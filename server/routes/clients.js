@@ -269,12 +269,20 @@ router.put('/:id', authenticateToken, requireRole('Admin', 'Staff'), async (req,
       }
     }
 
+    // Check which columns exist in clients table
+    const clientsTableInfo = await db.all("PRAGMA table_info(clients)");
+    const clientsColumnNames = clientsTableInfo.map(col => col.name);
+    
     const allowedFields = ['company_name', 'services_availed', 'loan_amount', 'loan_interest_rate',
       'loan_repayment_schedule', 'status', 'category', 'progress_status'];
     const updateFields = [];
     const params = [];
 
     allowedFields.forEach(field => {
+      // Skip field if column doesn't exist
+      if (!clientsColumnNames.includes(field)) {
+        return;
+      }
       if (updates[field] !== undefined) {
         updateFields.push(`${field} = ?`);
         if (field === 'services_availed' || field === 'loan_repayment_schedule') {

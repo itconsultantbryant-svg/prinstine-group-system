@@ -33,13 +33,28 @@ router.get('/', authenticateToken, async (req, res) => {
       const isClientEngagementOrAuditHead = userEmail.includes('cmoore') || userEmail.includes('wbuku');
       
       if (isClientEngagementOrAuditHead) {
+        // Check if head_email column exists
+        const deptTableInfo = await db.all("PRAGMA table_info(departments)");
+        const deptColumnNames = deptTableInfo.map(col => col.name);
+        const hasHeadEmail = deptColumnNames.includes('head_email');
+        
         // Both can see reports from Client Engagement or Audit departments
-        const depts = await db.all(
-          `SELECT id, name FROM departments 
-           WHERE (manager_id = ? OR LOWER(TRIM(head_email)) = ?)
-           OR (LOWER(name) LIKE '%client engagement%' OR LOWER(name) LIKE '%audit%')`,
-          [req.user.id, req.user.email.toLowerCase().trim()]
-        );
+        let depts;
+        if (hasHeadEmail) {
+          depts = await db.all(
+            `SELECT id, name FROM departments 
+             WHERE (manager_id = ? OR LOWER(TRIM(head_email)) = ?)
+             OR (LOWER(name) LIKE '%client engagement%' OR LOWER(name) LIKE '%audit%')`,
+            [req.user.id, req.user.email.toLowerCase().trim()]
+          );
+        } else {
+          depts = await db.all(
+            `SELECT id, name FROM departments 
+             WHERE manager_id = ?
+             OR (LOWER(name) LIKE '%client engagement%' OR LOWER(name) LIKE '%audit%')`,
+            [req.user.id]
+          );
+        }
         if (depts && depts.length > 0) {
           const deptIds = depts.map(d => d.id);
           query += ` AND dr.department_id IN (${deptIds.map(() => '?').join(',')})`;
@@ -48,7 +63,17 @@ router.get('/', authenticateToken, async (req, res) => {
           return res.json({ reports: [] });
         }
       } else {
-        const dept = await db.get('SELECT id, name FROM departments WHERE manager_id = ? OR LOWER(TRIM(head_email)) = ?', [req.user.id, req.user.email.toLowerCase().trim()]);
+        // Check if head_email column exists
+        const deptTableInfo = await db.all("PRAGMA table_info(departments)");
+        const deptColumnNames = deptTableInfo.map(col => col.name);
+        const hasHeadEmail = deptColumnNames.includes('head_email');
+        
+        let dept;
+        if (hasHeadEmail) {
+          dept = await db.get('SELECT id, name FROM departments WHERE manager_id = ? OR LOWER(TRIM(head_email)) = ?', [req.user.id, req.user.email.toLowerCase().trim()]);
+        } else {
+          dept = await db.get('SELECT id, name FROM departments WHERE manager_id = ?', [req.user.id]);
+        }
         if (dept) {
           query += ' AND dr.department_id = ?';
           params.push(dept.id);

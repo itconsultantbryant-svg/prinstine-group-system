@@ -64,13 +64,26 @@ router.get('/', authenticateToken, async (req, res) => {
     if (req.user.role === 'Admin') {
       // Admin sees all requisitions
     } else if (req.user.role === 'DepartmentHead') {
+      // Check if head_email column exists
+      const deptTableInfo = await db.all("PRAGMA table_info(departments)");
+      const deptColumnNames = deptTableInfo.map(col => col.name);
+      const hasHeadEmail = deptColumnNames.includes('head_email');
+      
       // Department Head sees requisitions from their department
       // This includes: pending approval, approved by them, and rejected by them
       // First, get the department(s) this user manages
-      const dept = await db.get(
-        'SELECT id, name FROM departments WHERE manager_id = ? OR LOWER(TRIM(head_email)) = ?',
-        [req.user.id, req.user.email.toLowerCase().trim()]
-      );
+      let dept;
+      if (hasHeadEmail) {
+        dept = await db.get(
+          'SELECT id, name FROM departments WHERE manager_id = ? OR LOWER(TRIM(head_email)) = ?',
+          [req.user.id, req.user.email.toLowerCase().trim()]
+        );
+      } else {
+        dept = await db.get(
+          'SELECT id, name FROM departments WHERE manager_id = ?',
+          [req.user.id]
+        );
+      }
       
       if (dept) {
         // Show requisitions from this department that are:

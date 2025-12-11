@@ -29,11 +29,24 @@ router.get('/', authenticateToken, async (req, res) => {
       query += ' AND scr.staff_id = ?';
       params.push(req.user.id);
     } else if (req.user.role === 'DepartmentHead') {
+      // Check if head_email column exists
+      const deptTableInfo = await db.all("PRAGMA table_info(departments)");
+      const deptColumnNames = deptTableInfo.map(col => col.name);
+      const hasHeadEmail = deptColumnNames.includes('head_email');
+      
       // Check if user is Marketing Department Head
-      const dept = await db.get(
-        'SELECT id, name FROM departments WHERE manager_id = ? OR LOWER(TRIM(head_email)) = ?',
-        [req.user.id, req.user.email.toLowerCase().trim()]
-      );
+      let dept;
+      if (hasHeadEmail) {
+        dept = await db.get(
+          'SELECT id, name FROM departments WHERE manager_id = ? OR LOWER(TRIM(head_email)) = ?',
+          [req.user.id, req.user.email.toLowerCase().trim()]
+        );
+      } else {
+        dept = await db.get(
+          'SELECT id, name FROM departments WHERE manager_id = ?',
+          [req.user.id]
+        );
+      }
       if (dept && dept.name.toLowerCase().includes('marketing')) {
         // Marketing Manager can see ALL staff reports EXCEPT:
         // - Finance reports (department name contains 'finance')

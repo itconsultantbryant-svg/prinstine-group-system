@@ -150,12 +150,30 @@ router.post('/', authenticateToken, requireRole('Admin'), [
       throw new Error('Password hash was not saved correctly');
     }
 
-    // Create department
-    const result = await db.run(
-      `INSERT INTO departments (name, description, head_name, head_email, head_phone, manager_id)
-       VALUES (?, ?, ?, ?, ?, ?)`,
-      [name, description || null, head_name, normalizedEmail, head_phone || null, userResult.lastID]
-    );
+    // Check if head_name, head_email, head_phone columns exist
+    const tableInfo = await db.all("PRAGMA table_info(departments)");
+    const columnNames = tableInfo.map(col => col.name);
+    const hasHeadFields = columnNames.includes('head_name') && 
+                         columnNames.includes('head_email') && 
+                         columnNames.includes('head_phone');
+    
+    // Create department - use appropriate columns based on what exists
+    let result;
+    if (hasHeadFields) {
+      // Use head_name, head_email, head_phone if columns exist
+      result = await db.run(
+        `INSERT INTO departments (name, description, head_name, head_email, head_phone, manager_id)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+        [name, description || null, head_name, normalizedEmail, head_phone || null, userResult.lastID]
+      );
+    } else {
+      // Fallback to just manager_id if head fields don't exist yet
+      result = await db.run(
+        `INSERT INTO departments (name, description, manager_id)
+         VALUES (?, ?, ?)`,
+        [name, description || null, userResult.lastID]
+      );
+    }
 
     await logAction(req.user.id, 'create_department', 'departments', result.lastID, { name, head_name, head_email }, req);
 

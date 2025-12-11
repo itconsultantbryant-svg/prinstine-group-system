@@ -175,6 +175,7 @@ async function initializeDatabase() {
       const requisitionsPath = path.join(__dirname, '../database/migrations/020_requisitions.sql');
       const targetsPath = path.join(__dirname, '../database/migrations/021_targets_system.sql');
       const departmentHeadFieldsPath = path.join(__dirname, '../database/migrations/022_add_department_head_fields.sql');
+      const addMissingColumnsPath = path.join(__dirname, '../database/migrations/023_add_missing_columns.sql');
     
     if (tables.length === 0) {
       console.log('Initializing database schema...');
@@ -815,6 +816,38 @@ async function initializeDatabase() {
               }
             }
             console.log('✓ Department head fields migration completed');
+          }
+        }
+      }
+
+      // Run add missing columns migration if needed
+      if (fs.existsSync(addMissingColumnsPath)) {
+        const clientsTableExists = await db.get("SELECT name FROM sqlite_master WHERE type='table' AND name='clients'");
+        if (clientsTableExists) {
+          const clientsTableInfo = await db.all("PRAGMA table_info(clients)");
+          const clientsColumnNames = clientsTableInfo.map(col => col.name);
+          const needsMigration = !clientsColumnNames.includes('category') || 
+                                !clientsColumnNames.includes('progress_status') ||
+                                !clientsColumnNames.includes('created_by');
+          
+          if (needsMigration) {
+            console.log('Adding missing columns to clients table (category, progress_status, created_by)...');
+            const missingColumnsSQL = fs.readFileSync(addMissingColumnsPath, 'utf8');
+            const missingColumnsStatements = missingColumnsSQL.split(';').filter(s => s.trim().length > 0);
+            for (const statement of missingColumnsStatements) {
+              if (statement.trim()) {
+                try {
+                  await db.run(statement);
+                } catch (stmtError) {
+                  // Ignore errors for columns that already exist
+                  if (!stmtError.message.includes('duplicate column') && 
+                      !stmtError.message.includes('already exists')) {
+                    console.error('Error executing missing columns migration statement:', stmtError.message);
+                  }
+                }
+              }
+            }
+            console.log('✓ Missing columns migration completed');
           }
         }
       }

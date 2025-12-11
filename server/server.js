@@ -1282,7 +1282,9 @@ async function initializeDatabase() {
       { name: 'requisitions', path: requisitionsPath },
       { name: 'meetings', path: meetingsPath },
       { name: 'archived_documents', path: archivedDocumentsPath },
-      { name: 'targets', path: targetsPath }
+      { name: 'targets', path: targetsPath },
+      { name: 'call_memos', path: callMemosPath },
+      { name: 'proposals', path: proposalsPath }
     ];
     
     for (const table of requiredTables) {

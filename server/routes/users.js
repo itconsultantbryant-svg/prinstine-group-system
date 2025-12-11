@@ -36,6 +36,10 @@ router.get('/', authenticateToken, async (req, res) => {
     res.json({ users });
   } catch (error) {
     console.error('Get users error:', error);
+    if (error.message && error.message.includes('no such table')) {
+      console.warn('users table does not exist yet');
+      return res.json({ users: [] });
+    }
     res.status(500).json({ error: 'Failed to fetch users' });
   }
 });

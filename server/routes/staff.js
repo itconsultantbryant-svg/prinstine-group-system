@@ -67,6 +67,11 @@ router.get('/', authenticateToken, async (req, res) => {
     res.json({ staff });
   } catch (error) {
     console.error('Get staff error:', error);
+    // Handle missing table gracefully
+    if (error.message && error.message.includes('no such table')) {
+      console.warn('staff table does not exist yet');
+      return res.json({ staff: [] });
+    }
     res.status(500).json({ error: 'Failed to fetch staff' });
   }
 });
@@ -96,6 +101,11 @@ router.get('/:id', authenticateToken, async (req, res) => {
     res.json({ staff });
   } catch (error) {
     console.error('Get staff error:', error);
+    // Handle missing table gracefully
+    if (error.message && error.message.includes('no such table')) {
+      console.warn('staff table does not exist yet');
+      return res.status(404).json({ error: 'Staff member not found' });
+    }
     res.status(500).json({ error: 'Failed to fetch staff member' });
   }
 });

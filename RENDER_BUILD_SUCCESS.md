@@ -84,3 +84,4 @@ Environment Variables:
 
 **The build script is working - we just need to see the full error message!** 🔍
 
+

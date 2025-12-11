@@ -52,6 +52,10 @@ router.get('/', authenticateToken, async (req, res) => {
     res.json({ meetings });
   } catch (error) {
     console.error('Get meetings error:', error);
+    if (error.message && error.message.includes('no such table')) {
+      console.warn('meetings table does not exist yet');
+      return res.json({ meetings: [] });
+    }
     res.status(500).json({ error: 'Failed to fetch meetings: ' + error.message });
   }
 });

@@ -17,6 +17,11 @@ router.get('/', authenticateToken, async (req, res) => {
     res.json({ departments });
   } catch (error) {
     console.error('Get departments error:', error);
+    // Handle missing table gracefully
+    if (error.message && error.message.includes('no such table')) {
+      console.warn('departments table does not exist yet');
+      return res.json({ departments: [] });
+    }
     res.status(500).json({ error: 'Failed to fetch departments' });
   }
 });
@@ -36,6 +41,11 @@ router.get('/:id', authenticateToken, async (req, res) => {
     res.json({ department });
   } catch (error) {
     console.error('Get department error:', error);
+    // Handle missing table gracefully
+    if (error.message && error.message.includes('no such table')) {
+      console.warn('departments table does not exist yet');
+      return res.status(404).json({ error: 'Department not found' });
+    }
     res.status(500).json({ error: 'Failed to fetch department' });
   }
 });

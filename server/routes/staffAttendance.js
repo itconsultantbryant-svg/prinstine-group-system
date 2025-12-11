@@ -33,6 +33,10 @@ router.get('/', authenticateToken, async (req, res) => {
     res.json({ attendance });
   } catch (error) {
     console.error('Get attendance error:', error);
+    if (error.message && error.message.includes('no such table')) {
+      console.warn('staff_attendance table does not exist yet');
+      return res.json({ attendance: [] });
+    }
     res.status(500).json({ error: 'Failed to fetch attendance: ' + error.message });
   }
 });

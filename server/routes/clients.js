@@ -67,6 +67,11 @@ router.get('/', authenticateToken, async (req, res) => {
     res.json({ clients });
   } catch (error) {
     console.error('Get clients error:', error);
+    // Handle missing table gracefully
+    if (error.message && error.message.includes('no such table')) {
+      console.warn('clients table does not exist yet');
+      return res.json({ clients: [] });
+    }
     res.status(500).json({ error: 'Failed to fetch clients' });
   }
 });
@@ -96,6 +101,11 @@ router.get('/:id', authenticateToken, async (req, res) => {
     res.json({ client });
   } catch (error) {
     console.error('Get client error:', error);
+    // Handle missing table gracefully
+    if (error.message && error.message.includes('no such table')) {
+      console.warn('clients table does not exist yet');
+      return res.status(404).json({ error: 'Client not found' });
+    }
     res.status(500).json({ error: 'Failed to fetch client' });
   }
 });

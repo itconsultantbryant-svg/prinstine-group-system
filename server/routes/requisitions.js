@@ -106,6 +106,11 @@ router.get('/', authenticateToken, async (req, res) => {
     res.json({ requisitions });
   } catch (error) {
     console.error('Get requisitions error:', error);
+    // Handle missing table gracefully
+    if (error.message && error.message.includes('no such table')) {
+      console.warn('requisitions table does not exist yet');
+      return res.json({ requisitions: [] });
+    }
     res.status(500).json({ error: 'Failed to fetch requisitions: ' + error.message });
   }
 });

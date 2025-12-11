@@ -12,8 +12,8 @@
 **Settings:**
 - **Name:** `prinstine-frontend` (or your preferred name)
 - **Branch:** `main`
-- **Root Directory:** `client`
-- **Build Command:** `npm install && npm run build`
+- **Root Directory:** `client` ⚠️ **CRITICAL: Must be exactly `client`**
+- **Build Command:** `npm install && npm run build` ⚠️ **Do NOT include `cd client &&` - Root Directory already sets you in client folder**
 - **Publish Directory:** `build`
 
 **Plan:** Free (always free for static sites)

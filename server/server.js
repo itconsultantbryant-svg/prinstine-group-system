@@ -143,6 +143,7 @@ async function initializeDatabase() {
       const staffAttendancePath = path.join(__dirname, '../database/migrations/019_staff_attendance.sql');
       const requisitionsPath = path.join(__dirname, '../database/migrations/020_requisitions.sql');
       const targetsPath = path.join(__dirname, '../database/migrations/021_targets_system.sql');
+      const departmentHeadFieldsPath = path.join(__dirname, '../database/migrations/022_add_department_head_fields.sql');
     
     if (tables.length === 0) {
       console.log('Initializing database schema...');
@@ -752,6 +753,38 @@ async function initializeDatabase() {
             }
           }
           console.log('✓ Targets system migration completed');
+        }
+      }
+
+      // Run department head fields migration if needed
+      if (fs.existsSync(departmentHeadFieldsPath)) {
+        const departmentsTableExists = await db.get("SELECT name FROM sqlite_master WHERE type='table' AND name='departments'");
+        if (departmentsTableExists) {
+          const departmentsTableInfo = await db.all("PRAGMA table_info(departments)");
+          const departmentsColumnNames = departmentsTableInfo.map(col => col.name);
+          const needsMigration = !departmentsColumnNames.includes('head_name') || 
+                                !departmentsColumnNames.includes('head_email') ||
+                                !departmentsColumnNames.includes('head_phone');
+          
+          if (needsMigration) {
+            console.log('Adding head_name, head_email, and head_phone columns to departments table...');
+            const deptHeadSQL = fs.readFileSync(departmentHeadFieldsPath, 'utf8');
+            const deptHeadStatements = deptHeadSQL.split(';').filter(s => s.trim().length > 0);
+            for (const statement of deptHeadStatements) {
+              if (statement.trim()) {
+                try {
+                  await db.run(statement);
+                } catch (stmtError) {
+                  // Ignore errors for columns that already exist
+                  if (!stmtError.message.includes('duplicate column') && 
+                      !stmtError.message.includes('already exists')) {
+                    console.error('Error executing department head fields migration statement:', stmtError.message);
+                  }
+                }
+              }
+            }
+            console.log('✓ Department head fields migration completed');
+          }
         }
       }
       

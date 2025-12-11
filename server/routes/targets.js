@@ -193,7 +193,29 @@ router.post('/', authenticateToken, requireRole('Admin'), [
     });
   } catch (error) {
     console.error('Create target error:', error);
-    res.status(500).json({ error: 'Failed to create target' });
+    console.error('Error details:', {
+      message: error.message,
+      code: error.code,
+      errno: error.errno,
+      sql: error.sql
+    });
+    
+    // Handle specific database errors
+    let errorMessage = 'Failed to create target';
+    if (error.message && error.message.includes('FOREIGN KEY constraint')) {
+      errorMessage = 'Foreign key constraint failed. Please ensure user exists.';
+    } else if (error.message && error.message.includes('NOT NULL constraint')) {
+      errorMessage = 'Required fields are missing.';
+    } else if (error.message && error.message.includes('no such table')) {
+      errorMessage = 'Targets table does not exist. Please wait for database migration to complete.';
+    } else if (error.message) {
+      errorMessage = error.message;
+    }
+    
+    res.status(500).json({ 
+      error: errorMessage,
+      details: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
   }
 });
 

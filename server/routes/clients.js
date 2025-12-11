@@ -67,12 +67,21 @@ router.get('/', authenticateToken, async (req, res) => {
     res.json({ clients });
   } catch (error) {
     console.error('Get clients error:', error);
-    // Handle missing table gracefully
-    if (error.message && error.message.includes('no such table')) {
-      console.warn('clients table does not exist yet');
+    console.error('Error details:', {
+      message: error.message,
+      code: error.code,
+      errno: error.errno,
+      sql: query.substring(0, 200)
+    });
+    // Handle missing table/column gracefully
+    if (error.message && (error.message.includes('no such table') || error.message.includes('no such column'))) {
+      console.warn('clients table or column does not exist yet');
       return res.json({ clients: [] });
     }
-    res.status(500).json({ error: 'Failed to fetch clients' });
+    res.status(500).json({ 
+      error: 'Failed to fetch clients: ' + error.message,
+      details: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
   }
 });
 
@@ -179,7 +188,29 @@ router.post('/', authenticateToken, requireRole('Admin', 'Staff', 'DepartmentHea
     });
   } catch (error) {
     console.error('Create client error:', error);
-    res.status(500).json({ error: 'Failed to create client' });
+    console.error('Error details:', {
+      message: error.message,
+      code: error.code,
+      errno: error.errno,
+      sql: error.sql
+    });
+    
+    // Handle specific database errors
+    let errorMessage = 'Failed to create client';
+    if (error.message && error.message.includes('FOREIGN KEY constraint')) {
+      errorMessage = 'Foreign key constraint failed. Please ensure user exists.';
+    } else if (error.message && error.message.includes('NOT NULL constraint')) {
+      errorMessage = 'Required fields are missing.';
+    } else if (error.message && error.message.includes('UNIQUE constraint')) {
+      errorMessage = 'Client with this information already exists.';
+    } else if (error.message) {
+      errorMessage = error.message;
+    }
+    
+    res.status(500).json({ 
+      error: errorMessage,
+      details: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
   }
 });
 

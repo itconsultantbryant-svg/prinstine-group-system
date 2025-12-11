@@ -8,21 +8,43 @@ const { logAction } = require('../utils/audit');
 // Get all departments
 router.get('/', authenticateToken, async (req, res) => {
   try {
-    const departments = await db.all(
-      `SELECT d.*, u.id as manager_id 
-       FROM departments d 
-       LEFT JOIN users u ON d.head_email = u.email 
-       ORDER BY d.name ASC`
-    );
+    // Check if head_email column exists
+    const tableInfo = await db.all("PRAGMA table_info(departments)");
+    const columnNames = tableInfo.map(col => col.name);
+    const hasHeadEmail = columnNames.includes('head_email');
+    
+    let query;
+    if (hasHeadEmail) {
+      // Use head_email if column exists
+      query = `SELECT d.*, u.id as manager_id 
+               FROM departments d 
+               LEFT JOIN users u ON d.head_email = u.email 
+               ORDER BY d.name ASC`;
+    } else {
+      // Fallback to manager_id if head_email doesn't exist
+      query = `SELECT d.*, d.manager_id 
+               FROM departments d 
+               ORDER BY d.name ASC`;
+    }
+    
+    const departments = await db.all(query);
     res.json({ departments });
   } catch (error) {
     console.error('Get departments error:', error);
+    console.error('Error details:', {
+      message: error.message,
+      code: error.code,
+      errno: error.errno
+    });
     // Handle missing table gracefully
-    if (error.message && error.message.includes('no such table')) {
-      console.warn('departments table does not exist yet');
+    if (error.message && (error.message.includes('no such table') || error.message.includes('no such column'))) {
+      console.warn('departments table or column does not exist yet');
       return res.json({ departments: [] });
     }
-    res.status(500).json({ error: 'Failed to fetch departments' });
+    res.status(500).json({ 
+      error: 'Failed to fetch departments: ' + error.message,
+      details: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
   }
 });
 

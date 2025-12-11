@@ -876,82 +876,98 @@ async function initializeDatabase() {
 
       // Run meetings migration if table doesn't exist
       const meetingsTableExists = await db.get("SELECT name FROM sqlite_master WHERE type='table' AND name='meetings'");
-      if (!meetingsTableExists && fs.existsSync(meetingsPath)) {
-        console.log('Creating meetings tables...');
-        const meetingsSQL = fs.readFileSync(meetingsPath, 'utf8');
-        const meetingsStatements = meetingsSQL.split(';').filter(s => s.trim().length > 0);
-        for (const statement of meetingsStatements) {
-          if (statement.trim()) {
-            try {
-              await db.run(statement);
-            } catch (stmtError) {
-              if (!stmtError.message.includes('already exists')) {
-                console.error('Error executing meetings statement:', stmtError.message);
+      if (!meetingsTableExists) {
+        if (fs.existsSync(meetingsPath)) {
+          console.log('Creating meetings tables...');
+          const meetingsSQL = fs.readFileSync(meetingsPath, 'utf8');
+          const meetingsStatements = meetingsSQL.split(';').filter(s => s.trim().length > 0);
+          for (const statement of meetingsStatements) {
+            if (statement.trim()) {
+              try {
+                await db.run(statement);
+              } catch (stmtError) {
+                if (!stmtError.message.includes('already exists')) {
+                  console.error('Error executing meetings statement:', stmtError.message);
+                }
               }
             }
           }
+          console.log('✓ Meetings tables created');
+        } else {
+          console.error('⚠️ meetings migration file not found:', meetingsPath);
         }
-        console.log('✓ Meetings tables created');
       }
 
       // Run archived documents migration if table doesn't exist
       const archivedDocumentsTableExists = await db.get("SELECT name FROM sqlite_master WHERE type='table' AND name='archived_documents'");
-      if (!archivedDocumentsTableExists && fs.existsSync(archivedDocumentsPath)) {
-        console.log('Creating archived_documents table...');
-        const archivedDocumentsSQL = fs.readFileSync(archivedDocumentsPath, 'utf8');
-        const archivedDocumentsStatements = archivedDocumentsSQL.split(';').filter(s => s.trim().length > 0);
-        for (const statement of archivedDocumentsStatements) {
-          if (statement.trim()) {
-            try {
-              await db.run(statement);
-            } catch (stmtError) {
-              if (!stmtError.message.includes('already exists')) {
-                console.error('Error executing archived documents statement:', stmtError.message);
+      if (!archivedDocumentsTableExists) {
+        if (fs.existsSync(archivedDocumentsPath)) {
+          console.log('Creating archived_documents table...');
+          const archivedDocumentsSQL = fs.readFileSync(archivedDocumentsPath, 'utf8');
+          const archivedDocumentsStatements = archivedDocumentsSQL.split(';').filter(s => s.trim().length > 0);
+          for (const statement of archivedDocumentsStatements) {
+            if (statement.trim()) {
+              try {
+                await db.run(statement);
+              } catch (stmtError) {
+                if (!stmtError.message.includes('already exists')) {
+                  console.error('Error executing archived documents statement:', stmtError.message);
+                }
               }
             }
           }
+          console.log('✓ Archived documents table created');
+        } else {
+          console.error('⚠️ archived_documents migration file not found:', archivedDocumentsPath);
         }
-        console.log('✓ Archived documents table created');
       }
 
       // Run staff attendance migration if table doesn't exist
       const staffAttendanceTableExists = await db.get("SELECT name FROM sqlite_master WHERE type='table' AND name='staff_attendance'");
-      if (!staffAttendanceTableExists && fs.existsSync(staffAttendancePath)) {
-        console.log('Creating staff_attendance table...');
-        const staffAttendanceSQL = fs.readFileSync(staffAttendancePath, 'utf8');
-        const staffAttendanceStatements = staffAttendanceSQL.split(';').filter(s => s.trim().length > 0);
-        for (const statement of staffAttendanceStatements) {
-          if (statement.trim()) {
-            try {
-              await db.run(statement);
-            } catch (stmtError) {
-              if (!stmtError.message.includes('already exists')) {
-                console.error('Error executing staff attendance statement:', stmtError.message);
+      if (!staffAttendanceTableExists) {
+        if (fs.existsSync(staffAttendancePath)) {
+          console.log('Creating staff_attendance table...');
+          const staffAttendanceSQL = fs.readFileSync(staffAttendancePath, 'utf8');
+          const staffAttendanceStatements = staffAttendanceSQL.split(';').filter(s => s.trim().length > 0);
+          for (const statement of staffAttendanceStatements) {
+            if (statement.trim()) {
+              try {
+                await db.run(statement);
+              } catch (stmtError) {
+                if (!stmtError.message.includes('already exists')) {
+                  console.error('Error executing staff attendance statement:', stmtError.message);
+                }
               }
             }
           }
+          console.log('✓ Staff attendance table created');
+        } else {
+          console.error('⚠️ staff_attendance migration file not found:', staffAttendancePath);
         }
-        console.log('✓ Staff attendance table created');
       }
 
       // Run requisitions migration if table doesn't exist
       const requisitionsTableExists = await db.get("SELECT name FROM sqlite_master WHERE type='table' AND name='requisitions'");
-      if (!requisitionsTableExists && fs.existsSync(requisitionsPath)) {
-        console.log('Creating requisitions table...');
-        const requisitionsSQL = fs.readFileSync(requisitionsPath, 'utf8');
-        const requisitionsStatements = requisitionsSQL.split(';').filter(s => s.trim().length > 0);
-        for (const statement of requisitionsStatements) {
-          if (statement.trim()) {
-            try {
-              await db.run(statement);
-            } catch (stmtError) {
-              if (!stmtError.message.includes('already exists')) {
-                console.error('Error executing requisitions statement:', stmtError.message);
+      if (!requisitionsTableExists) {
+        if (fs.existsSync(requisitionsPath)) {
+          console.log('Creating requisitions table...');
+          const requisitionsSQL = fs.readFileSync(requisitionsPath, 'utf8');
+          const requisitionsStatements = requisitionsSQL.split(';').filter(s => s.trim().length > 0);
+          for (const statement of requisitionsStatements) {
+            if (statement.trim()) {
+              try {
+                await db.run(statement);
+              } catch (stmtError) {
+                if (!stmtError.message.includes('already exists')) {
+                  console.error('Error executing requisitions statement:', stmtError.message);
+                }
               }
             }
           }
+          console.log('✓ Requisitions table created');
+        } else {
+          console.error('⚠️ requisitions migration file not found:', requisitionsPath);
         }
-        console.log('✓ Requisitions table created');
       }
 
       // Run targets system migration if needed

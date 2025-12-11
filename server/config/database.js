@@ -122,8 +122,15 @@ class Database {
       }
       this.db.all(sql, params, (err, rows) => {
         if (err) {
-          console.error('Database all() error:', err.message);
-          reject(err);
+          // If table doesn't exist, return empty array instead of error
+          if (err.message && err.message.includes('no such table')) {
+            console.warn(`Table may not exist yet: ${err.message}`);
+            console.warn(`Query: ${sql.substring(0, 100)}...`);
+            resolve([]);
+          } else {
+            console.error('Database all() error:', err.message);
+            reject(err);
+          }
         } else {
           resolve(rows);
         }
@@ -140,8 +147,15 @@ class Database {
       }
       this.db.get(sql, params, (err, row) => {
         if (err) {
-          console.error('Database get() error:', err.message);
-          reject(err);
+          // If table doesn't exist, return null instead of error
+          if (err.message && err.message.includes('no such table')) {
+            console.warn(`Table may not exist yet: ${err.message}`);
+            console.warn(`Query: ${sql.substring(0, 100)}...`);
+            resolve(null);
+          } else {
+            console.error('Database get() error:', err.message);
+            reject(err);
+          }
         } else {
           resolve(row);
         }

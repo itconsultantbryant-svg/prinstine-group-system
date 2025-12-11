@@ -394,15 +394,20 @@ router.put('/:id', authenticateToken, requireRole('Admin'), async (req, res) => 
     ];
 
     allowedFields.forEach(field => {
-      // Only include field if column exists in table
-      if (!staffColumnNames.includes(field) && field !== 'references') {
-        // Check for references column (it's escaped as [references])
-        if (field === 'references' && !staffColumnNames.includes('[references]')) {
-          return; // Skip if references column doesn't exist
-        }
-        return; // Skip if column doesn't exist
-      }
       if (updates[field] !== undefined) {
+        // Check if column exists in table
+        let columnExists = false;
+        if (field === 'references') {
+          // References column is escaped as [references] in SQLite
+          columnExists = staffColumnNames.includes('[references]');
+        } else {
+          columnExists = staffColumnNames.includes(field);
+        }
+        
+        // Skip field if column doesn't exist
+        if (!columnExists) {
+          return;
+        }
         // Handle JSON fields
         let value = updates[field];
         if ((field === 'qualifications' || field === 'previous_employment' || field === 'references') && typeof value === 'string' && value.trim()) {

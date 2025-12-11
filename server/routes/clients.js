@@ -164,20 +164,42 @@ router.post('/', authenticateToken, requireRole('Admin', 'Staff', 'DepartmentHea
 
     const clientId = generateClientId();
 
+    // Check which columns exist in clients table
+    const clientsTableInfo = await db.all("PRAGMA table_info(clients)");
+    const clientsColumnNames = clientsTableInfo.map(col => col.name);
+    const hasCategory = clientsColumnNames.includes('category');
+    const hasProgressStatus = clientsColumnNames.includes('progress_status');
+    const hasCreatedBy = clientsColumnNames.includes('created_by');
+    
+    // Build INSERT query based on available columns
+    let insertColumns = ['user_id', 'client_id', 'company_name', 'services_availed', 'loan_amount',
+      'loan_interest_rate', 'loan_repayment_schedule', 'status'];
+    let insertValues = [
+      userId, clientId, company_name || null,
+      services_availed && services_availed.length > 0 ? JSON.stringify(services_availed) : null,
+      loan_amount || 0, loan_interest_rate || 0,
+      loan_repayment_schedule ? JSON.stringify(loan_repayment_schedule) : null,
+      status || 'Active'
+    ];
+    
+    if (hasCategory) {
+      insertColumns.push('category');
+      insertValues.push(category || null);
+    }
+    if (hasProgressStatus) {
+      insertColumns.push('progress_status');
+      insertValues.push(progress_status || null);
+    }
+    if (hasCreatedBy) {
+      insertColumns.push('created_by');
+      insertValues.push(req.user.id);
+    }
+    
+    const placeholders = insertColumns.map(() => '?').join(', ');
     const result = await db.run(
-      `INSERT INTO clients (user_id, client_id, company_name, services_availed, loan_amount,
-        loan_interest_rate, loan_repayment_schedule, status, category, progress_status, created_by)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [
-        userId, clientId, company_name || null,
-        services_availed && services_availed.length > 0 ? JSON.stringify(services_availed) : null,
-        loan_amount || 0, loan_interest_rate || 0,
-        loan_repayment_schedule ? JSON.stringify(loan_repayment_schedule) : null,
-        status || 'Active',
-        category || null,
-        progress_status || null,
-        req.user.id
-      ]
+      `INSERT INTO clients (${insertColumns.join(', ')})
+       VALUES (${placeholders})`,
+      insertValues
     );
 
     await logAction(req.user.id, 'create_client', 'clients', result.lastID, { clientId, email }, req);

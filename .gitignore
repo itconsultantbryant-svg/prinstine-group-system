@@ -15,7 +15,18 @@ client/.env
 # Database
 database/*.db
 database/*.db-journal
+database/*.db-shm
+database/*.db-wal
 database/backups/*.db
+server/database/*.db
+server/database/*.db-shm
+server/database/*.db-wal
+server/database/*.backup
+server/*.db
+*.db
+*.db-shm
+*.db-wal
+*.backup
 
 # Build outputs
 client/build/

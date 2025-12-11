@@ -1250,31 +1250,56 @@ async function initializeDatabase() {
     ];
     
     for (const table of requiredTables) {
+      console.log(`Checking table: ${table.name}...`);
+      console.log(`Migration path: ${table.path}`);
+      console.log(`File exists: ${fs.existsSync(table.path)}`);
+      
       const tableExists = await db.get(`SELECT name FROM sqlite_master WHERE type='table' AND name=?`, [table.name]);
       if (!tableExists) {
         console.log(`⚠️ Table ${table.name} does not exist. Attempting to create...`);
         if (fs.existsSync(table.path)) {
           try {
+            console.log(`Reading migration file: ${table.path}`);
             const migrationSQL = fs.readFileSync(table.path, 'utf8');
+            console.log(`Migration SQL length: ${migrationSQL.length} characters`);
             const statements = migrationSQL.split(';').filter(s => s.trim().length > 0);
-            for (const statement of statements) {
-              if (statement.trim()) {
+            console.log(`Found ${statements.length} SQL statements`);
+            
+            for (let i = 0; i < statements.length; i++) {
+              const statement = statements[i].trim();
+              if (statement) {
                 try {
+                  console.log(`Executing statement ${i + 1}/${statements.length} for ${table.name}...`);
                   await db.run(statement);
+                  console.log(`✓ Statement ${i + 1} executed successfully`);
                 } catch (stmtError) {
                   if (!stmtError.message.includes('already exists') && 
-                      !stmtError.message.includes('duplicate column')) {
-                    console.error(`Error creating ${table.name}:`, stmtError.message);
+                      !stmtError.message.includes('duplicate column') &&
+                      !stmtError.message.includes('duplicate index')) {
+                    console.error(`✗ Error executing statement ${i + 1} for ${table.name}:`, stmtError.message);
+                    console.error(`Statement was: ${statement.substring(0, 100)}...`);
+                  } else {
+                    console.log(`⚠ Statement ${i + 1} skipped (already exists): ${stmtError.message}`);
                   }
                 }
               }
             }
-            console.log(`✓ ${table.name} table created`);
+            
+            // Verify table was created
+            const verifyTable = await db.get(`SELECT name FROM sqlite_master WHERE type='table' AND name=?`, [table.name]);
+            if (verifyTable) {
+              console.log(`✓ ${table.name} table created and verified`);
+            } else {
+              console.error(`✗ ${table.name} table creation failed - table still does not exist after migration`);
+            }
           } catch (error) {
             console.error(`Failed to create ${table.name} table:`, error.message);
+            console.error(`Error stack:`, error.stack);
           }
         } else {
           console.error(`⚠️ Migration file not found for ${table.name}:`, table.path);
+          console.error(`Current working directory: ${process.cwd()}`);
+          console.error(`__dirname: ${__dirname}`);
         }
       } else {
         console.log(`✓ ${table.name} table exists`);
@@ -1481,4 +1506,5 @@ startServer().catch(error => {
 });
 
 module.exports = { app, server, io };
+
 

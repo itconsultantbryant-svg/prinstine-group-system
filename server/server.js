@@ -48,48 +48,21 @@ const PORT = process.env.PORT || 3006;
 //   crossOriginResourcePolicy: { policy: "cross-origin" }
 // }));
 
-// CORS configuration - Allow frontend origin explicitly
-const allowedOrigins = [
-  process.env.FRONTEND_URL,
-  'https://prinstine-group-system-frontend.onrender.com',
-  'http://localhost:3000',
-  'http://localhost:3001'
-].filter(Boolean); // Remove undefined values
-
-// More permissive CORS for production
-app.use(cors({
-  origin: function (origin, callback) {
-    // Allow requests with no origin (like mobile apps or curl requests)
-    if (!origin) {
-      return callback(null, true);
-    }
-    
-    // Always allow the frontend origin
-    if (origin.includes('prinstine-group-system-frontend.onrender.com') || 
-        origin.includes('localhost') ||
-        allowedOrigins.indexOf(origin) !== -1) {
-      return callback(null, true);
-    }
-    
-    // In production, allow all origins for now (can be restricted later)
-    console.log('CORS: Allowing origin:', origin);
-    callback(null, true);
-  },
-  credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Origin', 'Referer', 'Accept'],
-  exposedHeaders: ['Content-Length', 'Content-Type'],
-  preflightContinue: false,
-  optionsSuccessStatus: 204
-}));
-
-// Handle preflight OPTIONS requests explicitly - must be before other routes
-app.options('*', (req, res) => {
-  res.header('Access-Control-Allow-Origin', req.headers.origin || '*');
+// CORS configuration - Simple and permissive for now
+app.use((req, res, next) => {
+  const origin = req.headers.origin;
+  // Allow all origins for now (can be restricted later)
+  res.header('Access-Control-Allow-Origin', origin || '*');
   res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS, PATCH');
   res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, Origin, Referer, Accept');
   res.header('Access-Control-Allow-Credentials', 'true');
-  res.sendStatus(204);
+  res.header('Access-Control-Max-Age', '86400'); // 24 hours
+  
+  // Handle preflight requests
+  if (req.method === 'OPTIONS') {
+    return res.sendStatus(204);
+  }
+  next();
 });
 
 // Request logging - SIMPLIFIED to avoid blocking

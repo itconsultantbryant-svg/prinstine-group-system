@@ -1,0 +1,125 @@
+import React from 'react';
+import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
+import { AuthProvider } from './context/AuthContext';
+import PrivateRoute from './components/PrivateRoute';
+import ErrorBoundary from './components/ErrorBoundary';
+import Sidebar from './components/layout/Sidebar';
+import TopBar from './components/layout/TopBar';
+import Login from './pages/auth/Login';
+import Dashboard from './pages/Dashboard';
+import DepartmentManagement from './pages/departments/DepartmentManagement';
+import DepartmentView from './pages/departments/DepartmentView';
+import StaffManagement from './pages/staff/StaffManagement';
+import StaffView from './pages/staff/StaffView';
+import ClientManagement from './pages/clients/ClientManagement';
+import ClientView from './pages/clients/ClientView';
+import PartnerManagement from './pages/partners/PartnerManagement';
+import PartnerView from './pages/partners/PartnerView';
+import AcademyManagement from './pages/academy/AcademyManagement';
+import StudentView from './pages/academy/StudentView';
+import InstructorView from './pages/academy/InstructorView';
+import CourseView from './pages/academy/CourseView';
+import ReportsManagement from './pages/reports/ReportsManagement';
+import CertificateVerification from './pages/certificates/CertificateVerification';
+import CertificateManagement from './pages/certificates/CertificateManagement';
+import PublicVerification from './pages/certificates/PublicVerification';
+import PublicClaims from './pages/claims/PublicClaims';
+import Profile from './pages/Profile';
+import UserManagement from './pages/users/UserManagement';
+import DepartmentHeadDashboard from './pages/departments/DepartmentHeadDashboard';
+import DepartmentReportsManagement from './pages/departments/DepartmentReportsManagement';
+import DepartmentReportHistory from './pages/departments/DepartmentReportHistory';
+import SupportTicketTracker from './pages/ict/SupportTicketTracker';
+import NotificationManagement from './pages/notifications/NotificationManagement';
+import Communications from './pages/notifications/Communications';
+import Notifications from './pages/notifications/Notifications';
+import StaffDashboard from './pages/staff/StaffDashboard';
+import StaffClientReports from './pages/staff/StaffClientReports';
+import PettyCashLedger from './pages/finance/PettyCashLedger';
+import AssetRegistry from './pages/finance/AssetRegistry';
+import MyReportsHistory from './pages/reports/MyReportsHistory';
+import FinanceRoute from './components/FinanceRoute';
+import CallMemoHistory from './pages/callMemos/CallMemoHistory';
+import ProposalHistory from './pages/proposals/ProposalHistory';
+import MeetingHistory from './pages/meetings/MeetingHistory';
+import Calendar from './pages/calendar/Calendar';
+import ArchivedDocuments from './pages/archivedDocuments/ArchivedDocuments';
+import AttendanceHistory from './pages/attendance/AttendanceHistory';
+import RequisitionHistory from './pages/requisitions/RequisitionHistory';
+import Targets from './pages/targets/Targets';
+import './App.css';
+
+function App() {
+  return (
+    <ErrorBoundary>
+      <AuthProvider>
+        <Router>
+          <div className="App">
+            <Routes>
+            <Route path="/login" element={<Login />} />
+            <Route path="/certificates/verify/:code" element={<CertificateVerification />} />
+            <Route path="/verify-certificate" element={<PublicVerification />} />
+            <Route path="/submit-claim" element={<PublicClaims />} />
+              <Route
+                path="/*"
+                element={
+                  <PrivateRoute>
+                    <div className="app-layout">
+                      <Sidebar />
+                      <div className="main-content-wrapper">
+                        <TopBar />
+                        <Routes>
+                          <Route path="/" element={<Navigate to="/dashboard" replace />} />
+                          <Route path="/dashboard" element={<PrivateRoute><Dashboard /></PrivateRoute>} />
+                          <Route path="/staff-dashboard" element={<PrivateRoute requiredRole="Staff"><StaffDashboard /></PrivateRoute>} />
+                          <Route path="/staff-client-reports" element={<PrivateRoute requiredRole="Staff"><StaffClientReports /></PrivateRoute>} />
+                          <Route path="/users" element={<PrivateRoute requiredRole="Admin"><UserManagement /></PrivateRoute>} />
+                          <Route path="/departments" element={<PrivateRoute requiredRole="Admin"><DepartmentManagement /></PrivateRoute>} />
+                          <Route path="/departments/view/:id" element={<PrivateRoute requiredRole="Admin"><DepartmentView /></PrivateRoute>} />
+                          <Route path="/staff" element={<PrivateRoute requiredRole="Admin"><StaffManagement /></PrivateRoute>} />
+                          <Route path="/staff/view/:id" element={<PrivateRoute requiredRole="Admin"><StaffView /></PrivateRoute>} />
+                          <Route path="/clients" element={<ClientManagement />} />
+                          <Route path="/clients/view/:id" element={<ClientView />} />
+                          <Route path="/partners" element={<PartnerManagement />} />
+                          <Route path="/partners/view/:id" element={<PartnerView />} />
+                          <Route path="/academy" element={<AcademyManagement />} />
+                          <Route path="/academy/students/view/:id" element={<StudentView />} />
+                          <Route path="/academy/instructors/view/:id" element={<InstructorView />} />
+                          <Route path="/academy/courses/view/:id" element={<CourseView />} />
+                          <Route path="/certificates" element={<PrivateRoute requiredRole="Admin"><CertificateManagement /></PrivateRoute>} />
+                          <Route path="/finance/petty-cash" element={<FinanceRoute><PettyCashLedger /></FinanceRoute>} />
+                          <Route path="/finance/assets" element={<FinanceRoute><AssetRegistry /></FinanceRoute>} />
+                          <Route path="/reports" element={<ReportsManagement />} />
+                          <Route path="/my-reports-history" element={<MyReportsHistory />} />
+                <Route path="/department-dashboard" element={<PrivateRoute requiredRole="DepartmentHead"><DepartmentHeadDashboard /></PrivateRoute>} />
+                <Route path="/department-report-history" element={<PrivateRoute requiredRole="DepartmentHead"><DepartmentReportHistory /></PrivateRoute>} />
+                <Route path="/support-tickets" element={<PrivateRoute><SupportTicketTracker /></PrivateRoute>} />
+                          <Route path="/notifications" element={<PrivateRoute requiredRole="Admin"><NotificationManagement /></PrivateRoute>} />
+                          <Route path="/notifications-view" element={<PrivateRoute><Notifications /></PrivateRoute>} />
+                          <Route path="/communications" element={<PrivateRoute><Communications /></PrivateRoute>} />
+                          <Route path="/department-reports" element={<PrivateRoute requiredRole="Admin"><DepartmentReportsManagement /></PrivateRoute>} />
+                          <Route path="/call-memos" element={<PrivateRoute><CallMemoHistory /></PrivateRoute>} />
+                          <Route path="/proposals" element={<PrivateRoute><ProposalHistory /></PrivateRoute>} />
+                          <Route path="/meetings" element={<PrivateRoute><MeetingHistory /></PrivateRoute>} />
+                          <Route path="/calendar" element={<PrivateRoute><Calendar /></PrivateRoute>} />
+                          <Route path="/archived-documents" element={<PrivateRoute><ArchivedDocuments /></PrivateRoute>} />
+                          <Route path="/attendance" element={<PrivateRoute><AttendanceHistory /></PrivateRoute>} />
+                          <Route path="/requisitions" element={<PrivateRoute><RequisitionHistory /></PrivateRoute>} />
+                          <Route path="/targets" element={<PrivateRoute><Targets /></PrivateRoute>} />
+                          <Route path="/profile" element={<Profile />} />
+                        </Routes>
+                      </div>
+                    </div>
+                  </PrivateRoute>
+                }
+              />
+            </Routes>
+          </div>
+        </Router>
+      </AuthProvider>
+    </ErrorBoundary>
+  );
+}
+
+export default App;
+

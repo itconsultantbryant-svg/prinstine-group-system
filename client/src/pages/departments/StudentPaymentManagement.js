@@ -1,0 +1,570 @@
+import React, { useState, useEffect } from 'react';
+import api from '../../config/api';
+import { useAuth } from '../../hooks/useAuth';
+import { format } from 'date-fns';
+import { exportToPDF, exportToExcel, printContent } from '../../utils/exportUtils';
+
+const StudentPaymentManagement = () => {
+  const { user } = useAuth();
+  const [students, setStudents] = useState([]);
+  const [selectedStudent, setSelectedStudent] = useState(null);
+  const [payments, setPayments] = useState([]);
+  const [enrolledCourses, setEnrolledCourses] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [success, setSuccess] = useState('');
+  const [showPaymentForm, setShowPaymentForm] = useState(false);
+  const [paymentFormData, setPaymentFormData] = useState({
+    student_id: '',
+    course_id: '',
+    amount: '',
+    payment_date: format(new Date(), 'yyyy-MM-dd'),
+    payment_method: 'Cash',
+    payment_reference: '',
+    notes: ''
+  });
+
+  useEffect(() => {
+    fetchStudents();
+  }, []);
+
+  useEffect(() => {
+    if (selectedStudent) {
+      fetchStudentPayments(selectedStudent.id);
+      fetchEnrolledCourses(selectedStudent.id);
+    }
+  }, [selectedStudent]);
+
+  const fetchStudents = async () => {
+    try {
+      setLoading(true);
+      const response = await api.get('/student-payments/students');
+      setStudents(response.data.students);
+    } catch (err) {
+      console.error('Error fetching students:', err);
+      setError('Failed to fetch students: ' + (err.response?.data?.error || err.message));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const fetchStudentPayments = async (studentId) => {
+    try {
+      const response = await api.get(`/student-payments/student/${studentId}`);
+      setPayments(response.data.payments);
+      setSelectedStudent(response.data.student);
+    } catch (err) {
+      console.error('Error fetching student payments:', err);
+      setError('Failed to fetch student payments: ' + (err.response?.data?.error || err.message));
+    }
+  };
+
+  const fetchEnrolledCourses = async (studentId) => {
+    try {
+      console.log('Fetching enrolled courses for student:', studentId);
+      const response = await api.get(`/student-payments/student/${studentId}/enrolled-courses`);
+      console.log('Enrolled courses response:', response.data);
+      setEnrolledCourses(response.data.courses || []);
+    } catch (err) {
+      console.error('Error fetching enrolled courses:', err);
+      console.error('Error details:', err.response?.data);
+      // Don't show error if endpoint doesn't exist yet, just set empty array
+      setEnrolledCourses([]);
+    }
+  };
+
+  const handleStudentSelect = (student) => {
+    setSelectedStudent(student);
+    setShowPaymentForm(false);
+  };
+
+  const handlePaymentFormChange = (e) => {
+    const { name, value } = e.target;
+    setPaymentFormData(prev => ({ ...prev, [name]: value }));
+  };
+
+  const handleAddPayment = async (e) => {
+    e.preventDefault();
+    setError('');
+    setSuccess('');
+
+    if (!paymentFormData.amount || parseFloat(paymentFormData.amount) <= 0) {
+      setError('Please enter a valid payment amount');
+      return;
+    }
+
+    try {
+      await api.post('/student-payments/add-payment', paymentFormData);
+      setSuccess('Payment added successfully');
+      setShowPaymentForm(false);
+      setPaymentFormData({
+        student_id: selectedStudent.id,
+        course_id: '',
+        amount: '',
+        payment_date: format(new Date(), 'yyyy-MM-dd'),
+        payment_method: 'Cash',
+        payment_reference: '',
+        notes: ''
+      });
+      fetchStudentPayments(selectedStudent.id);
+      fetchEnrolledCourses(selectedStudent.id);
+      fetchStudents(); // Refresh student list to update totals
+    } catch (err) {
+      console.error('Error adding payment:', err);
+      setError('Failed to add payment: ' + (err.response?.data?.error || err.message));
+    }
+  };
+
+  const handlePrint = (student, payments) => {
+    const content = `
+      <h2>Student Payment Details</h2>
+      <h3>Student Information</h3>
+      <p><strong>Student ID:</strong> ${student.student_id}</p>
+      <p><strong>Name:</strong> ${student.name}</p>
+      <p><strong>Email:</strong> ${student.email}</p>
+      <p><strong>Phone:</strong> ${student.phone || 'N/A'}</p>
+      <p><strong>Status:</strong> ${student.status}</p>
+      
+      <h3>Payment Summary</h3>
+      <p><strong>Total Course Fees:</strong> $${payments.reduce((sum, p) => sum + (parseFloat(p.course_fee) || 0), 0).toFixed(2)}</p>
+      <p><strong>Total Paid:</strong> $${payments.reduce((sum, p) => sum + (parseFloat(p.amount_paid) || 0), 0).toFixed(2)}</p>
+      <p><strong>Total Balance:</strong> $${payments.reduce((sum, p) => sum + (parseFloat(p.balance) || 0), 0).toFixed(2)}</p>
+      
+      <h3>Payment Details</h3>
+      <table border="1" style="width: 100%; border-collapse: collapse;">
+        <thead>
+          <tr>
+            <th>Course</th>
+            <th>Course Fee</th>
+            <th>Amount Paid</th>
+            <th>Balance</th>
+            <th>Payment Date</th>
+            <th>Payment Method</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${payments.map(p => `
+            <tr>
+              <td>${p.course_code} - ${p.course_title}</td>
+              <td>$${parseFloat(p.course_fee || 0).toFixed(2)}</td>
+              <td>$${parseFloat(p.amount_paid || 0).toFixed(2)}</td>
+              <td>$${parseFloat(p.balance || 0).toFixed(2)}</td>
+              <td>${p.payment_date ? format(new Date(p.payment_date), 'PPP') : 'N/A'}</td>
+              <td>${p.payment_method || 'N/A'}</td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>
+    `;
+    printContent('Student Payment Details', content);
+  };
+
+  const handleExportPDF = (student, payments) => {
+    const content = [
+      `Student Payment Details`,
+      `Student ID: ${student.student_id}`,
+      `Name: ${student.name}`,
+      `Email: ${student.email}`,
+      `Phone: ${student.phone || 'N/A'}`,
+      `Status: ${student.status}`,
+      ``,
+      `Payment Summary`,
+      `Total Course Fees: $${payments.reduce((sum, p) => sum + (parseFloat(p.course_fee) || 0), 0).toFixed(2)}`,
+      `Total Paid: $${payments.reduce((sum, p) => sum + (parseFloat(p.amount_paid) || 0), 0).toFixed(2)}`,
+      `Total Balance: $${payments.reduce((sum, p) => sum + (parseFloat(p.balance) || 0), 0).toFixed(2)}`,
+      ``,
+      `Payment Details`,
+      ...payments.map(p => [
+        `Course: ${p.course_code} - ${p.course_title}`,
+        `Course Fee: $${parseFloat(p.course_fee || 0).toFixed(2)}`,
+        `Amount Paid: $${parseFloat(p.amount_paid || 0).toFixed(2)}`,
+        `Balance: $${parseFloat(p.balance || 0).toFixed(2)}`,
+        `Payment Date: ${p.payment_date ? format(new Date(p.payment_date), 'PPP') : 'N/A'}`,
+        `Payment Method: ${p.payment_method || 'N/A'}`,
+        `---`
+      ]).flat()
+    ];
+    exportToPDF(`Student Payment - ${student.name}`, content, `student_payment_${student.student_id}.pdf`);
+  };
+
+  const handleExportExcel = () => {
+    const allData = students.flatMap(student => {
+      const studentPayments = payments.filter(p => p.student_id === student.id);
+      return studentPayments.map(payment => ({
+        'Student ID': student.student_id,
+        'Student Name': student.name,
+        'Email': student.email,
+        'Phone': student.phone || 'N/A',
+        'Course Code': payment.course_code,
+        'Course Title': payment.course_title,
+        'Course Fee': parseFloat(payment.course_fee || 0),
+        'Amount Paid': parseFloat(payment.amount_paid || 0),
+        'Balance': parseFloat(payment.balance || 0),
+        'Payment Date': payment.payment_date ? format(new Date(payment.payment_date), 'yyyy-MM-dd') : 'N/A',
+        'Payment Method': payment.payment_method || 'N/A'
+      }));
+    });
+
+    if (allData.length === 0) {
+      setError('No payment data to export');
+      return;
+    }
+
+    const headers = [
+      'Student ID', 'Student Name', 'Email', 'Phone', 'Course Code', 'Course Title',
+      'Course Fee', 'Amount Paid', 'Balance', 'Payment Date', 'Payment Method'
+    ];
+    const data = allData.map(row => [
+      row['Student ID'], row['Student Name'], row['Email'], row['Phone'],
+      row['Course Code'], row['Course Title'], row['Course Fee'], row['Amount Paid'],
+      row['Balance'], row['Payment Date'], row['Payment Method']
+    ]);
+
+    exportToExcel('Student Payments', headers, data, 'student_payments.xlsx');
+  };
+
+  if (loading) {
+    return (
+      <div className="d-flex justify-content-center align-items-center" style={{ height: '70vh' }}>
+        <div className="spinner-border text-primary" role="status">
+          <span className="visually-hidden">Loading...</span>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="container-fluid">
+      <div className="d-flex justify-content-between align-items-center mb-4">
+        <h1 className="h3 mb-0">Student Payment Management</h1>
+        <div>
+          <button className="btn btn-outline-secondary btn-sm me-2" onClick={handleExportExcel}>
+            <i className="bi bi-file-earmark-excel me-1"></i>Export All Excel
+          </button>
+        </div>
+      </div>
+
+      {error && (
+        <div className="alert alert-danger alert-dismissible fade show" role="alert">
+          {error}
+          <button type="button" className="btn-close" onClick={() => setError('')}></button>
+        </div>
+      )}
+      {success && (
+        <div className="alert alert-success alert-dismissible fade show" role="alert">
+          {success}
+          <button type="button" className="btn-close" onClick={() => setSuccess('')}></button>
+        </div>
+      )}
+
+      <div className="row">
+        <div className="col-md-4">
+          <div className="card">
+            <div className="card-header">
+              <h5 className="mb-0">Students</h5>
+            </div>
+            <div className="card-body" style={{ maxHeight: '600px', overflowY: 'auto' }}>
+              {students.length === 0 ? (
+                <div className="text-center p-4 text-muted">
+                  <i className="bi bi-person-x fs-1 d-block mb-2"></i>
+                  No students found.
+                </div>
+              ) : (
+                <div className="list-group">
+                  {students.map(student => (
+                    <button
+                      key={student.id}
+                      className={`list-group-item list-group-item-action ${selectedStudent?.id === student.id ? 'active' : ''}`}
+                      onClick={() => handleStudentSelect(student)}
+                    >
+                      <div className="d-flex w-100 justify-content-between">
+                        <h6 className="mb-1">{student.name}</h6>
+                        <small>{student.student_id}</small>
+                      </div>
+                      <p className="mb-1 text-muted">{student.email}</p>
+                      <div className="d-flex justify-content-between">
+                        <small>Total Fees: ${student.paymentSummary?.totalFees?.toFixed(2) || '0.00'}</small>
+                        <small className={student.paymentSummary?.totalBalance > 0 ? 'text-danger' : 'text-success'}>
+                          Balance: ${student.paymentSummary?.totalBalance?.toFixed(2) || '0.00'}
+                        </small>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+
+        <div className="col-md-8">
+          {selectedStudent ? (
+            <div className="card">
+              <div className="card-header d-flex justify-content-between align-items-center">
+                <h5 className="mb-0">Payment Details - {selectedStudent.name}</h5>
+                <div>
+                  <button className="btn btn-sm btn-outline-primary me-2" onClick={() => handlePrint(selectedStudent, payments)}>
+                    <i className="bi bi-printer me-1"></i>Print
+                  </button>
+                  <button className="btn btn-sm btn-outline-secondary me-2" onClick={() => handleExportPDF(selectedStudent, payments)}>
+                    <i className="bi bi-file-earmark-pdf me-1"></i>Export PDF
+                  </button>
+                  <button className="btn btn-sm btn-primary" onClick={() => {
+                    setPaymentFormData({
+                      student_id: selectedStudent.id,
+                      course_id: '',
+                      amount: '',
+                      payment_date: format(new Date(), 'yyyy-MM-dd'),
+                      payment_method: 'Cash',
+                      payment_reference: '',
+                      notes: ''
+                    });
+                    setShowPaymentForm(true);
+                  }}>
+                    <i className="bi bi-plus-circle me-1"></i>Add Payment
+                  </button>
+                </div>
+              </div>
+              <div className="card-body">
+                <div className="row mb-3">
+                  <div className="col-md-3">
+                    <strong>Student ID:</strong><br />
+                    {selectedStudent.student_id}
+                  </div>
+                  <div className="col-md-3">
+                    <strong>Email:</strong><br />
+                    {selectedStudent.email}
+                  </div>
+                  <div className="col-md-3">
+                    <strong>Phone:</strong><br />
+                    {selectedStudent.phone || 'N/A'}
+                  </div>
+                  <div className="col-md-3">
+                    <strong>Status:</strong><br />
+                    <span className={`badge bg-${selectedStudent.status === 'Active' ? 'success' : 'secondary'}`}>
+                      {selectedStudent.status}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="row mb-4">
+                  <div className="col-md-4">
+                    <div className="card bg-light">
+                      <div className="card-body text-center">
+                        <h6 className="text-muted">Total Fees</h6>
+                        <h4 className="mb-0">${payments.reduce((sum, p) => sum + (parseFloat(p.course_fee) || 0), 0).toFixed(2)}</h4>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="col-md-4">
+                    <div className="card bg-light">
+                      <div className="card-body text-center">
+                        <h6 className="text-muted">Total Paid</h6>
+                        <h4 className="mb-0 text-success">${payments.reduce((sum, p) => sum + (parseFloat(p.amount_paid) || 0), 0).toFixed(2)}</h4>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="col-md-4">
+                    <div className="card bg-light">
+                      <div className="card-body text-center">
+                        <h6 className="text-muted">Balance</h6>
+                        <h4 className={`mb-0 ${payments.reduce((sum, p) => sum + (parseFloat(p.balance) || 0), 0) > 0 ? 'text-danger' : 'text-success'}`}>
+                          ${payments.reduce((sum, p) => sum + (parseFloat(p.balance) || 0), 0).toFixed(2)}
+                        </h4>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {showPaymentForm && (
+                  <div className="card mb-4 border-primary">
+                    <div className="card-header bg-primary text-white">
+                      <h6 className="mb-0">Add Payment</h6>
+                    </div>
+                    <div className="card-body">
+                      <form onSubmit={handleAddPayment}>
+                        <div className="row">
+                          <div className="col-md-6 mb-3">
+                            <label className="form-label">Course *</label>
+                            <select
+                              className="form-select"
+                              name="course_id"
+                              value={paymentFormData.course_id}
+                              onChange={handlePaymentFormChange}
+                              required
+                            >
+                              <option value="">Select Course</option>
+                              {enrolledCourses.length > 0 ? (
+                                enrolledCourses.map(course => {
+                                  const balance = parseFloat(course.balance || course.course_fee || 0);
+                                  const amountPaid = parseFloat(course.amount_paid || 0);
+                                  return (
+                                    <option key={course.course_id} value={course.course_id}>
+                                      {course.course_code} - {course.title} 
+                                      {course.payment_id ? (
+                                        ` (Paid: $${amountPaid.toFixed(2)}, Balance: $${balance.toFixed(2)})`
+                                      ) : (
+                                        ` (Fee: $${parseFloat(course.course_fee || 0).toFixed(2)})`
+                                      )}
+                                    </option>
+                                  );
+                                })
+                              ) : payments.length > 0 ? (
+                                payments.map(payment => (
+                                  <option key={payment.course_id} value={payment.course_id}>
+                                    {payment.course_code} - {payment.course_title} (Balance: ${parseFloat(payment.balance || 0).toFixed(2)})
+                                  </option>
+                                ))
+                              ) : (
+                                <option value="" disabled>No courses available</option>
+                              )}
+                            </select>
+                            {enrolledCourses.length === 0 && payments.length === 0 && (
+                              <small className="form-text text-danger">
+                                No enrolled courses found for this student. Please enroll the student in courses first.
+                              </small>
+                            )}
+                            {enrolledCourses.length === 0 && payments.length > 0 && (
+                              <small className="form-text text-muted">
+                                Showing courses from existing payment records.
+                              </small>
+                            )}
+                          </div>
+                          <div className="col-md-6 mb-3">
+                            <label className="form-label">Payment Amount *</label>
+                            <div className="input-group">
+                              <span className="input-group-text">$</span>
+                              <input
+                                type="number"
+                                step="0.01"
+                                className="form-control"
+                                name="amount"
+                                value={paymentFormData.amount}
+                                onChange={handlePaymentFormChange}
+                                required
+                                min="0.01"
+                              />
+                            </div>
+                          </div>
+                        </div>
+                        <div className="row">
+                          <div className="col-md-4 mb-3">
+                            <label className="form-label">Payment Date *</label>
+                            <input
+                              type="date"
+                              className="form-control"
+                              name="payment_date"
+                              value={paymentFormData.payment_date}
+                              onChange={handlePaymentFormChange}
+                              required
+                            />
+                          </div>
+                          <div className="col-md-4 mb-3">
+                            <label className="form-label">Payment Method</label>
+                            <select
+                              className="form-select"
+                              name="payment_method"
+                              value={paymentFormData.payment_method}
+                              onChange={handlePaymentFormChange}
+                            >
+                              <option value="Cash">Cash</option>
+                              <option value="Bank Transfer">Bank Transfer</option>
+                              <option value="Check">Check</option>
+                              <option value="Credit Card">Credit Card</option>
+                              <option value="Mobile Money">Mobile Money</option>
+                            </select>
+                          </div>
+                          <div className="col-md-4 mb-3">
+                            <label className="form-label">Reference Number</label>
+                            <input
+                              type="text"
+                              className="form-control"
+                              name="payment_reference"
+                              value={paymentFormData.payment_reference}
+                              onChange={handlePaymentFormChange}
+                              placeholder="Optional"
+                            />
+                          </div>
+                        </div>
+                        <div className="mb-3">
+                          <label className="form-label">Notes</label>
+                          <textarea
+                            className="form-control"
+                            name="notes"
+                            rows="2"
+                            value={paymentFormData.notes}
+                            onChange={handlePaymentFormChange}
+                            placeholder="Optional notes about this payment"
+                          ></textarea>
+                        </div>
+                        <div className="d-flex gap-2">
+                          <button type="submit" className="btn btn-primary">
+                            <i className="bi bi-check-circle me-1"></i>Add Payment
+                          </button>
+                          <button type="button" className="btn btn-secondary" onClick={() => setShowPaymentForm(false)}>
+                            Cancel
+                          </button>
+                        </div>
+                      </form>
+                    </div>
+                  </div>
+                )}
+
+                <div className="table-responsive">
+                  <table className="table table-hover table-striped">
+                    <thead>
+                      <tr>
+                        <th>Course</th>
+                        <th>Course Fee</th>
+                        <th>Amount Paid</th>
+                        <th>Balance</th>
+                        <th>Payment Date</th>
+                        <th>Payment Method</th>
+                        <th>Reference</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {payments.length === 0 ? (
+                        <tr>
+                          <td colSpan="7" className="text-center text-muted">
+                            No payment records found for this student.
+                          </td>
+                        </tr>
+                      ) : (
+                        payments.map(payment => (
+                          <tr key={payment.id}>
+                            <td>
+                              <strong>{payment.course_code}</strong><br />
+                              <small className="text-muted">{payment.course_title}</small>
+                            </td>
+                            <td>${parseFloat(payment.course_fee || 0).toFixed(2)}</td>
+                            <td className="text-success">${parseFloat(payment.amount_paid || 0).toFixed(2)}</td>
+                            <td className={parseFloat(payment.balance || 0) > 0 ? 'text-danger' : 'text-success'}>
+                              ${parseFloat(payment.balance || 0).toFixed(2)}
+                            </td>
+                            <td>{payment.payment_date ? format(new Date(payment.payment_date), 'PPP') : 'N/A'}</td>
+                            <td>{payment.payment_method || 'N/A'}</td>
+                            <td>{payment.payment_reference || 'N/A'}</td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div className="card">
+              <div className="card-body text-center p-5 text-muted">
+                <i className="bi bi-arrow-left-circle fs-1 d-block mb-3"></i>
+                <p>Select a student from the list to view their payment details</p>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+};
+
+export default StudentPaymentManagement;
+

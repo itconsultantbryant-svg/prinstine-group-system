@@ -1,0 +1,18 @@
+.navbar {
+  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+.notification-dropdown {
+  min-width: 300px;
+  max-width: 400px;
+}
+
+.notification-list .dropdown-item {
+  cursor: pointer;
+  white-space: normal;
+}
+
+.notification-list .dropdown-item:hover {
+  background-color: #f8f9fa;
+}
+

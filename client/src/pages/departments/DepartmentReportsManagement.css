@@ -1,0 +1,87 @@
+/* Department Reports Management Styles */
+
+.report-content {
+  font-family: 'Courier New', monospace;
+  line-height: 1.8;
+}
+
+.report-section {
+  margin-bottom: 2rem;
+  padding-bottom: 1rem;
+  border-bottom: 2px solid #e9ecef;
+}
+
+.report-section:last-child {
+  border-bottom: none;
+}
+
+.section-header {
+  color: #0d6efd;
+  font-weight: 700;
+  margin-bottom: 1rem;
+  padding-bottom: 0.5rem;
+  border-bottom: 2px solid #0d6efd;
+}
+
+.section-divider {
+  margin: 1.5rem 0;
+  border-color: #dee2e6;
+}
+
+.report-item {
+  margin: 0.5rem 0;
+  padding-left: 1.5rem;
+  position: relative;
+}
+
+.report-item.numbered {
+  padding-left: 0;
+}
+
+.report-item .bullet {
+  position: absolute;
+  left: 0;
+  color: #6c757d;
+  font-weight: bold;
+}
+
+.report-field {
+  margin: 0.75rem 0;
+  padding: 0.5rem;
+  background-color: #f8f9fa;
+  border-left: 3px solid #0d6efd;
+  padding-left: 1rem;
+}
+
+.report-field strong {
+  color: #495057;
+  margin-right: 0.5rem;
+}
+
+.report-line {
+  margin: 0.5rem 0;
+  line-height: 1.6;
+}
+
+/* Print styles */
+@media print {
+  .modal-dialog {
+    max-width: 100%;
+    margin: 0;
+  }
+  
+  .modal-content {
+    border: none;
+    box-shadow: none;
+  }
+  
+  .modal-header,
+  .modal-footer {
+    display: none;
+  }
+  
+  .report-content {
+    font-size: 10pt;
+  }
+}
+

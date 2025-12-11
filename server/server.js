@@ -1300,6 +1300,175 @@ async function initializeDatabase() {
           console.error(`⚠️ Migration file not found for ${table.name}:`, table.path);
           console.error(`Current working directory: ${process.cwd()}`);
           console.error(`__dirname: ${__dirname}`);
+          
+          // Fallback: Create table directly with SQL if migration file not found
+          console.log(`Attempting to create ${table.name} table directly...`);
+          try {
+            if (table.name === 'staff_attendance') {
+              await db.run(`
+                CREATE TABLE IF NOT EXISTS staff_attendance (
+                  id INTEGER PRIMARY KEY AUTOINCREMENT,
+                  user_id INTEGER NOT NULL,
+                  user_name TEXT,
+                  attendance_date DATE NOT NULL,
+                  sign_in_time DATETIME,
+                  sign_out_time DATETIME,
+                  sign_in_late BOOLEAN DEFAULT 0,
+                  sign_in_late_reason TEXT,
+                  sign_out_early BOOLEAN DEFAULT 0,
+                  sign_out_early_reason TEXT,
+                  status TEXT DEFAULT 'Pending' CHECK(status IN ('Pending', 'Approved', 'Rejected')),
+                  approved_by INTEGER,
+                  approved_at DATETIME,
+                  admin_notes TEXT,
+                  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+                  FOREIGN KEY (approved_by) REFERENCES users(id) ON DELETE SET NULL,
+                  UNIQUE(user_id, attendance_date)
+                )
+              `);
+              await db.run(`CREATE INDEX IF NOT EXISTS idx_staff_attendance_user_id ON staff_attendance(user_id)`);
+              await db.run(`CREATE INDEX IF NOT EXISTS idx_staff_attendance_date ON staff_attendance(attendance_date)`);
+              await db.run(`CREATE INDEX IF NOT EXISTS idx_staff_attendance_status ON staff_attendance(status)`);
+              await db.run(`CREATE INDEX IF NOT EXISTS idx_staff_attendance_approved_by ON staff_attendance(approved_by)`);
+              console.log(`✓ ${table.name} table created directly`);
+            } else if (table.name === 'requisitions') {
+              await db.run(`
+                CREATE TABLE IF NOT EXISTS requisitions (
+                  id INTEGER PRIMARY KEY AUTOINCREMENT,
+                  user_id INTEGER NOT NULL,
+                  department_id INTEGER,
+                  title TEXT NOT NULL,
+                  description TEXT,
+                  amount DECIMAL(10, 2) NOT NULL,
+                  status TEXT DEFAULT 'Pending_DeptHead' CHECK(status IN ('Pending_DeptHead', 'Pending_Admin', 'Admin_Approved', 'Admin_Rejected', 'DeptHead_Approved', 'DeptHead_Rejected')),
+                  dept_head_reviewed_by INTEGER,
+                  dept_head_reviewed_at DATETIME,
+                  dept_head_notes TEXT,
+                  admin_reviewed_by INTEGER,
+                  admin_reviewed_at DATETIME,
+                  admin_notes TEXT,
+                  attachments TEXT,
+                  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+                  FOREIGN KEY (department_id) REFERENCES departments(id) ON DELETE SET NULL,
+                  FOREIGN KEY (dept_head_reviewed_by) REFERENCES users(id) ON DELETE SET NULL,
+                  FOREIGN KEY (admin_reviewed_by) REFERENCES users(id) ON DELETE SET NULL
+                )
+              `);
+              console.log(`✓ ${table.name} table created directly`);
+            } else if (table.name === 'meetings') {
+              await db.run(`
+                CREATE TABLE IF NOT EXISTS meetings (
+                  id INTEGER PRIMARY KEY AUTOINCREMENT,
+                  title TEXT NOT NULL,
+                  description TEXT,
+                  meeting_date DATETIME NOT NULL,
+                  location TEXT,
+                  organizer_id INTEGER NOT NULL,
+                  status TEXT DEFAULT 'Scheduled' CHECK(status IN ('Scheduled', 'Completed', 'Cancelled', 'Postponed')),
+                  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                  FOREIGN KEY (organizer_id) REFERENCES users(id) ON DELETE CASCADE
+                )
+              `);
+              await db.run(`
+                CREATE TABLE IF NOT EXISTS meeting_participants (
+                  id INTEGER PRIMARY KEY AUTOINCREMENT,
+                  meeting_id INTEGER NOT NULL,
+                  user_id INTEGER NOT NULL,
+                  status TEXT DEFAULT 'Invited' CHECK(status IN ('Invited', 'Accepted', 'Declined', 'Attended', 'Absent')),
+                  response_at DATETIME,
+                  notes TEXT,
+                  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                  FOREIGN KEY (meeting_id) REFERENCES meetings(id) ON DELETE CASCADE,
+                  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+                  UNIQUE(meeting_id, user_id)
+                )
+              `);
+              console.log(`✓ ${table.name} tables created directly`);
+            } else if (table.name === 'archived_documents') {
+              await db.run(`
+                CREATE TABLE IF NOT EXISTS archived_documents (
+                  id INTEGER PRIMARY KEY AUTOINCREMENT,
+                  title TEXT NOT NULL,
+                  description TEXT,
+                  file_path TEXT NOT NULL,
+                  file_type TEXT,
+                  file_size INTEGER,
+                  uploaded_by INTEGER NOT NULL,
+                  source_type TEXT,
+                  source_id INTEGER,
+                  department_id INTEGER,
+                  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                  FOREIGN KEY (uploaded_by) REFERENCES users(id) ON DELETE CASCADE,
+                  FOREIGN KEY (department_id) REFERENCES departments(id) ON DELETE SET NULL
+                )
+              `);
+              console.log(`✓ ${table.name} table created directly`);
+            } else if (table.name === 'targets') {
+              await db.run(`
+                CREATE TABLE IF NOT EXISTS targets (
+                  id INTEGER PRIMARY KEY AUTOINCREMENT,
+                  user_id INTEGER NOT NULL,
+                  target_amount DECIMAL(10, 2) NOT NULL,
+                  target_type TEXT DEFAULT 'Employee' CHECK(target_type IN ('Employee', 'Client_Consultancy', 'Client_Audit', 'Student', 'Others')),
+                  status TEXT DEFAULT 'Signed_Contract' CHECK(status IN ('Signed_Contract', 'Pipeline_Client', 'Submitted')),
+                  start_date DATE,
+                  end_date DATE,
+                  created_by INTEGER NOT NULL,
+                  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+                  FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE CASCADE
+                )
+              `);
+              await db.run(`
+                CREATE TABLE IF NOT EXISTS target_progress (
+                  id INTEGER PRIMARY KEY AUTOINCREMENT,
+                  target_id INTEGER NOT NULL,
+                  progress_amount DECIMAL(10, 2) NOT NULL,
+                  progress_date DATE NOT NULL,
+                  notes TEXT,
+                  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                  FOREIGN KEY (target_id) REFERENCES targets(id) ON DELETE CASCADE
+                )
+              `);
+              await db.run(`
+                CREATE TABLE IF NOT EXISTS fund_sharing (
+                  id INTEGER PRIMARY KEY AUTOINCREMENT,
+                  from_user_id INTEGER NOT NULL,
+                  to_user_id INTEGER NOT NULL,
+                  amount DECIMAL(10, 2) NOT NULL,
+                  reason TEXT,
+                  status TEXT DEFAULT 'Active' CHECK(status IN ('Active', 'Reversed')),
+                  reversed_by INTEGER,
+                  reversed_at DATETIME,
+                  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                  FOREIGN KEY (from_user_id) REFERENCES users(id) ON DELETE CASCADE,
+                  FOREIGN KEY (to_user_id) REFERENCES users(id) ON DELETE CASCADE,
+                  FOREIGN KEY (reversed_by) REFERENCES users(id) ON DELETE SET NULL
+                )
+              `);
+              // Add amount column to progress_reports if it doesn't exist
+              try {
+                await db.run(`ALTER TABLE progress_reports ADD COLUMN amount DECIMAL(10, 2) DEFAULT 0`);
+              } catch (e) {
+                // Column may already exist
+              }
+              console.log(`✓ ${table.name} tables created directly`);
+            }
+            
+            // Verify table was created
+            const verifyTable = await db.get(`SELECT name FROM sqlite_master WHERE type='table' AND name=?`, [table.name]);
+            if (verifyTable) {
+              console.log(`✓ ${table.name} table verified after direct creation`);
+            }
+          } catch (fallbackError) {
+            console.error(`✗ Failed to create ${table.name} table directly:`, fallbackError.message);
+          }
         }
       } else {
         console.log(`✓ ${table.name} table exists`);

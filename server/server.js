@@ -146,7 +146,7 @@ async function initializeDatabase() {
     const tables = await db.all("SELECT name FROM sqlite_master WHERE type='table' AND name='users'");
     
     // Define migration paths (used in both if and else blocks)
-      const migrationPath = path.join(__dirname, '../database/migrations/001_initial_schema.sql');
+    const migrationPath = path.join(__dirname, '../database/migrations/001_initial_schema.sql');
       const seedPath = path.join(__dirname, '../database/migrations/002_seed_data.sql');
       const supportTicketsPath = path.join(__dirname, '../database/migrations/003_support_tickets.sql');
       const communicationsPath = path.join(__dirname, '../database/migrations/004_communications_enhancement.sql');
@@ -168,6 +168,30 @@ async function initializeDatabase() {
       const targetsPath = path.join(__dirname, '../database/migrations/021_targets_system.sql');
       const departmentHeadFieldsPath = path.join(__dirname, '../database/migrations/022_add_department_head_fields.sql');
       const addMissingColumnsPath = path.join(__dirname, '../database/migrations/023_add_missing_columns.sql');
+    
+    // Define migration paths (used in both if and else blocks)
+    const migrationPath = path.join(__dirname, '../database/migrations/001_initial_schema.sql');
+    const seedPath = path.join(__dirname, '../database/migrations/002_seed_data.sql');
+    const supportTicketsPath = path.join(__dirname, '../database/migrations/003_support_tickets.sql');
+    const communicationsPath = path.join(__dirname, '../database/migrations/004_communications_enhancement.sql');
+    const progressReportPath = path.join(__dirname, '../database/migrations/005_progress_report_fields.sql');
+    const progressReportsTablePath = path.join(__dirname, '../database/migrations/006_progress_reports_table.sql');
+    const staffEnhancementsPath = path.join(__dirname, '../database/migrations/007_staff_enhancements.sql');
+    const staffClientReportsPath = path.join(__dirname, '../database/migrations/008_staff_client_reports.sql');
+    const addAttachmentsToReportsPath = path.join(__dirname, '../database/migrations/009_add_attachments_to_reports.sql');
+    const academyEnhancementsPath = path.join(__dirname, '../database/migrations/011_academy_enhancements.sql');
+    const financeModulesPath = path.join(__dirname, '../database/migrations/012_finance_modules.sql');
+    const departmentReportsApprovalPath = path.join(__dirname, '../database/migrations/013_department_reports_approval_workflow.sql');
+    const financeApprovalWorkflowPath = path.join(__dirname, '../database/migrations/014_finance_approval_workflow.sql');
+    const callMemosPath = path.join(__dirname, '../database/migrations/015_call_memos.sql');
+    const proposalsPath = path.join(__dirname, '../database/migrations/016_proposals.sql');
+    const meetingsPath = path.join(__dirname, '../database/migrations/017_meetings.sql');
+    const archivedDocumentsPath = path.join(__dirname, '../database/migrations/018_archived_documents.sql');
+    const staffAttendancePath = path.join(__dirname, '../database/migrations/019_staff_attendance.sql');
+    const requisitionsPath = path.join(__dirname, '../database/migrations/020_requisitions.sql');
+    const targetsPath = path.join(__dirname, '../database/migrations/021_targets_system.sql');
+    const departmentHeadFieldsPath = path.join(__dirname, '../database/migrations/022_add_department_head_fields.sql');
+    const addMissingColumnsPath = path.join(__dirname, '../database/migrations/023_add_missing_columns.sql');
     
     if (tables.length === 0) {
       console.log('Initializing database schema...');

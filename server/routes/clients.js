@@ -13,14 +13,30 @@ function generateClientId() {
 
 // Get all clients
 router.get('/', authenticateToken, async (req, res) => {
+  let query = ''; // Declare outside try block for error handling
   try {
+    // Check which columns exist in clients table
+    const clientsTableInfo = await db.all("PRAGMA table_info(clients)");
+    const clientsColumnNames = clientsTableInfo.map(col => col.name);
+    const hasCreatedBy = clientsColumnNames.includes('created_by');
+    const hasCategory = clientsColumnNames.includes('category');
+    const hasProgressStatus = clientsColumnNames.includes('progress_status');
+    
     const { status, service, search, category, progress_status, from_date, to_date } = req.query;
-    let query = `
-      SELECT c.*, u.name, u.email, u.phone, u.profile_image,
-             creator.name as created_by_name, creator.email as created_by_email
-      FROM clients c
-      LEFT JOIN users u ON c.user_id = u.id
-      LEFT JOIN users creator ON c.created_by = creator.id
+    
+    // Build SELECT query based on available columns
+    let selectFields = `c.*, u.name, u.email, u.phone, u.profile_image`;
+    let joinClause = `FROM clients c
+      LEFT JOIN users u ON c.user_id = u.id`;
+    
+    if (hasCreatedBy) {
+      selectFields += `, creator.name as created_by_name, creator.email as created_by_email`;
+      joinClause += ` LEFT JOIN users creator ON c.created_by = creator.id`;
+    }
+    
+    query = `
+      SELECT ${selectFields}
+      ${joinClause}
       WHERE 1=1
     `;
     const params = [];
@@ -39,11 +55,11 @@ router.get('/', authenticateToken, async (req, res) => {
       query += ' AND c.services_availed LIKE ?';
       params.push(`%${service}%`);
     }
-    if (category) {
+    if (category && hasCategory) {
       query += ' AND c.category = ?';
       params.push(category);
     }
-    if (progress_status) {
+    if (progress_status && hasProgressStatus) {
       query += ' AND c.progress_status = ?';
       params.push(progress_status);
     }
@@ -71,7 +87,7 @@ router.get('/', authenticateToken, async (req, res) => {
       message: error.message,
       code: error.code,
       errno: error.errno,
-      sql: query.substring(0, 200)
+      sql: query ? query.substring(0, 200) : 'Query not built'
     });
     // Handle missing table/column gracefully
     if (error.message && (error.message.includes('no such table') || error.message.includes('no such column'))) {

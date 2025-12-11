@@ -8,11 +8,12 @@ services:
       - key: NODE_ENV
         value: production
 
-staticSites:
-  - type: static
+services:
+  - type: web
     name: prinstine-frontend
-    buildCommand: cd client && npm install && npm run build
-    staticPublishPath: client/build
+    rootDir: client
+    buildCommand: npm install && npm run build
+    startCommand: npx serve -s build -l ${PORT:-3000}
     envVars:
       - key: REACT_APP_API_URL
         sync: false

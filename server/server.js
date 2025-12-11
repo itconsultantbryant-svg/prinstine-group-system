@@ -263,6 +263,38 @@ async function initializeDatabase() {
         }
         console.log('✓ Communications enhancement migration completed');
       }
+      
+      // Run add missing columns migration after initial schema
+      if (fs.existsSync(addMissingColumnsPath)) {
+        const clientsTableExists = await db.get("SELECT name FROM sqlite_master WHERE type='table' AND name='clients'");
+        if (clientsTableExists) {
+          const clientsTableInfo = await db.all("PRAGMA table_info(clients)");
+          const clientsColumnNames = clientsTableInfo.map(col => col.name);
+          const needsMigration = !clientsColumnNames.includes('category') || 
+                                !clientsColumnNames.includes('progress_status') ||
+                                !clientsColumnNames.includes('created_by');
+          
+          if (needsMigration) {
+            console.log('Adding missing columns to clients table (category, progress_status, created_by)...');
+            const missingColumnsSQL = fs.readFileSync(addMissingColumnsPath, 'utf8');
+            const missingColumnsStatements = missingColumnsSQL.split(';').filter(s => s.trim().length > 0);
+            for (const statement of missingColumnsStatements) {
+              if (statement.trim()) {
+                try {
+                  await db.run(statement);
+                } catch (stmtError) {
+                  // Ignore errors for columns that already exist
+                  if (!stmtError.message.includes('duplicate column') && 
+                      !stmtError.message.includes('already exists')) {
+                    console.error('Error executing missing columns migration statement:', stmtError.message);
+                  }
+                }
+              }
+            }
+            console.log('✓ Missing columns migration completed');
+          }
+        }
+      }
     } else {
       console.log('Database already initialized');
       

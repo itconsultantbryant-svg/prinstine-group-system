@@ -1,0 +1,517 @@
+const express = require('express');
+const router = express.Router();
+const { body, validationResult } = require('express-validator');
+const db = require('../config/database');
+const { authenticateToken, requireRole } = require('../utils/auth');
+const { logAction } = require('../utils/audit');
+const multer = require('multer');
+const path = require('path');
+const fs = require('fs');
+const crypto = require('crypto');
+
+// Configure multer for certificate file uploads
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    const uploadPath = path.join(__dirname, '../../uploads/certificates');
+    if (!fs.existsSync(uploadPath)) {
+      fs.mkdirSync(uploadPath, { recursive: true });
+    }
+    cb(null, uploadPath);
+  },
+  filename: (req, file, cb) => {
+    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+    const ext = path.extname(file.originalname);
+    cb(null, `certificate-${uniqueSuffix}${ext}`);
+  }
+});
+
+const fileFilter = (req, file, cb) => {
+  const allowedTypes = ['image/png', 'image/jpeg', 'image/jpg', 'application/pdf'];
+  if (allowedTypes.includes(file.mimetype)) {
+    cb(null, true);
+  } else {
+    cb(new Error('Invalid file type. Only PNG, JPEG, and PDF files are allowed.'), false);
+  }
+};
+
+const upload = multer({
+  storage: storage,
+  limits: { fileSize: 10 * 1024 * 1024 }, // 10MB limit
+  fileFilter: fileFilter
+});
+
+// Generate certificate ID
+function generateCertificateId() {
+  return 'CERT-' + Date.now() + '-' + Math.random().toString(36).substr(2, 9).toUpperCase();
+}
+
+// Get all certificates (Admin only)
+router.get('/', authenticateToken, requireRole('Admin'), async (req, res) => {
+  try {
+    const { search, student_id, course_id } = req.query;
+    let query = `
+      SELECT c.*, 
+             s.student_id as student_code,
+             u.name as student_name,
+             u.profile_image as student_image,
+             co.course_code,
+             co.title as course_title,
+             co.start_date as course_start_date,
+             co.end_date as course_end_date
+      FROM certificates c
+      JOIN students s ON c.student_id = s.id
+      JOIN users u ON s.user_id = u.id
+      JOIN courses co ON c.course_id = co.id
+      WHERE 1=1
+    `;
+    const params = [];
+
+    if (search) {
+      query += ' AND (u.name LIKE ? OR s.student_id LIKE ? OR c.certificate_id LIKE ?)';
+      const searchTerm = `%${search}%`;
+      params.push(searchTerm, searchTerm, searchTerm);
+    }
+    if (student_id) {
+      query += ' AND c.student_id = ?';
+      params.push(student_id);
+    }
+    if (course_id) {
+      query += ' AND c.course_id = ?';
+      params.push(course_id);
+    }
+
+    query += ' ORDER BY c.created_at DESC';
+
+    const certificates = await db.all(query, params);
+    res.json({ certificates });
+  } catch (error) {
+    console.error('Get certificates error:', error);
+    res.status(500).json({ error: 'Failed to fetch certificates' });
+  }
+});
+
+// Get certificate by ID
+router.get('/:id', authenticateToken, async (req, res) => {
+  try {
+    const certificateId = req.params.id;
+
+    const certificate = await db.get(
+      `SELECT c.*, 
+              s.student_id as student_code,
+              u.name as student_name,
+              u.profile_image as student_image,
+              u.email as student_email,
+              co.course_code,
+              co.title as course_title,
+              co.description as course_description,
+              co.start_date as course_start_date,
+              co.end_date as course_end_date,
+              co.mode as course_mode
+       FROM certificates c
+       JOIN students s ON c.student_id = s.id
+       JOIN users u ON s.user_id = u.id
+       JOIN courses co ON c.course_id = co.id
+       WHERE c.id = ? OR c.certificate_id = ?`,
+      [certificateId, certificateId]
+    );
+
+    if (!certificate) {
+      return res.status(404).json({ error: 'Certificate not found' });
+    }
+
+    // Check permissions - Admin can see all, students can only see their own
+    if (req.user.role !== 'Admin' && req.user.role !== 'Staff') {
+      const student = await db.get('SELECT id FROM students WHERE user_id = ?', [req.user.id]);
+      if (!student || certificate.student_id !== student.id) {
+        return res.status(403).json({ error: 'Insufficient permissions' });
+      }
+    }
+
+    res.json({ certificate });
+  } catch (error) {
+    console.error('Get certificate error:', error);
+    res.status(500).json({ error: 'Failed to fetch certificate' });
+  }
+});
+
+// Search certificates by student name or ID (Admin/Staff)
+router.get('/search/:query', authenticateToken, requireRole('Admin', 'Staff'), async (req, res) => {
+  try {
+    const query = req.params.query;
+
+    const certificates = await db.all(
+      `SELECT c.*, 
+              s.student_id as student_code,
+              u.name as student_name,
+              u.profile_image as student_image,
+              co.course_code,
+              co.title as course_title,
+              co.start_date as course_start_date,
+              co.end_date as course_end_date
+       FROM certificates c
+       JOIN students s ON c.student_id = s.id
+       JOIN users u ON s.user_id = u.id
+       JOIN courses co ON c.course_id = co.id
+       WHERE u.name LIKE ? OR s.student_id LIKE ? OR c.certificate_id LIKE ?
+       ORDER BY c.created_at DESC`,
+      [`%${query}%`, `%${query}%`, `%${query}%`]
+    );
+
+    res.json({ certificates });
+  } catch (error) {
+    console.error('Search certificates error:', error);
+    res.status(500).json({ error: 'Failed to search certificates' });
+  }
+});
+
+// Create certificate with file upload (Admin only)
+router.post('/', authenticateToken, requireRole('Admin'), upload.single('certificate_file'), [
+  body('student_id').isInt().withMessage('Student ID is required'),
+  body('course_id').isInt().withMessage('Course ID is required')
+], async (req, res) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({ errors: errors.array() });
+    }
+
+    const { student_id, course_id, grade, issue_date, completion_date } = req.body;
+
+    // Verify student exists
+    const student = await db.get('SELECT id, user_id FROM students WHERE id = ?', [student_id]);
+    if (!student) {
+      return res.status(404).json({ error: 'Student not found' });
+    }
+
+    // Verify course exists
+    const course = await db.get('SELECT id, course_code, title, start_date, end_date FROM courses WHERE id = ?', [course_id]);
+    if (!course) {
+      return res.status(404).json({ error: 'Course not found' });
+    }
+
+    // Check if certificate already exists for this student and course
+    const existing = await db.get(
+      'SELECT id FROM certificates WHERE student_id = ? AND course_id = ?',
+      [student_id, course_id]
+    );
+    if (existing) {
+      return res.status(400).json({ error: 'Certificate already exists for this student and course' });
+    }
+
+    if (!req.file) {
+      return res.status(400).json({ error: 'Certificate file is required' });
+    }
+
+    const certificateId = generateCertificateId();
+    const verificationCode = crypto.randomBytes(16).toString('hex').toUpperCase();
+
+    // Determine file type
+    const fileExt = path.extname(req.file.filename).toLowerCase();
+    const fileType = fileExt === '.pdf' ? 'pdf' : fileExt === '.png' ? 'png' : 'jpeg';
+    const filePath = `/uploads/certificates/${req.file.filename}`;
+
+    const result = await db.run(
+      `INSERT INTO certificates (certificate_id, student_id, course_id, issue_date, grade, verification_code, file_path, file_type, completion_date)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        certificateId,
+        student_id,
+        course_id,
+        issue_date || new Date().toISOString().split('T')[0],
+        grade || null,
+        verificationCode,
+        filePath,
+        fileType,
+        completion_date || null
+      ]
+    );
+
+    // Update enrollment status if exists
+    const enrollment = await db.get(
+      'SELECT id FROM enrollments WHERE student_id = ? AND course_id = ?',
+      [student_id, course_id]
+    );
+    if (enrollment) {
+      await db.run(
+        'UPDATE enrollments SET status = ?, completion_date = ? WHERE student_id = ? AND course_id = ?',
+        ['Completed', completion_date || new Date().toISOString().split('T')[0], student_id, course_id]
+      );
+    }
+
+    await logAction(req.user.id, 'create_certificate', 'certificates', result.lastID, { certificateId }, req);
+
+    res.status(201).json({
+      message: 'Certificate created successfully',
+      certificate: {
+        id: result.lastID,
+        certificate_id: certificateId,
+        verification_code: verificationCode,
+        file_path: filePath
+      }
+    });
+  } catch (error) {
+    console.error('Create certificate error:', error);
+    if (req.file) {
+      // Delete uploaded file on error
+      fs.unlinkSync(req.file.path);
+    }
+    res.status(500).json({ error: 'Failed to create certificate: ' + error.message });
+  }
+});
+
+// Update certificate (Admin only)
+router.put('/:id', authenticateToken, requireRole('Admin'), upload.single('certificate_file'), async (req, res) => {
+  try {
+    const certificateId = req.params.id;
+    const { grade, issue_date, completion_date } = req.body;
+
+    const certificate = await db.get('SELECT id, file_path FROM certificates WHERE id = ?', [certificateId]);
+    if (!certificate) {
+      return res.status(404).json({ error: 'Certificate not found' });
+    }
+
+    const updates = [];
+    const params = [];
+
+    if (grade !== undefined) {
+      updates.push('grade = ?');
+      params.push(grade);
+    }
+    if (issue_date !== undefined) {
+      updates.push('issue_date = ?');
+      params.push(issue_date);
+    }
+    if (completion_date !== undefined) {
+      updates.push('completion_date = ?');
+      params.push(completion_date);
+    }
+
+    // Handle file update
+    if (req.file) {
+      // Delete old file
+      if (certificate.file_path) {
+        const oldFilePath = path.join(__dirname, '../../', certificate.file_path);
+        if (fs.existsSync(oldFilePath)) {
+          fs.unlinkSync(oldFilePath);
+        }
+      }
+
+      const fileExt = path.extname(req.file.filename).toLowerCase();
+      const fileType = fileExt === '.pdf' ? 'pdf' : fileExt === '.png' ? 'png' : 'jpeg';
+      const filePath = `/uploads/certificates/${req.file.filename}`;
+
+      updates.push('file_path = ?');
+      updates.push('file_type = ?');
+      params.push(filePath);
+      params.push(fileType);
+    }
+
+    if (updates.length > 0) {
+      params.push(certificateId);
+      await db.run(
+        `UPDATE certificates SET ${updates.join(', ')}, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
+        params
+      );
+    }
+
+    await logAction(req.user.id, 'update_certificate', 'certificates', certificateId, req.body, req);
+
+    res.json({ message: 'Certificate updated successfully' });
+  } catch (error) {
+    console.error('Update certificate error:', error);
+    if (req.file) {
+      fs.unlinkSync(req.file.path);
+    }
+    res.status(500).json({ error: 'Failed to update certificate' });
+  }
+});
+
+// Delete certificate (Admin only)
+router.delete('/:id', authenticateToken, requireRole('Admin'), async (req, res) => {
+  try {
+    const certificateId = req.params.id;
+
+    const certificate = await db.get('SELECT file_path FROM certificates WHERE id = ?', [certificateId]);
+    if (!certificate) {
+      return res.status(404).json({ error: 'Certificate not found' });
+    }
+
+    // Delete file
+    if (certificate.file_path) {
+      const filePath = path.join(__dirname, '../../', certificate.file_path);
+      if (fs.existsSync(filePath)) {
+        fs.unlinkSync(filePath);
+      }
+    }
+
+    await db.run('DELETE FROM certificates WHERE id = ?', [certificateId]);
+
+    await logAction(req.user.id, 'delete_certificate', 'certificates', certificateId, {}, req);
+
+    res.json({ message: 'Certificate deleted successfully' });
+  } catch (error) {
+    console.error('Delete certificate error:', error);
+    res.status(500).json({ error: 'Failed to delete certificate' });
+  }
+});
+
+// Public verification by student name and ID
+router.post('/verify', async (req, res) => {
+  try {
+    const { student_name, student_id } = req.body;
+
+    if (!student_name || !student_id) {
+      return res.status(400).json({ error: 'Student name and ID are required' });
+    }
+
+    const certificate = await db.get(
+      `SELECT c.*, 
+              s.student_id as student_code,
+              u.name as student_name,
+              u.profile_image as student_image,
+              co.course_code,
+              co.title as course_title,
+              co.start_date as course_start_date,
+              co.end_date as course_end_date
+       FROM certificates c
+       JOIN students s ON c.student_id = s.id
+       JOIN users u ON s.user_id = u.id
+       JOIN courses co ON c.course_id = co.id
+       WHERE LOWER(u.name) = LOWER(?) AND s.student_id = ?`,
+      [student_name.trim(), student_id.trim()]
+    );
+
+    if (!certificate) {
+      return res.status(404).json({ error: 'Certificate not found. Please verify the student name and ID.' });
+    }
+
+    res.json({
+      valid: true,
+      certificate: {
+        id: certificate.id,
+        certificate_id: certificate.certificate_id,
+        student_name: certificate.student_name,
+        student_id: certificate.student_code,
+        student_image: certificate.student_image,
+        course_code: certificate.course_code,
+        course_title: certificate.course_title,
+        course_start_date: certificate.course_start_date,
+        course_end_date: certificate.course_end_date,
+        issue_date: certificate.issue_date,
+        completion_date: certificate.completion_date,
+        grade: certificate.grade,
+        file_path: certificate.file_path,
+        file_type: certificate.file_type,
+        verification_code: certificate.verification_code
+      }
+    });
+  } catch (error) {
+    console.error('Verify certificate error:', error);
+    res.status(500).json({ error: 'Failed to verify certificate' });
+  }
+});
+
+// Download certificate in different formats
+router.get('/:id/download/:format', authenticateToken, async (req, res) => {
+  try {
+    const certificateId = req.params.id;
+    const format = req.params.format.toLowerCase();
+
+    if (!['png', 'jpeg', 'pdf', 'original'].includes(format)) {
+      return res.status(400).json({ error: 'Invalid format. Use png, jpeg, pdf, or original' });
+    }
+
+    const certificate = await db.get(
+      `SELECT c.*, s.student_id as student_code
+       FROM certificates c
+       JOIN students s ON c.student_id = s.id
+       WHERE c.id = ? OR c.certificate_id = ?`,
+      [certificateId, certificateId]
+    );
+
+    if (!certificate) {
+      return res.status(404).json({ error: 'Certificate not found' });
+    }
+
+    // Check permissions
+    if (req.user.role !== 'Admin' && req.user.role !== 'Staff') {
+      const student = await db.get('SELECT id FROM students WHERE user_id = ?', [req.user.id]);
+      if (!student || certificate.student_id !== student.id) {
+        return res.status(403).json({ error: 'Insufficient permissions' });
+      }
+    }
+
+    if (!certificate.file_path) {
+      return res.status(404).json({ error: 'Certificate file not found' });
+    }
+
+    const filePath = path.join(__dirname, '../../', certificate.file_path);
+
+    if (!fs.existsSync(filePath)) {
+      return res.status(404).json({ error: 'Certificate file not found on server' });
+    }
+
+    // If requesting original format, serve the file as-is
+    if (format === 'original' || format === certificate.file_type) {
+      const ext = path.extname(filePath);
+      const contentType = ext === '.pdf' ? 'application/pdf' : ext === '.png' ? 'image/png' : 'image/jpeg';
+      
+      res.setHeader('Content-Type', contentType);
+      res.setHeader('Content-Disposition', `attachment; filename="certificate-${certificate.certificate_id}${ext}"`);
+      return res.sendFile(path.resolve(filePath));
+    }
+
+    // For format conversion, we would need image processing libraries
+    // For now, return the original file with appropriate headers
+    const ext = path.extname(filePath);
+    const contentType = format === 'pdf' ? 'application/pdf' : format === 'png' ? 'image/png' : 'image/jpeg';
+    
+    res.setHeader('Content-Type', contentType);
+    res.setHeader('Content-Disposition', `attachment; filename="certificate-${certificate.certificate_id}.${format}"`);
+    res.sendFile(path.resolve(filePath));
+  } catch (error) {
+    console.error('Download certificate error:', error);
+    res.status(500).json({ error: 'Failed to download certificate' });
+  }
+});
+
+// Public download endpoint (for verified certificates)
+router.get('/public/:id/download/:format', async (req, res) => {
+  try {
+    const certificateId = req.params.id;
+    const format = req.params.format.toLowerCase();
+
+    if (!['png', 'jpeg', 'pdf', 'original'].includes(format)) {
+      return res.status(400).json({ error: 'Invalid format' });
+    }
+
+    const certificate = await db.get(
+      'SELECT file_path, certificate_id, file_type FROM certificates WHERE id = ? OR certificate_id = ?',
+      [certificateId, certificateId]
+    );
+
+    if (!certificate || !certificate.file_path) {
+      return res.status(404).json({ error: 'Certificate not found' });
+    }
+
+    const filePath = path.join(__dirname, '../../', certificate.file_path);
+
+    if (!fs.existsSync(filePath)) {
+      return res.status(404).json({ error: 'Certificate file not found' });
+    }
+
+    const ext = path.extname(filePath);
+    const contentType = format === 'pdf' || ext === '.pdf' ? 'application/pdf' : 
+                       format === 'png' || ext === '.png' ? 'image/png' : 'image/jpeg';
+    
+    res.setHeader('Content-Type', contentType);
+    res.setHeader('Content-Disposition', `attachment; filename="certificate-${certificate.certificate_id}.${format}"`);
+    res.sendFile(path.resolve(filePath));
+  } catch (error) {
+    console.error('Public download certificate error:', error);
+    res.status(500).json({ error: 'Failed to download certificate' });
+  }
+});
+
+module.exports = router;
+

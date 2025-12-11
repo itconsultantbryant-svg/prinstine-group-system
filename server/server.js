@@ -1,0 +1,1111 @@
+const express = require('express');
+const http = require('http');
+const socketIo = require('socket.io');
+const cors = require('cors');
+const helmet = require('helmet');
+const rateLimit = require('express-rate-limit');
+require('dotenv').config();
+
+const db = require('./config/database');
+const { startPeriodicCheckpoint, stopPeriodicCheckpoint } = require('./utils/dbCheckpoint');
+const fs = require('fs');
+const path = require('path');
+
+const app = express();
+const server = http.createServer(app);
+const io = socketIo(server, {
+  cors: {
+    origin: process.env.FRONTEND_URL || 'http://localhost:3000',
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH'],
+    credentials: true
+  }
+});
+
+// Make io available to other modules
+app.set('io', io);
+global.io = io;
+
+const PORT = process.env.PORT || 3006;
+
+// Middleware
+// TEMPORARILY DISABLED HELMET to debug timeout issues
+// app.use(helmet({
+//   crossOriginResourcePolicy: { policy: "cross-origin" }
+// }));
+
+// CORS configuration - Simplified for debugging
+app.use(cors({
+  origin: true,
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Origin', 'Referer', 'Accept'],
+  exposedHeaders: ['Content-Length', 'Content-Type']
+}));
+
+// Request logging - SIMPLIFIED to avoid blocking
+app.use((req, res, next) => {
+  // Only log for specific paths to reduce overhead
+  if (req.path.includes('/auth/login') || req.path.includes('/health')) {
+    console.log(`[${new Date().toISOString()}] ${req.method} ${req.path}`);
+  }
+  next();
+});
+
+// JSON body parser
+app.use(express.json({ 
+  limit: '10mb',
+  strict: false
+}));
+
+// URL-encoded body parser
+app.use(express.urlencoded({ 
+  extended: true, 
+  limit: '10mb' 
+}));
+
+// Serve uploaded files
+app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
+app.use('/uploads/claims', express.static(path.join(__dirname, '../uploads/claims')));
+app.use('/uploads/communications', express.static(path.join(__dirname, '../uploads/communications')));
+app.use('/uploads/proposals', express.static(path.join(__dirname, '../uploads/proposals')));
+app.use('/uploads/archived-documents', express.static(path.join(__dirname, '../uploads/archived-documents')));
+app.use('/uploads/requisitions', express.static(path.join(__dirname, '../uploads/requisitions')));
+
+// Rate limiting - TEMPORARILY DISABLED to debug login timeout issues
+// const limiter = rateLimit({
+//   windowMs: 15 * 60 * 1000, // 15 minutes
+//   max: process.env.NODE_ENV === 'production' ? 100 : 1000, // Higher limit for development
+//   message: 'Too many requests, please try again later.',
+//   standardHeaders: true,
+//   legacyHeaders: false,
+//   skip: (req) => {
+//     // Skip rate limiting for health checks and login
+//     return req.path === '/api/health' || req.path === '/api/auth/login';
+//   }
+// });
+
+// More lenient rate limiter for auth routes - TEMPORARILY DISABLED
+// const authLimiter = rateLimit({
+//   windowMs: 15 * 60 * 1000, // 15 minutes
+//   max: process.env.NODE_ENV === 'production' ? 5 : 50, // Allow more login attempts in development
+//   message: 'Too many login attempts, please try again later.',
+//   standardHeaders: true,
+//   legacyHeaders: false,
+//   skipSuccessfulRequests: true, // Don't count successful logins
+// });
+
+// app.use('/api/', limiter);
+// app.use('/api/auth/login', authLimiter);
+// app.use('/api/auth/me', rateLimit({
+//   windowMs: 1 * 60 * 1000, // 1 minute
+//   max: process.env.NODE_ENV === 'production' ? 30 : 200, // More lenient for /me endpoint
+//   message: 'Too many requests, please try again later.',
+// }));
+
+// Initialize database
+async function initializeDatabase() {
+  try {
+    // Ensure database directory exists (use root database folder)
+    const dbDir = path.resolve(__dirname, '../../database');
+    if (!fs.existsSync(dbDir)) {
+      fs.mkdirSync(dbDir, { recursive: true });
+      console.log('Created database directory:', dbDir);
+    }
+    
+    // Log the database path being used
+    const dbPath = process.env.DB_PATH || path.resolve(__dirname, '../../database/pms.db');
+    console.log('Using database path:', dbPath);
+
+    await db.connect();
+    console.log('Database connected successfully');
+
+    // Check if database is empty (no users table or no data)
+    const tables = await db.all("SELECT name FROM sqlite_master WHERE type='table' AND name='users'");
+    
+    // Define migration paths (used in both if and else blocks)
+      const migrationPath = path.join(__dirname, '../database/migrations/001_initial_schema.sql');
+      const seedPath = path.join(__dirname, '../database/migrations/002_seed_data.sql');
+      const supportTicketsPath = path.join(__dirname, '../database/migrations/003_support_tickets.sql');
+      const communicationsPath = path.join(__dirname, '../database/migrations/004_communications_enhancement.sql');
+      const progressReportPath = path.join(__dirname, '../database/migrations/005_progress_report_fields.sql');
+      const progressReportsTablePath = path.join(__dirname, '../database/migrations/006_progress_reports_table.sql');
+      const staffEnhancementsPath = path.join(__dirname, '../database/migrations/007_staff_enhancements.sql');
+      const staffClientReportsPath = path.join(__dirname, '../database/migrations/008_staff_client_reports.sql');
+      const addAttachmentsToReportsPath = path.join(__dirname, '../database/migrations/009_add_attachments_to_reports.sql');
+      const academyEnhancementsPath = path.join(__dirname, '../database/migrations/011_academy_enhancements.sql');
+      const financeModulesPath = path.join(__dirname, '../database/migrations/012_finance_modules.sql');
+      const departmentReportsApprovalPath = path.join(__dirname, '../database/migrations/013_department_reports_approval_workflow.sql');
+      const financeApprovalWorkflowPath = path.join(__dirname, '../database/migrations/014_finance_approval_workflow.sql');
+      const callMemosPath = path.join(__dirname, '../database/migrations/015_call_memos.sql');
+      const proposalsPath = path.join(__dirname, '../database/migrations/016_proposals.sql');
+      const meetingsPath = path.join(__dirname, '../database/migrations/017_meetings.sql');
+      const archivedDocumentsPath = path.join(__dirname, '../database/migrations/018_archived_documents.sql');
+      const staffAttendancePath = path.join(__dirname, '../database/migrations/019_staff_attendance.sql');
+      const requisitionsPath = path.join(__dirname, '../database/migrations/020_requisitions.sql');
+      const targetsPath = path.join(__dirname, '../database/migrations/021_targets_system.sql');
+    
+    if (tables.length === 0) {
+      console.log('Initializing database schema...');
+      
+      // Read and execute migration files
+
+      if (fs.existsSync(migrationPath)) {
+        const migrationSQL = fs.readFileSync(migrationPath, 'utf8');
+        // Execute SQL statements one by one
+        const statements = migrationSQL.split(';').filter(s => s.trim().length > 0);
+        for (const statement of statements) {
+          if (statement.trim()) {
+            try {
+              await db.run(statement);
+            } catch (stmtError) {
+              // Ignore errors for IF NOT EXISTS statements
+              if (!stmtError.message.includes('already exists')) {
+                console.error('Error executing statement:', stmtError.message);
+              }
+            }
+          }
+        }
+        console.log('Database schema initialized');
+      } else {
+        console.error('Migration file not found:', migrationPath);
+      }
+
+      if (fs.existsSync(seedPath)) {
+        const seedSQL = fs.readFileSync(seedPath, 'utf8');
+        const statements = seedSQL.split(';').filter(s => s.trim().length > 0);
+        for (const statement of statements) {
+          if (statement.trim()) {
+            try {
+              await db.run(statement);
+            } catch (stmtError) {
+              // Ignore errors for INSERT OR IGNORE statements
+              if (!stmtError.message.includes('UNIQUE constraint')) {
+                console.error('Error executing seed statement:', stmtError.message);
+              }
+            }
+          }
+        }
+        console.log('Seed data loaded');
+        
+        // Verify admin user was created
+        const adminUser = await db.get('SELECT id, email, role FROM users WHERE email = ?', ['admin@prinstine.com']);
+        if (adminUser) {
+          console.log('✓ Admin user created successfully:', adminUser.email);
+        } else {
+          console.error('✗ Admin user was not created!');
+        }
+      } else {
+        console.error('Seed file not found:', seedPath);
+      }
+
+      // Run support tickets migration if table doesn't exist
+      const ticketsTableExists = await db.get("SELECT name FROM sqlite_master WHERE type='table' AND name='support_tickets'");
+      if (!ticketsTableExists && fs.existsSync(supportTicketsPath)) {
+        console.log('Creating support_tickets table...');
+        const ticketsSQL = fs.readFileSync(supportTicketsPath, 'utf8');
+        const ticketsStatements = ticketsSQL.split(';').filter(s => s.trim().length > 0);
+        for (const statement of ticketsStatements) {
+          if (statement.trim()) {
+            try {
+              await db.run(statement);
+            } catch (stmtError) {
+              if (!stmtError.message.includes('already exists')) {
+                console.error('Error executing ticket statement:', stmtError.message);
+              }
+            }
+          }
+        }
+        console.log('✓ Support tickets table created');
+      }
+
+      // Run communications enhancement migration
+      if (fs.existsSync(communicationsPath)) {
+        console.log('Running communications enhancement migration...');
+        const commSQL = fs.readFileSync(communicationsPath, 'utf8');
+        const commStatements = commSQL.split(';').filter(s => s.trim().length > 0);
+        for (const statement of commStatements) {
+          if (statement.trim()) {
+            try {
+              await db.run(statement);
+            } catch (stmtError) {
+              // Ignore errors for columns that already exist
+              if (!stmtError.message.includes('duplicate column') && 
+                  !stmtError.message.includes('already exists')) {
+                console.error('Error executing communications statement:', stmtError.message);
+              }
+            }
+          }
+        }
+        console.log('✓ Communications enhancement migration completed');
+      }
+    } else {
+      console.log('Database already initialized');
+      
+      // Check and create support_tickets table if it doesn't exist
+      const ticketsTableExists = await db.get("SELECT name FROM sqlite_master WHERE type='table' AND name='support_tickets'");
+      if (!ticketsTableExists && fs.existsSync(supportTicketsPath)) {
+        console.log('Creating support_tickets table...');
+        const ticketsSQL = fs.readFileSync(supportTicketsPath, 'utf8');
+        const ticketsStatements = ticketsSQL.split(';').filter(s => s.trim().length > 0);
+        for (const statement of ticketsStatements) {
+          if (statement.trim()) {
+            try {
+              await db.run(statement);
+            } catch (stmtError) {
+              if (!stmtError.message.includes('already exists')) {
+                console.error('Error executing ticket statement:', stmtError.message);
+              }
+            }
+          }
+        }
+        console.log('✓ Support tickets table created');
+      }
+
+      // Run communications enhancement migration if needed
+      if (fs.existsSync(communicationsPath)) {
+        // Check if columns already exist
+        const tableInfo = await db.all("PRAGMA table_info(notifications)");
+        const columnNames = tableInfo.map(col => col.name);
+        const needsMigration = !columnNames.includes('sender_id') || 
+                              !columnNames.includes('parent_id') || 
+                              !columnNames.includes('attachments') ||
+                              !columnNames.includes('is_acknowledged');
+        
+        if (needsMigration) {
+          console.log('Running communications enhancement migration...');
+          const commSQL = fs.readFileSync(communicationsPath, 'utf8');
+          const commStatements = commSQL.split(';').filter(s => s.trim().length > 0);
+          for (const statement of commStatements) {
+            if (statement.trim()) {
+              try {
+                await db.run(statement);
+              } catch (stmtError) {
+                // Ignore errors for columns that already exist
+                if (!stmtError.message.includes('duplicate column') && 
+                    !stmtError.message.includes('already exists')) {
+                  console.error('Error executing communications statement:', stmtError.message);
+                }
+              }
+            }
+          }
+          console.log('✓ Communications enhancement migration completed');
+        }
+      }
+
+      // Run progress report fields migration if needed
+      if (fs.existsSync(progressReportPath)) {
+        const tableInfo = await db.all("PRAGMA table_info(clients)");
+        const columnNames = tableInfo.map(col => col.name);
+        const needsMigration = !columnNames.includes('category') || 
+                              !columnNames.includes('progress_status') ||
+                              !columnNames.includes('created_by');
+        
+        if (needsMigration) {
+          console.log('Running progress report fields migration...');
+          const progressSQL = fs.readFileSync(progressReportPath, 'utf8');
+          const progressStatements = progressSQL.split(';').filter(s => s.trim().length > 0);
+          for (const statement of progressStatements) {
+            if (statement.trim()) {
+              try {
+                await db.run(statement);
+              } catch (stmtError) {
+                // Ignore errors for columns that already exist
+                if (!stmtError.message.includes('duplicate column') && 
+                    !stmtError.message.includes('already exists')) {
+                  console.error('Error executing progress report statement:', stmtError.message);
+                }
+              }
+            }
+          }
+          console.log('✓ Progress report fields migration completed');
+        }
+      }
+
+      // Run progress reports table migration if needed
+      if (fs.existsSync(progressReportsTablePath)) {
+        const progressReportsTableExists = await db.get("SELECT name FROM sqlite_master WHERE type='table' AND name='progress_reports'");
+        if (!progressReportsTableExists) {
+          console.log('Creating progress_reports table...');
+          const progressReportsSQL = fs.readFileSync(progressReportsTablePath, 'utf8');
+          const progressReportsStatements = progressReportsSQL.split(';').filter(s => s.trim().length > 0);
+          for (const statement of progressReportsStatements) {
+            if (statement.trim()) {
+              try {
+                await db.run(statement);
+              } catch (stmtError) {
+                if (!stmtError.message.includes('already exists')) {
+                  console.error('Error executing progress reports table statement:', stmtError.message);
+                }
+              }
+            }
+          }
+          console.log('✓ Progress reports table created');
+        }
+      }
+
+      // Run staff enhancements migration if needed
+      if (fs.existsSync(staffEnhancementsPath)) {
+        const tableInfo = await db.all("PRAGMA table_info(staff)");
+        const columnNames = tableInfo.map(col => col.name);
+        const needsMigration = !columnNames.includes('date_of_birth') || 
+                              !columnNames.includes('place_of_birth') ||
+                              !columnNames.includes('nationality');
+        
+        if (needsMigration) {
+          console.log('Running staff enhancements migration...');
+          const staffSQL = fs.readFileSync(staffEnhancementsPath, 'utf8');
+          const staffStatements = staffSQL.split(';').filter(s => s.trim().length > 0);
+          for (const statement of staffStatements) {
+            if (statement.trim()) {
+              try {
+                await db.run(statement);
+              } catch (stmtError) {
+                // Ignore errors for columns that already exist
+                if (!stmtError.message.includes('duplicate column') && 
+                    !stmtError.message.includes('already exists')) {
+                  console.error('Error executing staff enhancement statement:', stmtError.message);
+                }
+              }
+            }
+          }
+          console.log('✓ Staff enhancements migration completed');
+        }
+      }
+
+      // Run staff client reports migration if needed
+      if (fs.existsSync(staffClientReportsPath)) {
+        const staffClientReportsTableExists = await db.get("SELECT name FROM sqlite_master WHERE type='table' AND name='staff_client_reports'");
+        if (!staffClientReportsTableExists) {
+          console.log('Creating staff_client_reports table...');
+          const staffClientReportsSQL = fs.readFileSync(staffClientReportsPath, 'utf8');
+          const staffClientReportsStatements = staffClientReportsSQL.split(';').filter(s => s.trim().length > 0);
+          for (const statement of staffClientReportsStatements) {
+            if (statement.trim()) {
+              try {
+                await db.run(statement);
+              } catch (stmtError) {
+                if (!stmtError.message.includes('already exists')) {
+                  console.error('Error executing staff client reports table statement:', stmtError.message);
+                }
+              }
+            }
+          }
+          console.log('✓ Staff client reports table created');
+        }
+      }
+
+      // Run add attachments to reports migration if needed
+      if (fs.existsSync(addAttachmentsToReportsPath)) {
+        const tableInfo = await db.all("PRAGMA table_info(department_reports)");
+        const columnNames = tableInfo.map(col => col.name);
+        const needsMigration = !columnNames.includes('attachments');
+        
+        if (needsMigration) {
+          console.log('Adding attachments column to department_reports table...');
+          const attachmentsSQL = fs.readFileSync(addAttachmentsToReportsPath, 'utf8');
+          const attachmentsStatements = attachmentsSQL.split(';').filter(s => s.trim().length > 0);
+          for (const statement of attachmentsStatements) {
+            if (statement.trim()) {
+              try {
+                await db.run(statement);
+              } catch (stmtError) {
+                // Ignore errors for columns that already exist
+                if (!stmtError.message.includes('duplicate column') && 
+                    !stmtError.message.includes('already exists')) {
+                  console.error('Error executing attachments migration statement:', stmtError.message);
+                }
+              }
+            }
+          }
+          console.log('✓ Attachments column added to department_reports');
+        }
+      }
+
+      // Run academy enhancements migration if needed
+      if (fs.existsSync(academyEnhancementsPath)) {
+        // Check if courses table exists and add columns if needed
+        const coursesTableExists = await db.get("SELECT name FROM sqlite_master WHERE type='table' AND name='courses'");
+        if (coursesTableExists) {
+          const coursesTableInfo = await db.all("PRAGMA table_info(courses)");
+          const coursesColumnNames = coursesTableInfo.map(col => col.name);
+          const needsCoursesMigration = !coursesColumnNames.includes('course_fee') || 
+                                       !coursesColumnNames.includes('fee_approved') ||
+                                       !coursesColumnNames.includes('created_by');
+          
+          if (needsCoursesMigration) {
+            console.log('Adding course fees and approval fields to courses table...');
+            try {
+              if (!coursesColumnNames.includes('course_fee')) {
+                await db.run('ALTER TABLE courses ADD COLUMN course_fee REAL DEFAULT 0');
+              }
+              if (!coursesColumnNames.includes('fee_approved')) {
+                await db.run('ALTER TABLE courses ADD COLUMN fee_approved INTEGER DEFAULT 0');
+              }
+              if (!coursesColumnNames.includes('approved_by')) {
+                await db.run('ALTER TABLE courses ADD COLUMN approved_by INTEGER');
+              }
+              if (!coursesColumnNames.includes('approved_at')) {
+                await db.run('ALTER TABLE courses ADD COLUMN approved_at DATETIME');
+              }
+              if (!coursesColumnNames.includes('admin_notes')) {
+                await db.run('ALTER TABLE courses ADD COLUMN admin_notes TEXT');
+              }
+              if (!coursesColumnNames.includes('created_by')) {
+                await db.run('ALTER TABLE courses ADD COLUMN created_by INTEGER');
+              }
+              console.log('✓ Course fees and approval fields added');
+            } catch (stmtError) {
+              if (!stmtError.message.includes('duplicate column') && 
+                  !stmtError.message.includes('already exists')) {
+                console.error('Error adding course fields:', stmtError.message);
+              }
+            }
+          }
+        }
+
+        // Check if instructors table exists and add approval fields
+        const instructorsTableExists = await db.get("SELECT name FROM sqlite_master WHERE type='table' AND name='instructors'");
+        if (instructorsTableExists) {
+          const instructorsTableInfo = await db.all("PRAGMA table_info(instructors)");
+          const instructorsColumnNames = instructorsTableInfo.map(col => col.name);
+          const needsInstructorsMigration = !instructorsColumnNames.includes('approved');
+          
+          if (needsInstructorsMigration) {
+            console.log('Adding approval fields to instructors table...');
+            try {
+              if (!instructorsColumnNames.includes('approved')) {
+                await db.run('ALTER TABLE instructors ADD COLUMN approved INTEGER DEFAULT 0');
+              }
+              if (!instructorsColumnNames.includes('approved_by')) {
+                await db.run('ALTER TABLE instructors ADD COLUMN approved_by INTEGER');
+              }
+              if (!instructorsColumnNames.includes('approved_at')) {
+                await db.run('ALTER TABLE instructors ADD COLUMN approved_at DATETIME');
+              }
+              if (!instructorsColumnNames.includes('admin_notes')) {
+                await db.run('ALTER TABLE instructors ADD COLUMN admin_notes TEXT');
+              }
+              console.log('✓ Instructor approval fields added');
+            } catch (stmtError) {
+              if (!stmtError.message.includes('duplicate column') && 
+                  !stmtError.message.includes('already exists')) {
+                console.error('Error adding instructor fields:', stmtError.message);
+              }
+            }
+          }
+        }
+
+        // Run the academy enhancements migration for new tables
+        const studentPaymentsTableExists = await db.get("SELECT name FROM sqlite_master WHERE type='table' AND name='student_payments'");
+        if (!studentPaymentsTableExists) {
+          console.log('Running academy enhancements migration for new tables...');
+          const academySQL = fs.readFileSync(academyEnhancementsPath, 'utf8');
+          const academyStatements = academySQL.split(';').filter(s => s.trim().length > 0);
+          for (const statement of academyStatements) {
+            if (statement.trim()) {
+              try {
+                await db.run(statement);
+              } catch (stmtError) {
+                if (!stmtError.message.includes('already exists')) {
+                  console.error('Error executing academy enhancement statement:', stmtError.message);
+                }
+              }
+            }
+          }
+          console.log('✓ Academy enhancements migration completed');
+        }
+      }
+
+      // Run finance modules migration if needed
+      if (fs.existsSync(financeModulesPath)) {
+        const pettyCashLedgerTableExists = await db.get("SELECT name FROM sqlite_master WHERE type='table' AND name='petty_cash_ledgers'");
+        if (!pettyCashLedgerTableExists) {
+          console.log('Creating finance modules tables (Petty Cash Ledger & Asset Registry)...');
+          const financeSQL = fs.readFileSync(financeModulesPath, 'utf8');
+          const financeStatements = financeSQL.split(';').filter(s => s.trim().length > 0);
+          for (const statement of financeStatements) {
+            if (statement.trim()) {
+              try {
+                await db.run(statement);
+              } catch (stmtError) {
+                if (!stmtError.message.includes('already exists')) {
+                  console.error('Error executing finance modules statement:', stmtError.message);
+                }
+              }
+            }
+          }
+          console.log('✓ Finance modules (Petty Cash Ledger & Asset Registry) migration completed');
+        }
+      }
+
+      // Run department reports approval workflow migration if needed
+      if (fs.existsSync(departmentReportsApprovalPath)) {
+        const tableInfo = await db.all("PRAGMA table_info(department_reports)");
+        const columnNames = tableInfo.map(col => col.name);
+        const needsMigration = !columnNames.includes('dept_head_reviewed_by') || 
+                              !columnNames.includes('dept_head_status') ||
+                              !columnNames.includes('dept_head_notes');
+        
+        if (needsMigration) {
+          console.log('Adding department head approval workflow columns to department_reports table...');
+          const approvalSQL = fs.readFileSync(departmentReportsApprovalPath, 'utf8');
+          const approvalStatements = approvalSQL.split(';').filter(s => s.trim().length > 0);
+          for (const statement of approvalStatements) {
+            if (statement.trim()) {
+              try {
+                await db.run(statement);
+              } catch (stmtError) {
+                if (!stmtError.message.includes('duplicate column') && 
+                    !stmtError.message.includes('already exists')) {
+                  console.error('Error executing approval workflow statement:', stmtError.message);
+                }
+              }
+            }
+          }
+          console.log('✓ Department reports approval workflow migration completed');
+        }
+      }
+
+      // Run finance approval workflow migration if needed
+      if (fs.existsSync(financeApprovalWorkflowPath)) {
+        // Check if petty_cash_ledgers table exists and if new columns are missing
+        const pettyCashLedgerTableExists = await db.get("SELECT name FROM sqlite_master WHERE type='table' AND name='petty_cash_ledgers'");
+        if (pettyCashLedgerTableExists) {
+          const pettyCashInfo = await db.all("PRAGMA table_info(petty_cash_ledgers)");
+          const pettyCashColumns = pettyCashInfo.map(col => col.name);
+          const needsPettyCashMigration = !pettyCashColumns.includes('dept_head_approved_by') || 
+                                        !pettyCashColumns.includes('dept_head_status');
+          
+          // Check if assets table exists and if new columns are missing
+          const assetsTableExists = await db.get("SELECT name FROM sqlite_master WHERE type='table' AND name='assets'");
+          let needsAssetsMigration = false;
+          if (assetsTableExists) {
+            const assetsInfo = await db.all("PRAGMA table_info(assets)");
+            const assetsColumns = assetsInfo.map(col => col.name);
+            needsAssetsMigration = !assetsColumns.includes('dept_head_approved_by') || 
+                                   !assetsColumns.includes('dept_head_status');
+          }
+          
+          if (needsPettyCashMigration || needsAssetsMigration) {
+            console.log('Adding finance approval workflow columns to petty_cash_ledgers and assets tables...');
+            const financeApprovalSQL = fs.readFileSync(financeApprovalWorkflowPath, 'utf8');
+            const financeApprovalStatements = financeApprovalSQL.split(';').filter(s => s.trim().length > 0);
+            for (const statement of financeApprovalStatements) {
+              if (statement.trim()) {
+                try {
+                  await db.run(statement);
+                } catch (stmtError) {
+                  if (!stmtError.message.includes('duplicate column') && 
+                      !stmtError.message.includes('already exists')) {
+                    console.error('Error executing finance approval workflow statement:', stmtError.message);
+                  }
+                }
+              }
+            }
+            console.log('✓ Finance approval workflow migration completed');
+          }
+        }
+      }
+
+      // Run call memos migration if table doesn't exist
+      const callMemosTableExists = await db.get("SELECT name FROM sqlite_master WHERE type='table' AND name='call_memos'");
+      if (!callMemosTableExists && fs.existsSync(callMemosPath)) {
+        console.log('Creating call_memos table...');
+        const callMemosSQL = fs.readFileSync(callMemosPath, 'utf8');
+        const callMemosStatements = callMemosSQL.split(';').filter(s => s.trim().length > 0);
+        for (const statement of callMemosStatements) {
+          if (statement.trim()) {
+            try {
+              await db.run(statement);
+            } catch (stmtError) {
+              if (!stmtError.message.includes('already exists')) {
+                console.error('Error executing call memos statement:', stmtError.message);
+              }
+            }
+          }
+        }
+        console.log('✓ Call memos table created');
+      }
+
+      // Run proposals migration if table doesn't exist
+      const proposalsTableExists = await db.get("SELECT name FROM sqlite_master WHERE type='table' AND name='proposals'");
+      if (!proposalsTableExists && fs.existsSync(proposalsPath)) {
+        console.log('Creating proposals table...');
+        const proposalsSQL = fs.readFileSync(proposalsPath, 'utf8');
+        const proposalsStatements = proposalsSQL.split(';').filter(s => s.trim().length > 0);
+        for (const statement of proposalsStatements) {
+          if (statement.trim()) {
+            try {
+              await db.run(statement);
+            } catch (stmtError) {
+              if (!stmtError.message.includes('already exists')) {
+                console.error('Error executing proposals statement:', stmtError.message);
+              }
+            }
+          }
+        }
+        console.log('✓ Proposals table created');
+      }
+
+      // Run meetings migration if table doesn't exist
+      const meetingsTableExists = await db.get("SELECT name FROM sqlite_master WHERE type='table' AND name='meetings'");
+      if (!meetingsTableExists && fs.existsSync(meetingsPath)) {
+        console.log('Creating meetings tables...');
+        const meetingsSQL = fs.readFileSync(meetingsPath, 'utf8');
+        const meetingsStatements = meetingsSQL.split(';').filter(s => s.trim().length > 0);
+        for (const statement of meetingsStatements) {
+          if (statement.trim()) {
+            try {
+              await db.run(statement);
+            } catch (stmtError) {
+              if (!stmtError.message.includes('already exists')) {
+                console.error('Error executing meetings statement:', stmtError.message);
+              }
+            }
+          }
+        }
+        console.log('✓ Meetings tables created');
+      }
+
+      // Run archived documents migration if table doesn't exist
+      const archivedDocumentsTableExists = await db.get("SELECT name FROM sqlite_master WHERE type='table' AND name='archived_documents'");
+      if (!archivedDocumentsTableExists && fs.existsSync(archivedDocumentsPath)) {
+        console.log('Creating archived_documents table...');
+        const archivedDocumentsSQL = fs.readFileSync(archivedDocumentsPath, 'utf8');
+        const archivedDocumentsStatements = archivedDocumentsSQL.split(';').filter(s => s.trim().length > 0);
+        for (const statement of archivedDocumentsStatements) {
+          if (statement.trim()) {
+            try {
+              await db.run(statement);
+            } catch (stmtError) {
+              if (!stmtError.message.includes('already exists')) {
+                console.error('Error executing archived documents statement:', stmtError.message);
+              }
+            }
+          }
+        }
+        console.log('✓ Archived documents table created');
+      }
+
+      // Run staff attendance migration if table doesn't exist
+      const staffAttendanceTableExists = await db.get("SELECT name FROM sqlite_master WHERE type='table' AND name='staff_attendance'");
+      if (!staffAttendanceTableExists && fs.existsSync(staffAttendancePath)) {
+        console.log('Creating staff_attendance table...');
+        const staffAttendanceSQL = fs.readFileSync(staffAttendancePath, 'utf8');
+        const staffAttendanceStatements = staffAttendanceSQL.split(';').filter(s => s.trim().length > 0);
+        for (const statement of staffAttendanceStatements) {
+          if (statement.trim()) {
+            try {
+              await db.run(statement);
+            } catch (stmtError) {
+              if (!stmtError.message.includes('already exists')) {
+                console.error('Error executing staff attendance statement:', stmtError.message);
+              }
+            }
+          }
+        }
+        console.log('✓ Staff attendance table created');
+      }
+
+      // Run requisitions migration if table doesn't exist
+      const requisitionsTableExists = await db.get("SELECT name FROM sqlite_master WHERE type='table' AND name='requisitions'");
+      if (!requisitionsTableExists && fs.existsSync(requisitionsPath)) {
+        console.log('Creating requisitions table...');
+        const requisitionsSQL = fs.readFileSync(requisitionsPath, 'utf8');
+        const requisitionsStatements = requisitionsSQL.split(';').filter(s => s.trim().length > 0);
+        for (const statement of requisitionsStatements) {
+          if (statement.trim()) {
+            try {
+              await db.run(statement);
+            } catch (stmtError) {
+              if (!stmtError.message.includes('already exists')) {
+                console.error('Error executing requisitions statement:', stmtError.message);
+              }
+            }
+          }
+        }
+        console.log('✓ Requisitions table created');
+      }
+
+      // Run targets system migration if needed
+      if (fs.existsSync(targetsPath)) {
+        const targetsTableExists = await db.get("SELECT name FROM sqlite_master WHERE type='table' AND name='targets'");
+        const progressReportsTableInfo = await db.all("PRAGMA table_info(progress_reports)");
+        const progressReportsColumnNames = progressReportsTableInfo.map(col => col.name);
+        const needsAmountColumn = !progressReportsColumnNames.includes('amount');
+        
+        if (!targetsTableExists || needsAmountColumn) {
+          console.log('Running targets system migration...');
+          const targetsSQL = fs.readFileSync(targetsPath, 'utf8');
+          const targetsStatements = targetsSQL.split(';').filter(s => s.trim().length > 0);
+          for (const statement of targetsStatements) {
+            if (statement.trim()) {
+              try {
+                await db.run(statement);
+              } catch (stmtError) {
+                // Ignore errors for columns/tables that already exist
+                if (!stmtError.message.includes('already exists') && 
+                    !stmtError.message.includes('duplicate column')) {
+                  console.error('Error executing targets migration statement:', stmtError.message);
+                }
+              }
+            }
+          }
+          console.log('✓ Targets system migration completed');
+        }
+      }
+      
+      // Fix users table role constraint to include DepartmentHead
+      try {
+        // SQLite doesn't support ALTER TABLE to modify CHECK constraints
+        // We need to recreate the table with the updated constraint
+        console.log('Checking users table role constraint...');
+        
+        // Test if DepartmentHead role is allowed by trying to query the constraint
+        // Since we can't directly check constraints, we'll recreate the table if needed
+        const testUser = await db.get("SELECT role FROM users LIMIT 1");
+        
+        if (testUser) {
+          // Check if we can insert DepartmentHead (this will fail if constraint doesn't allow it)
+          // Instead, we'll recreate the table with the correct constraint
+          console.log('Updating users table to support DepartmentHead role...');
+          
+          // Get all users data
+          const allUsers = await db.all('SELECT * FROM users');
+          
+          // Create new table with updated constraint
+          await db.run('BEGIN TRANSACTION');
+          
+          try {
+            // Create temporary table with new constraint
+            await db.run(`
+              CREATE TABLE users_new (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                email TEXT UNIQUE NOT NULL,
+                username TEXT UNIQUE,
+                password_hash TEXT NOT NULL,
+                role TEXT NOT NULL CHECK(role IN ('Admin', 'Staff', 'Instructor', 'Student', 'Client', 'Partner', 'DepartmentHead')),
+                name TEXT NOT NULL,
+                phone TEXT,
+                profile_image TEXT,
+                is_active INTEGER DEFAULT 1,
+                email_verified INTEGER DEFAULT 0,
+                email_verification_token TEXT,
+                password_reset_token TEXT,
+                password_reset_expires DATETIME,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+              )
+            `);
+            
+            // Copy data from old table
+            for (const user of allUsers) {
+              await db.run(`
+                INSERT INTO users_new (id, email, username, password_hash, role, name, phone, profile_image, 
+                  is_active, email_verified, email_verification_token, password_reset_token, 
+                  password_reset_expires, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+              `, [
+                user.id, user.email, user.username, user.password_hash, user.role, user.name, 
+                user.phone, user.profile_image, user.is_active, user.email_verified,
+                user.email_verification_token, user.password_reset_token, 
+                user.password_reset_expires, user.created_at, user.updated_at
+              ]);
+            }
+            
+            // Drop old table
+            await db.run('DROP TABLE users');
+            
+            // Rename new table
+            await db.run('ALTER TABLE users_new RENAME TO users');
+            
+            await db.run('COMMIT');
+            console.log('✓ Users table updated to support DepartmentHead role');
+          } catch (tableError) {
+            await db.run('ROLLBACK');
+            // Check if error is because constraint already allows DepartmentHead
+            if (tableError.message.includes('already exists') || tableError.message.includes('no such table')) {
+              console.log('Users table may already support DepartmentHead role');
+            } else {
+              throw tableError;
+            }
+          }
+        }
+      } catch (error) {
+        console.error('Error updating users table:', error.message);
+        console.log('Note: Users table constraint update skipped');
+      }
+      
+      // Ensure departments table exists (for databases created before departments were added)
+      const deptTableExists = await db.get("SELECT name FROM sqlite_master WHERE type='table' AND name='departments'");
+      if (!deptTableExists) {
+        console.log('Creating missing departments table...');
+        await db.run(`
+          CREATE TABLE IF NOT EXISTS departments (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT UNIQUE NOT NULL,
+            description TEXT,
+            head_name TEXT NOT NULL,
+            head_phone TEXT,
+            head_email TEXT UNIQUE NOT NULL,
+            manager_id INTEGER,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (manager_id) REFERENCES users(id) ON DELETE SET NULL
+          )
+        `);
+        console.log('✓ Departments table created');
+      } else {
+        // Add new columns if they don't exist
+        try {
+          await db.run('ALTER TABLE departments ADD COLUMN head_name TEXT');
+        } catch (e) { /* Column may already exist */ }
+        try {
+          await db.run('ALTER TABLE departments ADD COLUMN head_phone TEXT');
+        } catch (e) { /* Column may already exist */ }
+        try {
+          await db.run('ALTER TABLE departments ADD COLUMN head_email TEXT');
+        } catch (e) { /* Column may already exist */ }
+        try {
+          // Add unique constraint separately if needed
+          await db.run('CREATE UNIQUE INDEX IF NOT EXISTS idx_departments_head_email ON departments(head_email) WHERE head_email IS NOT NULL');
+        } catch (e) { /* Index may already exist */ }
+      }
+
+      // Create department_reports table
+      const reportsTableExists = await db.get("SELECT name FROM sqlite_master WHERE type='table' AND name='department_reports'");
+      if (!reportsTableExists) {
+        console.log('Creating department_reports table...');
+        await db.run(`
+          CREATE TABLE IF NOT EXISTS department_reports (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            department_id INTEGER NOT NULL,
+            submitted_by INTEGER NOT NULL,
+            title TEXT NOT NULL,
+            content TEXT NOT NULL,
+            attachments TEXT,
+            status TEXT DEFAULT 'Pending' CHECK(status IN ('Pending', 'Approved', 'Rejected')),
+            admin_notes TEXT,
+            reviewed_by INTEGER,
+            reviewed_at DATETIME,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (department_id) REFERENCES departments(id) ON DELETE CASCADE,
+            FOREIGN KEY (submitted_by) REFERENCES users(id) ON DELETE CASCADE,
+            FOREIGN KEY (reviewed_by) REFERENCES users(id) ON DELETE SET NULL
+          )
+        `);
+        console.log('✓ Department reports table created');
+      }
+
+      // Ensure certificates table has new columns
+      const certTableExists = await db.get("SELECT name FROM sqlite_master WHERE type='table' AND name='certificates'");
+      if (certTableExists) {
+        try {
+          await db.run('ALTER TABLE certificates ADD COLUMN file_path TEXT');
+        } catch (e) {
+          // Column may already exist
+        }
+        try {
+          await db.run('ALTER TABLE certificates ADD COLUMN file_type TEXT');
+        } catch (e) {
+          // Column may already exist
+        }
+        try {
+          await db.run('ALTER TABLE certificates ADD COLUMN completion_date DATE');
+        } catch (e) {
+          // Column may already exist
+        }
+        try {
+          await db.run('ALTER TABLE certificates ADD COLUMN updated_at DATETIME DEFAULT CURRENT_TIMESTAMP');
+        } catch (e) {
+          // Column may already exist
+        }
+      }
+      
+      // Verify admin user exists
+      const adminUser = await db.get('SELECT id, email, role, is_active FROM users WHERE email = ?', ['admin@prinstine.com']);
+      if (adminUser) {
+        console.log('✓ Admin user found:', adminUser.email, '- Active:', adminUser.is_active);
+      } else {
+        console.warn('⚠ Admin user not found in database!');
+      }
+    }
+  } catch (error) {
+    console.error('Database initialization error:', error);
+    console.error('Error stack:', error.stack);
+    process.exit(1);
+  }
+}
+
+// Routes
+app.use('/api/auth', require('./routes/auth'));
+app.use('/api/users', require('./routes/users'));
+app.use('/api/departments', require('./routes/departments'));
+app.use('/api/department-reports', require('./routes/departmentReports'));
+app.use('/api/reports', require('./routes/reportsHistory'));
+app.use('/api/staff', require('./routes/staff'));
+app.use('/api/clients', require('./routes/clients'));
+app.use('/api/partners', require('./routes/partners'));
+app.use('/api/academy', require('./routes/academy'));
+app.use('/api/certificates', require('./routes/certificates'));
+app.use('/api/reports', require('./routes/reports'));
+app.use('/api/my-reports-history', require('./routes/reportsHistory'));
+app.use('/api/marketing', require('./routes/marketing'));
+app.use('/api/dashboard', require('./routes/dashboard'));
+app.use('/api/notifications', require('./routes/notifications'));
+app.use('/api/backup', require('./routes/backup'));
+app.use('/api/call-memos', require('./routes/callMemos'));
+app.use('/api/proposals', require('./routes/proposals'));
+app.use('/api/meetings', require('./routes/meetings'));
+const { router: archivedDocumentsRouter } = require('./routes/archivedDocuments');
+app.use('/api/archived-documents', archivedDocumentsRouter);
+app.use('/api/attendance', require('./routes/staffAttendance'));
+app.use('/api/requisitions', require('./routes/requisitions'));
+app.use('/api/targets', require('./routes/targets'));
+app.use('/api/upload', require('./routes/upload'));
+app.use('/api/support-tickets', require('./routes/supportTickets'));
+app.use('/api/progress-reports', require('./routes/progressReports'));
+app.use('/api/staff-client-reports', require('./routes/staffClientReports'));
+app.use('/api/payroll', require('./routes/payroll'));
+app.use('/api/student-payments', require('./routes/studentPayments'));
+app.use('/api/finance', require('./routes/finance'));
+
+// Health check - MUST be before 404 handler
+app.get('/api/health', (req, res) => {
+  console.log('=== HEALTH CHECK HIT ===');
+  res.status(200).json({ status: 'ok', timestamp: new Date().toISOString() });
+});
+
+// Simple POST test endpoint (BEFORE body parser to test)
+app.post('/api/test-post', (req, res) => {
+  console.log('=== TEST POST HIT ===');
+  res.status(200).json({ status: 'post-ok', body: req.body });
+});
+
+// Make io globally available for notifications
+global.io = io;
+
+// WebSocket connection handling
+io.on('connection', (socket) => {
+  console.log('Client connected:', socket.id);
+
+  // Join user-specific room when authenticated
+  socket.on('authenticate', (userId) => {
+    socket.join(`user_${userId}`);
+    console.log(`User ${userId} joined their room`);
+  });
+
+  socket.on('disconnect', () => {
+    console.log('Client disconnected:', socket.id);
+  });
+});
+
+// Error handling middleware - MUST be after all routes
+app.use((err, req, res, next) => {
+  // Handle JSON parsing errors
+  if (err instanceof SyntaxError && err.status === 400 && 'body' in err) {
+    console.error('JSON parsing error:', err.message);
+    if (!res.headersSent) {
+      return res.status(400).json({ error: 'Invalid JSON in request body' });
+    }
+  }
+  
+  console.error('Error:', err);
+  if (!res.headersSent) {
+    res.status(err.status || 500).json({
+      error: err.message || 'Internal server error',
+      ...(process.env.NODE_ENV === 'development' && { stack: err.stack })
+    });
+  }
+});
+
+// 404 handler
+app.use((req, res) => {
+  console.error('404 - Route not found:', req.method, req.path);
+  console.error('Available routes:', [
+    '/api/auth',
+    '/api/users',
+    '/api/departments',
+    '/api/notifications',
+    '/api/dashboard',
+    // Add other routes as needed
+  ]);
+  res.status(404).json({ 
+    error: 'Route not found',
+    path: req.path,
+    method: req.method
+  });
+});
+
+// Start server
+async function startServer() {
+  try {
+    await initializeDatabase();
+    
+    // Start periodic database checkpointing for data persistence
+    startPeriodicCheckpoint();
+    
+    server.listen(PORT, () => {
+      console.log(`Server running on port ${PORT}`);
+      console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
+      console.log(`✓ Server is ready to accept requests`);
+    });
+    
+    server.on('error', (err) => {
+      if (err.code === 'EADDRINUSE') {
+        console.error(`Port ${PORT} is already in use. Please stop the other server.`);
+      } else {
+        console.error('Server error:', err);
+      }
+    });
+  } catch (error) {
+    console.error('Failed to start server:', error);
+    process.exit(1);
+  }
+}
+
+// Graceful shutdown with proper data persistence
+async function gracefulShutdown(signal) {
+  console.log(`${signal} received, shutting down gracefully...`);
+  
+  // Stop accepting new connections
+  server.close(() => {
+    console.log('HTTP server closed');
+  });
+  
+  // Stop periodic checkpoint
+  stopPeriodicCheckpoint();
+  
+  // Force final checkpoint before closing
+  if (db.db) {
+    console.log('Performing final database checkpoint...');
+    await new Promise((resolve) => {
+      db.db.run('PRAGMA wal_checkpoint(TRUNCATE)', (err) => {
+        if (err && !err.message.includes('database is locked')) {
+          console.warn('Final checkpoint warning:', err.message);
+        } else {
+          console.log('✓ Final database checkpoint completed - all data persisted');
+        }
+        resolve();
+      });
+    });
+  }
+  
+  // Close database connection
+  await db.close();
+  
+  console.log('Graceful shutdown completed');
+  process.exit(0);
+}
+
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+
+startServer().catch(error => {
+  console.error('Failed to start server:', error);
+  process.exit(1);
+});
+
+module.exports = { app, server, io };
+

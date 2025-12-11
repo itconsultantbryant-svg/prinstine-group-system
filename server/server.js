@@ -690,6 +690,42 @@ async function initializeDatabase() {
           }
         }
 
+        // Check if students table exists and add approval fields
+        const studentsTableExists = await db.get("SELECT name FROM sqlite_master WHERE type='table' AND name='students'");
+        if (studentsTableExists) {
+          const studentsTableInfo = await db.all("PRAGMA table_info(students)");
+          const studentsColumnNames = studentsTableInfo.map(col => col.name);
+          const needsStudentsMigration = !studentsColumnNames.includes('approved') || 
+                                        !studentsColumnNames.includes('created_by');
+          
+          if (needsStudentsMigration) {
+            console.log('Adding approval fields to students table...');
+            try {
+              if (!studentsColumnNames.includes('approved')) {
+                await db.run('ALTER TABLE students ADD COLUMN approved INTEGER DEFAULT 0');
+              }
+              if (!studentsColumnNames.includes('approved_by')) {
+                await db.run('ALTER TABLE students ADD COLUMN approved_by INTEGER');
+              }
+              if (!studentsColumnNames.includes('approved_at')) {
+                await db.run('ALTER TABLE students ADD COLUMN approved_at DATETIME');
+              }
+              if (!studentsColumnNames.includes('admin_notes')) {
+                await db.run('ALTER TABLE students ADD COLUMN admin_notes TEXT');
+              }
+              if (!studentsColumnNames.includes('created_by')) {
+                await db.run('ALTER TABLE students ADD COLUMN created_by INTEGER');
+              }
+              console.log('✓ Student approval fields added');
+            } catch (stmtError) {
+              if (!stmtError.message.includes('duplicate column') && 
+                  !stmtError.message.includes('already exists')) {
+                console.error('Error adding student fields:', stmtError.message);
+              }
+            }
+          }
+        }
+
         // Check if instructors table exists and add approval fields
         const instructorsTableExists = await db.get("SELECT name FROM sqlite_master WHERE type='table' AND name='instructors'");
         if (instructorsTableExists) {
@@ -1475,6 +1511,107 @@ async function initializeDatabase() {
       }
     }
     console.log('=== Table verification complete ===\n');
+    
+    // FINAL CHECK: Ensure all required columns exist in academy tables
+    console.log('=== Running column verification for academy tables ===');
+    
+    // Check students table columns
+    const studentsTableCheck = await db.get("SELECT name FROM sqlite_master WHERE type='table' AND name='students'");
+    if (studentsTableCheck) {
+      const studentsInfo = await db.all("PRAGMA table_info(students)");
+      const studentsColumns = studentsInfo.map(col => col.name);
+      const requiredStudentColumns = ['approved', 'approved_by', 'approved_at', 'admin_notes', 'created_by'];
+      
+      for (const col of requiredStudentColumns) {
+        if (!studentsColumns.includes(col)) {
+          console.log(`Adding missing column '${col}' to students table...`);
+          try {
+            if (col === 'approved') {
+              await db.run('ALTER TABLE students ADD COLUMN approved INTEGER DEFAULT 0');
+            } else if (col === 'approved_by') {
+              await db.run('ALTER TABLE students ADD COLUMN approved_by INTEGER');
+            } else if (col === 'approved_at') {
+              await db.run('ALTER TABLE students ADD COLUMN approved_at DATETIME');
+            } else if (col === 'admin_notes') {
+              await db.run('ALTER TABLE students ADD COLUMN admin_notes TEXT');
+            } else if (col === 'created_by') {
+              await db.run('ALTER TABLE students ADD COLUMN created_by INTEGER');
+            }
+            console.log(`✓ Added '${col}' to students table`);
+          } catch (e) {
+            if (!e.message.includes('duplicate column') && !e.message.includes('already exists')) {
+              console.error(`Error adding '${col}' to students:`, e.message);
+            }
+          }
+        }
+      }
+    }
+    
+    // Check instructors table columns
+    const instructorsTableCheck = await db.get("SELECT name FROM sqlite_master WHERE type='table' AND name='instructors'");
+    if (instructorsTableCheck) {
+      const instructorsInfo = await db.all("PRAGMA table_info(instructors)");
+      const instructorsColumns = instructorsInfo.map(col => col.name);
+      const requiredInstructorColumns = ['approved', 'approved_by', 'approved_at', 'admin_notes'];
+      
+      for (const col of requiredInstructorColumns) {
+        if (!instructorsColumns.includes(col)) {
+          console.log(`Adding missing column '${col}' to instructors table...`);
+          try {
+            if (col === 'approved') {
+              await db.run('ALTER TABLE instructors ADD COLUMN approved INTEGER DEFAULT 0');
+            } else if (col === 'approved_by') {
+              await db.run('ALTER TABLE instructors ADD COLUMN approved_by INTEGER');
+            } else if (col === 'approved_at') {
+              await db.run('ALTER TABLE instructors ADD COLUMN approved_at DATETIME');
+            } else if (col === 'admin_notes') {
+              await db.run('ALTER TABLE instructors ADD COLUMN admin_notes TEXT');
+            }
+            console.log(`✓ Added '${col}' to instructors table`);
+          } catch (e) {
+            if (!e.message.includes('duplicate column') && !e.message.includes('already exists')) {
+              console.error(`Error adding '${col}' to instructors:`, e.message);
+            }
+          }
+        }
+      }
+    }
+    
+    // Check courses table columns
+    const coursesTableCheck = await db.get("SELECT name FROM sqlite_master WHERE type='table' AND name='courses'");
+    if (coursesTableCheck) {
+      const coursesInfo = await db.all("PRAGMA table_info(courses)");
+      const coursesColumns = coursesInfo.map(col => col.name);
+      const requiredCourseColumns = ['course_fee', 'fee_approved', 'approved_by', 'approved_at', 'admin_notes', 'created_by'];
+      
+      for (const col of requiredCourseColumns) {
+        if (!coursesColumns.includes(col)) {
+          console.log(`Adding missing column '${col}' to courses table...`);
+          try {
+            if (col === 'course_fee') {
+              await db.run('ALTER TABLE courses ADD COLUMN course_fee REAL DEFAULT 0');
+            } else if (col === 'fee_approved') {
+              await db.run('ALTER TABLE courses ADD COLUMN fee_approved INTEGER DEFAULT 0');
+            } else if (col === 'approved_by') {
+              await db.run('ALTER TABLE courses ADD COLUMN approved_by INTEGER');
+            } else if (col === 'approved_at') {
+              await db.run('ALTER TABLE courses ADD COLUMN approved_at DATETIME');
+            } else if (col === 'admin_notes') {
+              await db.run('ALTER TABLE courses ADD COLUMN admin_notes TEXT');
+            } else if (col === 'created_by') {
+              await db.run('ALTER TABLE courses ADD COLUMN created_by INTEGER');
+            }
+            console.log(`✓ Added '${col}' to courses table`);
+          } catch (e) {
+            if (!e.message.includes('duplicate column') && !e.message.includes('already exists')) {
+              console.error(`Error adding '${col}' to courses:`, e.message);
+            }
+          }
+        }
+      }
+    }
+    
+    console.log('=== Column verification complete ===\n');
   } catch (error) {
     console.error('Database initialization error:', error);
     console.error('Error stack:', error.stack);

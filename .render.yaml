@@ -1,0 +1,19 @@
+services:
+  - type: web
+    name: prinstine-backend
+    env: node
+    buildCommand: cd server && npm install
+    startCommand: cd server && npm start
+    envVars:
+      - key: NODE_ENV
+        value: production
+
+staticSites:
+  - type: static
+    name: prinstine-frontend
+    buildCommand: cd client && npm install && npm run build
+    staticPublishPath: client/build
+    envVars:
+      - key: REACT_APP_API_URL
+        sync: false
+

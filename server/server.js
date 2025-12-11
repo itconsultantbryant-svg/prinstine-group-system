@@ -23,7 +23,14 @@ const allowedSocketOrigins = [
 
 const io = socketIo(server, {
   cors: {
-    origin: allowedSocketOrigins.length > 0 ? allowedSocketOrigins : true,
+    origin: function (origin, callback) {
+      // Allow all origins for now (can be restricted later)
+      if (!origin || origin.includes('prinstine-group-system-frontend.onrender.com') || 
+          origin.includes('localhost') || allowedSocketOrigins.indexOf(origin) !== -1) {
+        return callback(null, true);
+      }
+      callback(null, true); // Allow all for now
+    },
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH'],
     credentials: true
   }

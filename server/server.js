@@ -13,9 +13,16 @@ const path = require('path');
 
 const app = express();
 const server = http.createServer(app);
+const allowedSocketOrigins = [
+  process.env.FRONTEND_URL,
+  'https://prinstine-group-system-frontend.onrender.com',
+  'http://localhost:3000',
+  'http://localhost:3001'
+].filter(Boolean);
+
 const io = socketIo(server, {
   cors: {
-    origin: process.env.FRONTEND_URL || 'http://localhost:3000',
+    origin: allowedSocketOrigins.length > 0 ? allowedSocketOrigins : true,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH'],
     credentials: true
   }
@@ -33,14 +40,38 @@ const PORT = process.env.PORT || 3006;
 //   crossOriginResourcePolicy: { policy: "cross-origin" }
 // }));
 
-// CORS configuration - Simplified for debugging
+// CORS configuration - Allow frontend origin explicitly
+const allowedOrigins = [
+  process.env.FRONTEND_URL,
+  'https://prinstine-group-system-frontend.onrender.com',
+  'http://localhost:3000',
+  'http://localhost:3001'
+].filter(Boolean); // Remove undefined values
+
 app.use(cors({
-  origin: true,
+  origin: function (origin, callback) {
+    // Allow requests with no origin (like mobile apps or curl requests)
+    if (!origin) return callback(null, true);
+    
+    // Check if origin is in allowed list
+    if (allowedOrigins.indexOf(origin) !== -1 || process.env.NODE_ENV === 'development') {
+      callback(null, true);
+    } else {
+      // In production, log but still allow (for now)
+      console.log('CORS: Allowing origin:', origin);
+      callback(null, true);
+    }
+  },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Origin', 'Referer', 'Accept'],
-  exposedHeaders: ['Content-Length', 'Content-Type']
+  exposedHeaders: ['Content-Length', 'Content-Type'],
+  preflightContinue: false,
+  optionsSuccessStatus: 204
 }));
+
+// Handle preflight OPTIONS requests explicitly
+app.options('*', cors());
 
 // Request logging - SIMPLIFIED to avoid blocking
 app.use((req, res, next) => {

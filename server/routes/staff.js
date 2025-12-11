@@ -40,11 +40,25 @@ router.get('/', authenticateToken, async (req, res) => {
 
     // DepartmentHead can only see staff from their department
     if (req.user.role === 'DepartmentHead') {
+      // Check if head_email column exists
+      const deptTableInfo = await db.all("PRAGMA table_info(departments)");
+      const deptColumnNames = deptTableInfo.map(col => col.name);
+      const hasHeadEmail = deptColumnNames.includes('head_email');
+      
       // Get department for this department head
-      const dept = await db.get(
-        'SELECT id, name FROM departments WHERE manager_id = ? OR LOWER(head_email) = ?',
-        [req.user.id, req.user.email.toLowerCase()]
-      );
+      let dept;
+      if (hasHeadEmail) {
+        dept = await db.get(
+          'SELECT id, name FROM departments WHERE manager_id = ? OR LOWER(head_email) = ?',
+          [req.user.id, req.user.email.toLowerCase()]
+        );
+      } else {
+        // Fallback to manager_id only if head_email doesn't exist
+        dept = await db.get(
+          'SELECT id, name FROM departments WHERE manager_id = ?',
+          [req.user.id]
+        );
+      }
       if (dept) {
         query += ' AND s.department = ?';
         params.push(dept.name);

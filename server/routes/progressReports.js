@@ -64,6 +64,11 @@ router.get('/', authenticateToken, requireRole('Admin', 'DepartmentHead', 'Staff
     res.json({ reports });
   } catch (error) {
     console.error('Get progress reports error:', error);
+    // If table doesn't exist, return empty array instead of 500 error
+    if (error.message && error.message.includes('no such table')) {
+      console.warn('progress_reports table does not exist yet');
+      return res.json({ reports: [] });
+    }
     res.status(500).json({ error: 'Failed to fetch progress reports' });
   }
 });

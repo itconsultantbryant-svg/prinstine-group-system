@@ -75,6 +75,11 @@ router.get('/', authenticateToken, async (req, res) => {
     res.json({ reports: reportsWithAttachments });
   } catch (error) {
     console.error('Get reports error:', error);
+    // If table doesn't exist, return empty array instead of 500 error
+    if (error.message && error.message.includes('no such table')) {
+      console.warn('department_reports table does not exist yet');
+      return res.json({ reports: [] });
+    }
     res.status(500).json({ error: 'Failed to fetch reports' });
   }
 });

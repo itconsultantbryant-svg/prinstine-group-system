@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const db = require('../config/database');
 const { authenticateToken } = require('../utils/auth');
+const { safeQuery, safeQueryAll } = require('../utils/safeQuery');
 
 // Get dashboard statistics
 router.get('/stats', authenticateToken, async (req, res) => {
@@ -25,29 +26,29 @@ router.get('/stats', authenticateToken, async (req, res) => {
         totalUsers,
         totalDepartments,
         totalCertificates
-      ] = await Promise.all([
-        db.get('SELECT COUNT(*) as count FROM staff'),
-        db.get('SELECT COUNT(*) as count FROM clients'),
-        db.get('SELECT COUNT(*) as count FROM partners'),
-        db.get('SELECT COUNT(*) as count FROM students WHERE status = ?', ['Active']),
-        db.get('SELECT COUNT(*) as count FROM instructors'),
-        db.get('SELECT COUNT(*) as count FROM courses WHERE status = ?', ['Active']),
-        db.get('SELECT COUNT(*) as count FROM department_reports WHERE status = ?', ['Pending']),
-        db.get('SELECT COUNT(*) as count FROM marketing_plans WHERE status = ?', ['Active']),
-        db.get('SELECT COUNT(*) as count FROM users WHERE is_active = ?', [1]),
-        db.get('SELECT COUNT(*) as count FROM departments'),
-        db.get('SELECT COUNT(*) as count FROM certificates')
+      ] = await safeQueryAll([
+        { sql: 'SELECT COUNT(*) as count FROM staff' },
+        { sql: 'SELECT COUNT(*) as count FROM clients' },
+        { sql: 'SELECT COUNT(*) as count FROM partners' },
+        { sql: 'SELECT COUNT(*) as count FROM students WHERE status = ?', params: ['Active'] },
+        { sql: 'SELECT COUNT(*) as count FROM instructors' },
+        { sql: 'SELECT COUNT(*) as count FROM courses WHERE status = ?', params: ['Active'] },
+        { sql: 'SELECT COUNT(*) as count FROM department_reports WHERE status = ?', params: ['Pending'] },
+        { sql: 'SELECT COUNT(*) as count FROM marketing_plans WHERE status = ?', params: ['Active'] },
+        { sql: 'SELECT COUNT(*) as count FROM users WHERE is_active = ?', params: [1] },
+        { sql: 'SELECT COUNT(*) as count FROM departments' },
+        { sql: 'SELECT COUNT(*) as count FROM certificates' }
       ]);
 
-      const fullTimeResult = await db.get('SELECT COUNT(*) as count FROM staff WHERE employment_type = ?', ['Full-time']);
-      const partTimeResult = await db.get('SELECT COUNT(*) as count FROM staff WHERE employment_type = ?', ['Part-time']);
-      const internshipResult = await db.get('SELECT COUNT(*) as count FROM staff WHERE employment_type = ?', ['Internship']);
-      const activeClientsResult = await db.get('SELECT COUNT(*) as count FROM clients WHERE status = ?', ['Active']);
-      const withLoansResult = await db.get('SELECT COUNT(*) as count FROM clients WHERE loan_amount > 0');
-      const enrollmentsResult = await db.get('SELECT COUNT(*) as count FROM enrollments WHERE status = ?', ['Enrolled']);
-      const totalReportsResult = await db.get('SELECT COUNT(*) as count FROM department_reports');
-      const totalMarketingResult = await db.get('SELECT COUNT(*) as count FROM marketing_plans');
-      const activePartnersResult = await db.get('SELECT COUNT(*) as count FROM partners WHERE status = ?', ['Active']);
+      const fullTimeResult = await safeQuery('SELECT COUNT(*) as count FROM staff WHERE employment_type = ?', ['Full-time']);
+      const partTimeResult = await safeQuery('SELECT COUNT(*) as count FROM staff WHERE employment_type = ?', ['Part-time']);
+      const internshipResult = await safeQuery('SELECT COUNT(*) as count FROM staff WHERE employment_type = ?', ['Internship']);
+      const activeClientsResult = await safeQuery('SELECT COUNT(*) as count FROM clients WHERE status = ?', ['Active']);
+      const withLoansResult = await safeQuery('SELECT COUNT(*) as count FROM clients WHERE loan_amount > 0');
+      const enrollmentsResult = await safeQuery('SELECT COUNT(*) as count FROM enrollments WHERE status = ?', ['Enrolled']);
+      const totalReportsResult = await safeQuery('SELECT COUNT(*) as count FROM department_reports');
+      const totalMarketingResult = await safeQuery('SELECT COUNT(*) as count FROM marketing_plans');
+      const activePartnersResult = await safeQuery('SELECT COUNT(*) as count FROM partners WHERE status = ?', ['Active']);
 
       stats = {
         staff: {

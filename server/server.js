@@ -49,19 +49,24 @@ const allowedOrigins = [
   'http://localhost:3001'
 ].filter(Boolean); // Remove undefined values
 
+// More permissive CORS for production
 app.use(cors({
   origin: function (origin, callback) {
     // Allow requests with no origin (like mobile apps or curl requests)
-    if (!origin) return callback(null, true);
-    
-    // Check if origin is in allowed list
-    if (allowedOrigins.indexOf(origin) !== -1 || process.env.NODE_ENV === 'development') {
-      callback(null, true);
-    } else {
-      // In production, log but still allow (for now)
-      console.log('CORS: Allowing origin:', origin);
-      callback(null, true);
+    if (!origin) {
+      return callback(null, true);
     }
+    
+    // Always allow the frontend origin
+    if (origin.includes('prinstine-group-system-frontend.onrender.com') || 
+        origin.includes('localhost') ||
+        allowedOrigins.indexOf(origin) !== -1) {
+      return callback(null, true);
+    }
+    
+    // In production, allow all origins for now (can be restricted later)
+    console.log('CORS: Allowing origin:', origin);
+    callback(null, true);
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
@@ -71,8 +76,14 @@ app.use(cors({
   optionsSuccessStatus: 204
 }));
 
-// Handle preflight OPTIONS requests explicitly
-app.options('*', cors());
+// Handle preflight OPTIONS requests explicitly - must be before other routes
+app.options('*', (req, res) => {
+  res.header('Access-Control-Allow-Origin', req.headers.origin || '*');
+  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS, PATCH');
+  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, Origin, Referer, Accept');
+  res.header('Access-Control-Allow-Credentials', 'true');
+  res.sendStatus(204);
+});
 
 // Request logging - SIMPLIFIED to avoid blocking
 app.use((req, res, next) => {

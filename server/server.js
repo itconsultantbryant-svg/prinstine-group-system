@@ -1446,6 +1446,64 @@ async function initializeDatabase() {
                 )
               `);
               console.log(`✓ ${table.name} table created directly`);
+            } else if (table.name === 'call_memos') {
+              await db.run(`
+                CREATE TABLE IF NOT EXISTS call_memos (
+                  id INTEGER PRIMARY KEY AUTOINCREMENT,
+                  client_id INTEGER NOT NULL,
+                  client_name TEXT NOT NULL,
+                  participants TEXT NOT NULL,
+                  subject TEXT NOT NULL,
+                  call_date DATE NOT NULL,
+                  discussion TEXT NOT NULL,
+                  service_needed TEXT NOT NULL CHECK(service_needed IN ('Consultancy', 'Training (Academy)', 'Web Development', 'System Development', 'Audit', 'Others')),
+                  service_other TEXT,
+                  department_needed TEXT,
+                  next_visitation_date DATE,
+                  created_by INTEGER NOT NULL,
+                  created_by_name TEXT,
+                  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                  FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE CASCADE,
+                  FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL
+                )
+              `);
+              await db.run(`CREATE INDEX IF NOT EXISTS idx_call_memos_client_id ON call_memos(client_id)`);
+              await db.run(`CREATE INDEX IF NOT EXISTS idx_call_memos_created_by ON call_memos(created_by)`);
+              await db.run(`CREATE INDEX IF NOT EXISTS idx_call_memos_call_date ON call_memos(call_date)`);
+              await db.run(`CREATE INDEX IF NOT EXISTS idx_call_memos_service_needed ON call_memos(service_needed)`);
+              console.log(`✓ ${table.name} table created directly`);
+            } else if (table.name === 'proposals') {
+              await db.run(`
+                CREATE TABLE IF NOT EXISTS proposals (
+                  id INTEGER PRIMARY KEY AUTOINCREMENT,
+                  client_id INTEGER,
+                  client_name TEXT NOT NULL,
+                  proposal_date DATE NOT NULL,
+                  document_path TEXT,
+                  document_name TEXT,
+                  status TEXT DEFAULT 'Pending_Marketing' CHECK(status IN ('Pending_Marketing', 'Marketing_Approved', 'Marketing_Rejected', 'Pending_Admin', 'Approved', 'Rejected')),
+                  marketing_reviewed_by INTEGER,
+                  marketing_reviewed_at DATETIME,
+                  marketing_notes TEXT,
+                  admin_reviewed_by INTEGER,
+                  admin_reviewed_at DATETIME,
+                  admin_notes TEXT,
+                  created_by INTEGER NOT NULL,
+                  created_by_name TEXT,
+                  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                  FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE SET NULL,
+                  FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL,
+                  FOREIGN KEY (marketing_reviewed_by) REFERENCES users(id) ON DELETE SET NULL,
+                  FOREIGN KEY (admin_reviewed_by) REFERENCES users(id) ON DELETE SET NULL
+                )
+              `);
+              await db.run(`CREATE INDEX IF NOT EXISTS idx_proposals_client_id ON proposals(client_id)`);
+              await db.run(`CREATE INDEX IF NOT EXISTS idx_proposals_created_by ON proposals(created_by)`);
+              await db.run(`CREATE INDEX IF NOT EXISTS idx_proposals_status ON proposals(status)`);
+              await db.run(`CREATE INDEX IF NOT EXISTS idx_proposals_proposal_date ON proposals(proposal_date)`);
+              console.log(`✓ ${table.name} table created directly`);
             } else if (table.name === 'targets') {
               await db.run(`
                 CREATE TABLE IF NOT EXISTS targets (

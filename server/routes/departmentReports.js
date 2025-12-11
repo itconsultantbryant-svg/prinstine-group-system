@@ -112,11 +112,22 @@ router.get('/', authenticateToken, async (req, res) => {
 // Get single report
 router.get('/:id', authenticateToken, async (req, res) => {
   try {
-    const report = await db.get(
-      `SELECT dr.*, d.name as department_name, d.head_name,
-              u1.name as submitted_by_name, u1.email as submitted_by_email,
+    // Check if head_name column exists
+    const deptTableInfo = await db.all("PRAGMA table_info(departments)");
+    const deptColumnNames = deptTableInfo.map(col => col.name);
+    const hasHeadName = deptColumnNames.includes('head_name');
+    
+    // Build query based on available columns
+    let selectFields = `dr.*, d.name as department_name`;
+    if (hasHeadName) {
+      selectFields += `, d.head_name`;
+    }
+    selectFields += `, u1.name as submitted_by_name, u1.email as submitted_by_email,
               u2.name as reviewed_by_name,
-              u3.name as dept_head_reviewed_by_name
+              u3.name as dept_head_reviewed_by_name`;
+    
+    const report = await db.get(
+      `SELECT ${selectFields}
        FROM department_reports dr
        JOIN departments d ON dr.department_id = d.id
        JOIN users u1 ON dr.submitted_by = u1.id

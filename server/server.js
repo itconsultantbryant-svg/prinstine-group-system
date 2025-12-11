@@ -295,6 +295,176 @@ async function initializeDatabase() {
           }
         }
       }
+      
+      // Run all other table migrations during initial setup
+      // Run staff attendance migration
+      const staffAttendanceTableExists = await db.get("SELECT name FROM sqlite_master WHERE type='table' AND name='staff_attendance'");
+      if (!staffAttendanceTableExists && fs.existsSync(staffAttendancePath)) {
+        console.log('Creating staff_attendance table...');
+        const staffAttendanceSQL = fs.readFileSync(staffAttendancePath, 'utf8');
+        const staffAttendanceStatements = staffAttendanceSQL.split(';').filter(s => s.trim().length > 0);
+        for (const statement of staffAttendanceStatements) {
+          if (statement.trim()) {
+            try {
+              await db.run(statement);
+            } catch (stmtError) {
+              if (!stmtError.message.includes('already exists')) {
+                console.error('Error executing staff attendance statement:', stmtError.message);
+              }
+            }
+          }
+        }
+        console.log('✓ Staff attendance table created');
+      }
+      
+      // Run requisitions migration
+      const requisitionsTableExists = await db.get("SELECT name FROM sqlite_master WHERE type='table' AND name='requisitions'");
+      if (!requisitionsTableExists && fs.existsSync(requisitionsPath)) {
+        console.log('Creating requisitions table...');
+        const requisitionsSQL = fs.readFileSync(requisitionsPath, 'utf8');
+        const requisitionsStatements = requisitionsSQL.split(';').filter(s => s.trim().length > 0);
+        for (const statement of requisitionsStatements) {
+          if (statement.trim()) {
+            try {
+              await db.run(statement);
+            } catch (stmtError) {
+              if (!stmtError.message.includes('already exists')) {
+                console.error('Error executing requisitions statement:', stmtError.message);
+              }
+            }
+          }
+        }
+        console.log('✓ Requisitions table created');
+      }
+      
+      // Run archived documents migration
+      const archivedDocumentsTableExists = await db.get("SELECT name FROM sqlite_master WHERE type='table' AND name='archived_documents'");
+      if (!archivedDocumentsTableExists && fs.existsSync(archivedDocumentsPath)) {
+        console.log('Creating archived_documents table...');
+        const archivedDocumentsSQL = fs.readFileSync(archivedDocumentsPath, 'utf8');
+        const archivedDocumentsStatements = archivedDocumentsSQL.split(';').filter(s => s.trim().length > 0);
+        for (const statement of archivedDocumentsStatements) {
+          if (statement.trim()) {
+            try {
+              await db.run(statement);
+            } catch (stmtError) {
+              if (!stmtError.message.includes('already exists')) {
+                console.error('Error executing archived documents statement:', stmtError.message);
+              }
+            }
+          }
+        }
+        console.log('✓ Archived documents table created');
+      }
+      
+      // Run meetings migration
+      const meetingsTableExists = await db.get("SELECT name FROM sqlite_master WHERE type='table' AND name='meetings'");
+      if (!meetingsTableExists && fs.existsSync(meetingsPath)) {
+        console.log('Creating meetings tables...');
+        const meetingsSQL = fs.readFileSync(meetingsPath, 'utf8');
+        const meetingsStatements = meetingsSQL.split(';').filter(s => s.trim().length > 0);
+        for (const statement of meetingsStatements) {
+          if (statement.trim()) {
+            try {
+              await db.run(statement);
+            } catch (stmtError) {
+              if (!stmtError.message.includes('already exists')) {
+                console.error('Error executing meetings statement:', stmtError.message);
+              }
+            }
+          }
+        }
+        console.log('✓ Meetings tables created');
+      }
+      
+      // Run targets system migration
+      if (fs.existsSync(targetsPath)) {
+        const targetsTableExists = await db.get("SELECT name FROM sqlite_master WHERE type='table' AND name='targets'");
+        const progressReportsTableInfo = await db.all("PRAGMA table_info(progress_reports)");
+        const progressReportsColumnNames = progressReportsTableInfo.map(col => col.name);
+        const needsAmountColumn = !progressReportsColumnNames.includes('amount');
+        
+        if (!targetsTableExists || needsAmountColumn) {
+          console.log('Running targets system migration...');
+          const targetsSQL = fs.readFileSync(targetsPath, 'utf8');
+          const targetsStatements = targetsSQL.split(';').filter(s => s.trim().length > 0);
+          for (const statement of targetsStatements) {
+            if (statement.trim()) {
+              try {
+                await db.run(statement);
+              } catch (stmtError) {
+                // Ignore errors for columns/tables that already exist
+                if (!stmtError.message.includes('already exists') && 
+                    !stmtError.message.includes('duplicate column')) {
+                  console.error('Error executing targets migration statement:', stmtError.message);
+                }
+              }
+            }
+          }
+          console.log('✓ Targets system migration completed');
+        }
+      }
+      
+      // Run staff enhancements migration
+      if (fs.existsSync(staffEnhancementsPath)) {
+        const tableInfo = await db.all("PRAGMA table_info(staff)");
+        const columnNames = tableInfo.map(col => col.name);
+        const needsMigration = !columnNames.includes('date_of_birth') || 
+                              !columnNames.includes('place_of_birth') ||
+                              !columnNames.includes('nationality');
+        
+        if (needsMigration) {
+          console.log('Running staff enhancements migration...');
+          const staffSQL = fs.readFileSync(staffEnhancementsPath, 'utf8');
+          const staffStatements = staffSQL.split(';').filter(s => s.trim().length > 0);
+          for (const statement of staffStatements) {
+            if (statement.trim()) {
+              try {
+                await db.run(statement);
+              } catch (stmtError) {
+                // Ignore errors for columns that already exist
+                if (!stmtError.message.includes('duplicate column') && 
+                    !stmtError.message.includes('already exists')) {
+                  console.error('Error executing staff enhancement statement:', stmtError.message);
+                }
+              }
+            }
+          }
+          console.log('✓ Staff enhancements migration completed');
+        }
+      }
+      
+      // Run department head fields migration
+      if (fs.existsSync(departmentHeadFieldsPath)) {
+        const departmentsTableExists = await db.get("SELECT name FROM sqlite_master WHERE type='table' AND name='departments'");
+        if (departmentsTableExists) {
+          const departmentsTableInfo = await db.all("PRAGMA table_info(departments)");
+          const departmentsColumnNames = departmentsTableInfo.map(col => col.name);
+          const needsMigration = !departmentsColumnNames.includes('head_name') || 
+                                !departmentsColumnNames.includes('head_email') ||
+                                !departmentsColumnNames.includes('head_phone');
+          
+          if (needsMigration) {
+            console.log('Adding head_name, head_email, and head_phone columns to departments table...');
+            const deptHeadSQL = fs.readFileSync(departmentHeadFieldsPath, 'utf8');
+            const deptHeadStatements = deptHeadSQL.split(';').filter(s => s.trim().length > 0);
+            for (const statement of deptHeadStatements) {
+              if (statement.trim()) {
+                try {
+                  await db.run(statement);
+                } catch (stmtError) {
+                  // Ignore errors for columns that already exist
+                  if (!stmtError.message.includes('duplicate column') && 
+                      !stmtError.message.includes('already exists')) {
+                    console.error('Error executing department head fields migration statement:', stmtError.message);
+                  }
+                }
+              }
+            }
+            console.log('✓ Department head fields migration completed');
+          }
+        }
+      }
     } else {
       console.log('Database already initialized');
       

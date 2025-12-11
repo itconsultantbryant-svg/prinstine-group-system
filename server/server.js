@@ -971,6 +971,29 @@ app.use('/api/payroll', require('./routes/payroll'));
 app.use('/api/student-payments', require('./routes/studentPayments'));
 app.use('/api/finance', require('./routes/finance'));
 
+// Root route - API information
+app.get('/', (req, res) => {
+  res.status(200).json({
+    message: 'Prinstine Management System API',
+    version: '1.0.0',
+    status: 'running',
+    timestamp: new Date().toISOString(),
+    endpoints: {
+      health: '/api/health',
+      auth: '/api/auth',
+      users: '/api/users',
+      dashboard: '/api/dashboard',
+      departments: '/api/departments',
+      reports: '/api/department-reports',
+      attendance: '/api/attendance',
+      requisitions: '/api/requisitions',
+      targets: '/api/targets',
+      notifications: '/api/notifications'
+    },
+    documentation: 'All API routes are under /api/*'
+  });
+});
+
 // Health check - MUST be before 404 handler
 app.get('/api/health', (req, res) => {
   console.log('=== HEALTH CHECK HIT ===');

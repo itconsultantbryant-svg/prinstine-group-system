@@ -52,3 +52,18 @@ coverage/
 *.pem
 *.key
 
+# Uploads (exclude large files)
+uploads/certificates/
+uploads/claims/
+uploads/communications/
+uploads/profile-*.png
+uploads/profile-*.jpg
+uploads/profile-*.jpeg
+uploads/proposals/
+uploads/requisitions/
+uploads/*.png
+uploads/*.jpg
+uploads/*.jpeg
+uploads/*.docx
+uploads/*.pdf
+

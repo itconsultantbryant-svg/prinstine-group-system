@@ -330,7 +330,27 @@ router.post('/', authenticateToken, requireRole('Admin', 'DepartmentHead', 'Staf
     });
   } catch (error) {
     console.error('Create progress report error:', error);
-    res.status(500).json({ error: 'Failed to create progress report' });
+    console.error('Error details:', {
+      message: error.message,
+      code: error.code,
+      errno: error.errno,
+      sql: error.sql
+    });
+    
+    // Handle specific database errors
+    let errorMessage = 'Failed to create progress report';
+    if (error.message && error.message.includes('FOREIGN KEY constraint')) {
+      errorMessage = 'Foreign key constraint failed. Please ensure department and user exist.';
+    } else if (error.message && error.message.includes('NOT NULL constraint')) {
+      errorMessage = 'Required fields are missing.';
+    } else if (error.message) {
+      errorMessage = error.message;
+    }
+    
+    res.status(500).json({ 
+      error: errorMessage,
+      details: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
   }
 });
 

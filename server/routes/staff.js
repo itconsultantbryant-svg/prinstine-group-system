@@ -284,11 +284,25 @@ router.post('/', authenticateToken, requireRole('Admin'), [
       message: error.message,
       code: error.code,
       errno: error.errno,
+      sql: error.sql,
       stack: error.stack?.split('\n').slice(0, 5).join('\n')
     });
+    
+    // Handle specific database errors
+    let errorMessage = 'Failed to create staff member';
+    if (error.message && error.message.includes('FOREIGN KEY constraint')) {
+      errorMessage = 'Foreign key constraint failed. Please ensure the department exists.';
+    } else if (error.message && error.message.includes('UNIQUE constraint')) {
+      errorMessage = 'A staff member or user with this email already exists.';
+    } else if (error.message && error.message.includes('NOT NULL constraint')) {
+      errorMessage = 'Required fields are missing.';
+    } else if (error.message) {
+      errorMessage = error.message;
+    }
+    
     res.status(500).json({ 
-      error: 'Failed to create staff member: ' + error.message,
-      details: process.env.NODE_ENV === 'development' ? error.stack?.split('\n').slice(0, 3).join('\n') : undefined
+      error: errorMessage,
+      details: process.env.NODE_ENV === 'development' ? error.message : undefined
     });
   }
 });

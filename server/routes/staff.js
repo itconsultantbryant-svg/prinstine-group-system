@@ -231,30 +231,52 @@ router.post('/', authenticateToken, requireRole('Admin'), [
       referencesData = null;
     }
 
-    // Create staff record with all new fields
-    // Note: 'references' is a reserved keyword in SQL, so we need to escape it with square brackets for SQLite
+    // Check which columns exist in staff table
+    const staffTableInfo = await db.all("PRAGMA table_info(staff)");
+    const staffColumnNames = staffTableInfo.map(col => col.name);
+    const hasEnhancedFields = staffColumnNames.includes('date_of_birth') && 
+                              staffColumnNames.includes('place_of_birth') &&
+                              staffColumnNames.includes('nationality');
+    
+    // Create staff record - use appropriate columns based on what exists
     let staffResult;
     try {
-      staffResult = await db.run(
-        `INSERT INTO staff (user_id, staff_id, employment_type, position, department, employment_date,
-          base_salary, bonus_structure, emergency_contact_name, emergency_contact_phone, address,
-          date_of_birth, place_of_birth, nationality, gender, marital_status, national_id, tax_id,
-          bank_name, bank_account_number, bank_branch, next_of_kin_name, next_of_kin_relationship,
-          next_of_kin_phone, next_of_kin_address, qualifications, previous_employment, [references], notes)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [
-          userResult.lastID, staffId, employment_type, position, department,
-          employment_date || new Date().toISOString().split('T')[0],
-          baseSalaryValue, bonus_structure || null, emergency_contact_name || null,
-          emergency_contact_phone || null, address || null,
-          date_of_birth || null, place_of_birth || null, nationality || null,
-          gender || null, marital_status || null, national_id || null, tax_id || null,
-          bank_name || null, bank_account_number || null, bank_branch || null,
-          next_of_kin_name || null, next_of_kin_relationship || null,
-          next_of_kin_phone || null, next_of_kin_address || null,
-          qualificationsData, previousEmploymentData, referencesData, notes || null
-        ]
-      );
+      if (hasEnhancedFields) {
+        // Use all enhanced fields if they exist
+        staffResult = await db.run(
+          `INSERT INTO staff (user_id, staff_id, employment_type, position, department, employment_date,
+            base_salary, bonus_structure, emergency_contact_name, emergency_contact_phone, address,
+            date_of_birth, place_of_birth, nationality, gender, marital_status, national_id, tax_id,
+            bank_name, bank_account_number, bank_branch, next_of_kin_name, next_of_kin_relationship,
+            next_of_kin_phone, next_of_kin_address, qualifications, previous_employment, [references], notes)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [
+            userResult.lastID, staffId, employment_type, position, department,
+            employment_date || new Date().toISOString().split('T')[0],
+            baseSalaryValue, bonus_structure || null, emergency_contact_name || null,
+            emergency_contact_phone || null, address || null,
+            date_of_birth || null, place_of_birth || null, nationality || null,
+            gender || null, marital_status || null, national_id || null, tax_id || null,
+            bank_name || null, bank_account_number || null, bank_branch || null,
+            next_of_kin_name || null, next_of_kin_relationship || null,
+            next_of_kin_phone || null, next_of_kin_address || null,
+            qualificationsData, previousEmploymentData, referencesData, notes || null
+          ]
+        );
+      } else {
+        // Fallback to basic fields only if enhanced fields don't exist
+        staffResult = await db.run(
+          `INSERT INTO staff (user_id, staff_id, employment_type, position, department, employment_date,
+            base_salary, bonus_structure, emergency_contact_name, emergency_contact_phone, address)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [
+            userResult.lastID, staffId, employment_type, position, department,
+            employment_date || new Date().toISOString().split('T')[0],
+            baseSalaryValue, bonus_structure || null, emergency_contact_name || null,
+            emergency_contact_phone || null, address || null
+          ]
+        );
+      }
 
       // Force checkpoint to ensure data is persisted immediately
       if (db.db) {
@@ -355,7 +377,11 @@ router.put('/:id', authenticateToken, requireRole('Admin'), async (req, res) => 
       }
     }
 
-    // Update staff info
+    // Check which columns exist in staff table
+    const staffTableInfo = await db.all("PRAGMA table_info(staff)");
+    const staffColumnNames = staffTableInfo.map(col => col.name);
+    
+    // Update staff info - only update fields that exist in the table
     const staffUpdates = [];
     const staffParams = [];
     const allowedFields = [
@@ -368,6 +394,14 @@ router.put('/:id', authenticateToken, requireRole('Admin'), async (req, res) => 
     ];
 
     allowedFields.forEach(field => {
+      // Only include field if column exists in table
+      if (!staffColumnNames.includes(field) && field !== 'references') {
+        // Check for references column (it's escaped as [references])
+        if (field === 'references' && !staffColumnNames.includes('[references]')) {
+          return; // Skip if references column doesn't exist
+        }
+        return; // Skip if column doesn't exist
+      }
       if (updates[field] !== undefined) {
         // Handle JSON fields
         let value = updates[field];

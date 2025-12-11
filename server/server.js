@@ -1237,6 +1237,49 @@ async function initializeDatabase() {
       } else {
         console.warn('⚠ Admin user not found in database!');
       }
+      
+      // FINAL CHECK: Ensure all critical tables exist (runs after both if and else blocks)
+      console.log('\n=== Running final table verification ===');
+      const requiredTables = [
+        { name: 'staff_attendance', path: staffAttendancePath },
+        { name: 'requisitions', path: requisitionsPath },
+        { name: 'meetings', path: meetingsPath },
+        { name: 'archived_documents', path: archivedDocumentsPath },
+        { name: 'targets', path: targetsPath }
+      ];
+      
+      for (const table of requiredTables) {
+        const tableExists = await db.get(`SELECT name FROM sqlite_master WHERE type='table' AND name=?`, [table.name]);
+        if (!tableExists) {
+          console.log(`⚠️ Table ${table.name} does not exist. Attempting to create...`);
+          if (fs.existsSync(table.path)) {
+            try {
+              const migrationSQL = fs.readFileSync(table.path, 'utf8');
+              const statements = migrationSQL.split(';').filter(s => s.trim().length > 0);
+              for (const statement of statements) {
+                if (statement.trim()) {
+                  try {
+                    await db.run(statement);
+                  } catch (stmtError) {
+                    if (!stmtError.message.includes('already exists') && 
+                        !stmtError.message.includes('duplicate column')) {
+                      console.error(`Error creating ${table.name}:`, stmtError.message);
+                    }
+                  }
+                }
+              }
+              console.log(`✓ ${table.name} table created`);
+            } catch (error) {
+              console.error(`Failed to create ${table.name} table:`, error.message);
+            }
+          } else {
+            console.error(`⚠️ Migration file not found for ${table.name}:`, table.path);
+          }
+        } else {
+          console.log(`✓ ${table.name} table exists`);
+        }
+      }
+      console.log('=== Table verification complete ===\n');
     }
   } catch (error) {
     console.error('Database initialization error:', error);

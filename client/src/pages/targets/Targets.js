@@ -149,9 +149,12 @@ const Targets = () => {
   const fetchTargetProgress = async (targetId) => {
     try {
       const response = await api.get(`/targets/${targetId}/progress`);
-      setTargetProgress(response.data.progress || []);
+      // Handle different response formats
+      const progressData = response.data?.progress || response.data || [];
+      setTargetProgress(Array.isArray(progressData) ? progressData : []);
     } catch (err) {
       console.error('Error fetching target progress:', err);
+      setTargetProgress([]);
     }
   };
 
@@ -170,10 +173,13 @@ const Targets = () => {
         period_end: '',
         notes: ''
       });
-      // Refresh targets list immediately
-      await fetchTargets();
+      // Refresh all data immediately
+      await Promise.all([
+        fetchTargets(),
+        fetchSharingHistory()
+      ]);
       
-      // Emit socket event for real-time update
+      // Emit socket event for real-time update (backend already emits, but this ensures it)
       const socket = getSocket();
       if (socket) {
         socket.emit('target_created');
@@ -199,13 +205,16 @@ const Targets = () => {
       await api.put(`/targets/${selectedTarget.id}`, editForm);
       setShowEditModal(false);
       setSelectedTarget(null);
-      // Refresh targets list immediately
-      await fetchTargets();
+      // Refresh all data immediately
+      await Promise.all([
+        fetchTargets(),
+        fetchSharingHistory()
+      ]);
       
       // Emit socket event for real-time update
       const socket = getSocket();
       if (socket) {
-        socket.emit('target_created');
+        socket.emit('target_updated');
       }
     } catch (err) {
       setError(err.response?.data?.error || 'Failed to update target');
@@ -247,11 +256,13 @@ const Targets = () => {
         reason: ''
       });
       setAvailableAmount(0);
-      // Refresh targets list immediately
-      await fetchTargets();
-      await fetchSharingHistory();
+      // Refresh all data immediately
+      await Promise.all([
+        fetchTargets(),
+        fetchSharingHistory()
+      ]);
       
-      // Emit socket event for real-time update
+      // Emit socket event for real-time update (backend already emits, but this ensures it)
       const socket = getSocket();
       if (socket) {
         socket.emit('fund_shared');
@@ -287,8 +298,11 @@ const Targets = () => {
         additional_amount: '',
         period_end: ''
       });
-      // Refresh targets list immediately
-      await fetchTargets();
+      // Refresh all data immediately
+      await Promise.all([
+        fetchTargets(),
+        fetchSharingHistory()
+      ]);
       
       // Emit socket event for real-time update
       const socket = getSocket();

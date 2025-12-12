@@ -219,6 +219,19 @@ if (USE_POSTGRESQL) {
     const PostgreSQLDatabase = require('./database-postgres');
     dbInstance = PostgreSQLDatabase;
     console.log('✓ PostgreSQL database module loaded');
+    
+    // Test connection and fallback to SQLite if it fails
+    dbInstance.connect().catch((error) => {
+      console.error('\n❌ PostgreSQL connection failed!');
+      console.error('Error:', error.message);
+      console.error('\n⚠️  Falling back to SQLite for now.');
+      console.error('⚠️  Note: Data will NOT persist on Render free tier with SQLite.');
+      console.error('⚠️  Please fix DATABASE_URL and redeploy to use PostgreSQL.\n');
+      
+      // Fallback to SQLite
+      dbInstance = new Database();
+      console.log('Using SQLite database as fallback');
+    });
   } catch (error) {
     console.error('Failed to load PostgreSQL module:', error.message);
     console.error('Falling back to SQLite. Make sure pg package is installed: npm install pg');

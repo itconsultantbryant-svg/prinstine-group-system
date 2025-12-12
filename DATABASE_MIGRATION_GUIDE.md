@@ -13,17 +13,32 @@ PostgreSQL on Render's free tier provides **persistent storage** that survives r
 
 ### Step 1: Create PostgreSQL Database on Render
 
+**If you don't see "PostgreSQL" option:**
+- Make sure you're logged in to Render
+- Refresh the page
+- Check you're on the main dashboard (not a team view)
+- Free tier allows 1 PostgreSQL database - if you have one, delete it first or upgrade
+
+**To create the database:**
+
 1. Go to your Render dashboard: https://dashboard.render.com
-2. Click **"New +"** → **"PostgreSQL"**
-3. Configure:
+2. Click **"New +"** button (top right corner)
+3. From the dropdown, select **"PostgreSQL"**
+   - If you don't see this option, see troubleshooting below
+4. Configure:
    - **Name**: `prinstine-db` (or your preferred name)
    - **Database**: `prinstine_db`
-   - **User**: `prinstine_user` (auto-generated)
-   - **Region**: Choose closest to your backend
-   - **PostgreSQL Version**: 15 or 16
+   - **User**: Leave as default (auto-generated)
+   - **Region**: **IMPORTANT** - Choose the **SAME region** as your backend service
+     - If backend is in Oregon, choose Oregon
+     - If backend is in Ohio, choose Ohio
+   - **PostgreSQL Version**: 15 or 16 (latest stable)
    - **Plan**: **Free** (512 MB RAM, shared CPU)
-4. Click **"Create Database"**
-5. Wait for it to provision (1-2 minutes)
+5. Click **"Create Database"**
+6. Wait for it to provision (1-2 minutes)
+7. Status will show "Available" when ready
+
+**See `CREATE_POSTGRESQL_ON_RENDER.md` for detailed step-by-step guide with screenshots.**
 
 ### Step 2: Get Connection String
 

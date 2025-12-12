@@ -15,11 +15,46 @@ class PostgreSQLDatabase {
       }
 
       try {
-        // Parse and fix the connection string if needed
-        let connectionString = process.env.DATABASE_URL;
+        // Parse and validate the connection string
+        let connectionString = process.env.DATABASE_URL.trim();
         
-        // If the URL contains an IPv6 address, try to convert to IPv4 or use hostname
-        // Render internal URLs should use the hostname, not IP addresses
+        // Validate URL format
+        if (!connectionString.startsWith('postgresql://') && !connectionString.startsWith('postgres://')) {
+          console.error('\n❌ Invalid DATABASE_URL format!');
+          console.error('URL must start with postgresql:// or postgres://');
+          console.error('Current value:', connectionString.substring(0, 50) + '...');
+          reject(new Error('Invalid DATABASE_URL format. Must start with postgresql://'));
+          return;
+        }
+        
+        // Parse URL to validate components
+        try {
+          const url = new URL(connectionString);
+          if (!url.hostname || url.hostname === 'base' || url.hostname.length < 3) {
+            console.error('\n❌ Invalid DATABASE_URL hostname!');
+            console.error('Hostname is missing or invalid:', url.hostname);
+            console.error('Make sure you copied the COMPLETE Internal Database URL from Render');
+            console.error('It should look like: postgresql://user:pass@dpg-xxxxx-a.region-postgres.render.com:5432/dbname');
+            reject(new Error('Invalid DATABASE_URL hostname. Check that you copied the complete URL.'));
+            return;
+          }
+          
+          if (!url.port || url.port !== '5432') {
+            console.warn('⚠️  Unexpected port in DATABASE_URL. Expected 5432, got:', url.port);
+          }
+          
+          console.log('✓ DATABASE_URL format validated');
+          console.log('  Hostname:', url.hostname);
+          console.log('  Database:', url.pathname.replace('/', ''));
+        } catch (urlError) {
+          console.error('\n❌ Failed to parse DATABASE_URL!');
+          console.error('Error:', urlError.message);
+          console.error('Make sure the URL is complete and properly formatted');
+          reject(new Error('Invalid DATABASE_URL format: ' + urlError.message));
+          return;
+        }
+        
+        // If the URL contains an IPv6 address, warn user
         if (connectionString.includes('[') || connectionString.match(/:\/\/([0-9a-f:]+):/i)) {
           console.warn('⚠️  IPv6 address detected in DATABASE_URL. This may cause connection issues.');
           console.warn('⚠️  Make sure you are using the INTERNAL Database URL from Render, not External.');
@@ -46,13 +81,30 @@ class PostgreSQLDatabase {
               console.error('Error code:', err.code);
               
               // Provide helpful error messages
-              if (err.code === 'ENETUNREACH' || err.code === 'ECONNREFUSED') {
-                console.error('\n❌ Connection failed! Common issues:');
-                console.error('1. Make sure you are using the INTERNAL Database URL from Render');
-                console.error('2. The Internal URL should look like: postgresql://user:pass@hostname:5432/dbname');
-                console.error('3. Do NOT use the External Database URL');
-                console.error('4. Verify the database service is running on Render');
-                console.error('5. Check that both services are in the same region\n');
+              if (err.code === 'ENETUNREACH' || err.code === 'ECONNREFUSED' || err.code === 'ENOTFOUND') {
+                console.error('\n❌ PostgreSQL Connection Failed!');
+                console.error('Error code:', err.code);
+                console.error('Error message:', err.message);
+                console.error('\n📋 Common Issues & Solutions:');
+                console.error('1. ❌ DATABASE_URL is malformed or incomplete');
+                console.error('   ✅ Fix: Copy the COMPLETE Internal Database URL from Render');
+                console.error('   ✅ It should look like: postgresql://user:pass@dpg-xxxxx-a.region-postgres.render.com:5432/dbname');
+                console.error('');
+                console.error('2. ❌ Using External Database URL instead of Internal');
+                console.error('   ✅ Fix: Use the "Internal Database URL" (NOT External)');
+                console.error('');
+                console.error('3. ❌ URL was truncated or partially copied');
+                console.error('   ✅ Fix: Make sure you copied the ENTIRE URL, including:');
+                console.error('      - postgresql:// prefix');
+                console.error('      - username:password');
+                console.error('      - @hostname:5432');
+                console.error('      - /database_name');
+                console.error('');
+                console.error('4. ❌ Database service not running');
+                console.error('   ✅ Fix: Check Render dashboard - database should show "Available"');
+                console.error('');
+                console.error('5. ❌ Services in different regions');
+                console.error('   ✅ Fix: Ensure backend and database are in the SAME region\n');
               }
               
               // Retry logic for transient errors

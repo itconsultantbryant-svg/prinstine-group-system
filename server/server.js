@@ -139,8 +139,25 @@ async function initializeDatabase() {
     const dbPath = process.env.DB_PATH || path.resolve(__dirname, '../../database/pms.db');
     console.log('Using database path:', dbPath);
 
-    await db.connect();
-    console.log('Database connected successfully');
+    try {
+      await db.connect();
+      console.log('Database connected successfully');
+    } catch (dbError) {
+      // If PostgreSQL connection fails, provide helpful error and exit
+      if (process.env.DATABASE_URL) {
+        console.error('\n❌ Database connection failed!');
+        console.error('The system cannot start without a valid database connection.');
+        console.error('\n💡 Quick Fix:');
+        console.error('1. Go to Render Dashboard → Your PostgreSQL Database');
+        console.error('2. Copy the "Internal Database URL" (complete URL)');
+        console.error('3. Go to Backend Service → Environment → Update DATABASE_URL');
+        console.error('4. Save and redeploy\n');
+        throw dbError; // Exit with error so user knows to fix it
+      } else {
+        // SQLite connection failure
+        throw dbError;
+      }
+    }
 
     // Check if database is empty (no users table or no data)
     const tables = await db.all("SELECT name FROM sqlite_master WHERE type='table' AND name='users'");

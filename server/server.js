@@ -230,8 +230,11 @@ async function initializeDatabase() {
         }
         console.log('Seed data loaded');
         
-        // Verify admin user was created
-        const adminUser = await db.get('SELECT id, email, role FROM users WHERE email = ?', ['admin@prinstine.com']);
+        // Verify admin user was created (check both emails)
+        let adminUser = await db.get('SELECT id, email, role FROM users WHERE email = ?', ['admin@prinstinegroup.org']);
+        if (!adminUser) {
+          adminUser = await db.get('SELECT id, email, role FROM users WHERE email = ?', ['admin@prinstine.com']);
+        }
         if (adminUser) {
           console.log('✓ Admin user created successfully:', adminUser.email);
         } else {

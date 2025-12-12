@@ -49,8 +49,8 @@ router.get('/', authenticateToken, async (req, res) => {
       let dept;
       if (hasHeadEmail) {
         dept = await db.get(
-          'SELECT id, name FROM departments WHERE manager_id = ? OR LOWER(head_email) = ?',
-          [req.user.id, req.user.email.toLowerCase()]
+          'SELECT id, name FROM departments WHERE manager_id = ? OR LOWER(TRIM(head_email)) = ?',
+          [req.user.id, req.user.email.toLowerCase().trim()]
         );
       } else {
         // Fallback to manager_id only if head_email doesn't exist
@@ -59,7 +59,12 @@ router.get('/', authenticateToken, async (req, res) => {
           [req.user.id]
         );
       }
-      if (dept) {
+      
+      // Check if this is Finance Head - they can see all staff and department heads
+      if (dept && dept.name.toLowerCase().includes('finance')) {
+        // Finance Head can see all staff and department heads
+        // We'll add department heads after the main query
+      } else if (dept) {
         query += ' AND s.department = ?';
         params.push(dept.name);
       } else {
@@ -78,6 +83,46 @@ router.get('/', authenticateToken, async (req, res) => {
     query += ' ORDER BY s.created_at DESC';
 
     const staff = await db.all(query, params);
+    
+    // If Admin or Finance Head, also include Department Heads who don't have staff records
+    if (req.user.role === 'Admin' || 
+        (req.user.role === 'DepartmentHead' && 
+         req.user.email && req.user.email.toLowerCase().includes('finance'))) {
+      try {
+        const deptHeadsQuery = `
+          SELECT 
+            NULL as id,
+            u.id as user_id,
+            'DEPT-' || u.id as staff_id,
+            'Full-time' as employment_type,
+            d.name as position,
+            d.name as department,
+            NULL as employment_date,
+            NULL as base_salary,
+            NULL as bonus_structure,
+            NULL as emergency_contact_name,
+            NULL as emergency_contact_phone,
+            NULL as address,
+            u.created_at as created_at,
+            u.updated_at as updated_at,
+            u.name,
+            u.email,
+            u.phone,
+            u.profile_image,
+            u.is_active
+          FROM users u
+          LEFT JOIN departments d ON (d.manager_id = u.id OR LOWER(TRIM(d.head_email)) = LOWER(TRIM(u.email)))
+          WHERE u.role = 'DepartmentHead'
+          AND NOT EXISTS (SELECT 1 FROM staff s WHERE s.user_id = u.id)
+        `;
+        const deptHeads = await db.all(deptHeadsQuery);
+        staff.push(...deptHeads);
+      } catch (error) {
+        console.error('Error fetching department heads for payroll:', error);
+        // Continue without department heads if there's an error
+      }
+    }
+    
     res.json({ staff });
   } catch (error) {
     console.error('Get staff error:', error);

@@ -160,7 +160,7 @@ class PostgreSQLDatabase {
 
     try {
       // Convert SQLite syntax to PostgreSQL
-      const pgSql = this.convertSQLiteToPostgres(sql);
+      const pgSql = this.convertSQLiteToPostgres(sql, params);
       const result = await this.pool.query(pgSql, params);
       return result.rows;
     } catch (err) {
@@ -204,7 +204,7 @@ class PostgreSQLDatabase {
     }
 
     try {
-      const pgSql = this.convertSQLiteToPostgres(sql);
+      const pgSql = this.convertSQLiteToPostgres(sql, params);
       
       // Log the converted SQL for debugging (first 300 chars)
       if (sql.toUpperCase().includes('CREATE TABLE') || sql.toUpperCase().includes('INSERT')) {
@@ -229,19 +229,26 @@ class PostgreSQLDatabase {
     } catch (err) {
       console.error('❌ Database run() error:', err.message);
       console.error('📝 Original SQL (first 200):', sql.substring(0, 200));
-      console.error('📝 Converted SQL (first 200):', this.convertSQLiteToPostgres(sql).substring(0, 200));
+      console.error('📝 Converted SQL (first 200):', this.convertSQLiteToPostgres(sql, params).substring(0, 200));
       console.error('📝 Params:', params);
       throw err;
     }
   }
 
   // Convert SQLite syntax to PostgreSQL
-  convertSQLiteToPostgres(sql) {
+  convertSQLiteToPostgres(sql, params = []) {
     let pgSql = sql.trim();
     
     // Skip empty statements
     if (!pgSql || pgSql.length < 10) {
       return pgSql;
+    }
+
+    // Convert SQLite parameter placeholders (?) to PostgreSQL ($1, $2, etc.)
+    // This must be done FIRST before any other conversions
+    if (pgSql.includes('?')) {
+      let paramIndex = 1;
+      pgSql = pgSql.replace(/\?/g, () => `$${paramIndex++}`);
     }
 
     // Convert sqlite_master queries FIRST (before other conversions)

@@ -1218,15 +1218,37 @@ async function initializeDatabase() {
         console.log('✓ Departments table created');
       } else {
         // Add new columns if they don't exist
-        try {
-          await db.run('ALTER TABLE departments ADD COLUMN head_name TEXT');
-        } catch (e) { /* Column may already exist */ }
-        try {
-          await db.run('ALTER TABLE departments ADD COLUMN head_phone TEXT');
-        } catch (e) { /* Column may already exist */ }
-        try {
-          await db.run('ALTER TABLE departments ADD COLUMN head_email TEXT');
-        } catch (e) { /* Column may already exist */ }
+        // Check if columns exist first (PostgreSQL doesn't support IF NOT EXISTS for ALTER TABLE)
+        const deptColumns = await db.all("SELECT column_name FROM information_schema.columns WHERE table_name = 'departments' AND table_schema = 'public'");
+        const deptColumnNames = deptColumns.map(col => col.column_name);
+        
+        if (!deptColumnNames.includes('head_name')) {
+          try {
+            await db.run('ALTER TABLE departments ADD COLUMN head_name TEXT');
+          } catch (e) {
+            if (!e.message.includes('already exists')) {
+              console.error('Error adding head_name column:', e.message);
+            }
+          }
+        }
+        if (!deptColumnNames.includes('head_phone')) {
+          try {
+            await db.run('ALTER TABLE departments ADD COLUMN head_phone TEXT');
+          } catch (e) {
+            if (!e.message.includes('already exists')) {
+              console.error('Error adding head_phone column:', e.message);
+            }
+          }
+        }
+        if (!deptColumnNames.includes('head_email')) {
+          try {
+            await db.run('ALTER TABLE departments ADD COLUMN head_email TEXT');
+          } catch (e) {
+            if (!e.message.includes('already exists')) {
+              console.error('Error adding head_email column:', e.message);
+            }
+          }
+        }
         try {
           // Add unique constraint separately if needed
           await db.run('CREATE UNIQUE INDEX IF NOT EXISTS idx_departments_head_email ON departments(head_email) WHERE head_email IS NOT NULL');

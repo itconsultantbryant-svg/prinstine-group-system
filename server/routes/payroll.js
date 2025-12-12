@@ -186,6 +186,16 @@ router.post('/', authenticateToken, requireRole('DepartmentHead', 'Admin'), [
 
     await logAction(req.user.id, 'create_payroll', 'payroll_records', result.lastID, { staff_id }, req);
 
+    // Emit real-time update
+    if (global.io) {
+      global.io.emit('payroll_created', {
+        id: result.lastID,
+        user_id: targetUserId,
+        staff_id: targetStaffId,
+        created_by: req.user.name
+      });
+    }
+
     res.status(201).json({
       message: 'Payroll record created successfully',
       record: { id: result.lastID }
@@ -460,6 +470,14 @@ router.delete('/:id', authenticateToken, requireRole('DepartmentHead', 'Admin'),
     await db.run('DELETE FROM payroll_records WHERE id = ?', [req.params.id]);
 
     await logAction(req.user.id, 'delete_payroll', 'payroll_records', req.params.id, {}, req);
+
+    // Emit real-time update
+    if (global.io) {
+      global.io.emit('payroll_deleted', {
+        id: req.params.id,
+        deleted_by: req.user.name
+      });
+    }
 
     res.json({ message: 'Payroll record deleted successfully' });
   } catch (error) {

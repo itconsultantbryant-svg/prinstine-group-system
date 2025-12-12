@@ -45,7 +45,19 @@ const PublicVerification = () => {
 
   const handleDownload = async (format) => {
     try {
-      const response = await fetch(`http://localhost:3002/api/certificates/public/${certificate.id}/download/${format}`);
+      // Use the API base URL from environment or default
+      const apiBaseUrl = process.env.REACT_APP_API_URL || 'http://localhost:3006/api';
+      // Remove /api from the end if present, then add it back
+      const baseUrl = apiBaseUrl.endsWith('/api') ? apiBaseUrl : `${apiBaseUrl}/api`;
+      const downloadUrl = `${baseUrl}/certificates/public/${certificate.id}/download/${format}`;
+      
+      const response = await fetch(downloadUrl, {
+        method: 'GET',
+        headers: {
+          'Accept': `image/${format}`
+        }
+      });
+      
       if (!response.ok) throw new Error('Download failed');
       
       const blob = await response.blob();
@@ -59,7 +71,7 @@ const PublicVerification = () => {
       window.URL.revokeObjectURL(url);
     } catch (error) {
       console.error('Download error:', error);
-      alert('Failed to download certificate');
+      alert('Failed to download certificate. Please try again.');
     }
   };
 

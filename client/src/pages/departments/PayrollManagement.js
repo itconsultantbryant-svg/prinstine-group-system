@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import api from '../../config/api';
 import { useAuth } from '../../hooks/useAuth';
+import { getSocket } from '../../config/socket';
 
 const PayrollManagement = () => {
   const { user } = useAuth();
@@ -28,6 +29,32 @@ const PayrollManagement = () => {
   useEffect(() => {
     fetchPayrollRecords();
     fetchStaffMembers();
+
+    // Set up real-time socket connection for payroll updates
+    const socket = getSocket();
+    if (socket) {
+      const handlePayrollCreated = () => {
+        fetchPayrollRecords();
+      };
+
+      const handlePayrollUpdated = () => {
+        fetchPayrollRecords();
+      };
+
+      const handlePayrollDeleted = () => {
+        fetchPayrollRecords();
+      };
+
+      socket.on('payroll_created', handlePayrollCreated);
+      socket.on('payroll_updated', handlePayrollUpdated);
+      socket.on('payroll_deleted', handlePayrollDeleted);
+
+      return () => {
+        socket.off('payroll_created', handlePayrollCreated);
+        socket.off('payroll_updated', handlePayrollUpdated);
+        socket.off('payroll_deleted', handlePayrollDeleted);
+      };
+    }
   }, []);
 
   const fetchPayrollRecords = async () => {
@@ -115,7 +142,16 @@ const PayrollManagement = () => {
         other_deductions: '0',
         notes: ''
       });
-      fetchPayrollRecords();
+      
+      // Refresh payroll records
+      await fetchPayrollRecords();
+      
+      // Emit socket event for real-time update
+      const socket = getSocket();
+      if (socket) {
+        socket.emit(editingRecord ? 'payroll_updated' : 'payroll_created');
+      }
+      
       setTimeout(() => setSuccess(''), 3000);
     } catch (error) {
       setError(error.response?.data?.error || 'Failed to save payroll record');

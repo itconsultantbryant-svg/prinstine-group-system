@@ -23,14 +23,18 @@ const StaffManagement = () => {
   const fetchDepartments = async () => {
     try {
       const response = await api.get('/departments');
-      setDepartments(response.data.departments || []);
+      // Handle different response formats
+      const departments = response.data?.departments || response.data || [];
+      setDepartments(Array.isArray(departments) ? departments : []);
     } catch (error) {
       console.error('Error fetching departments:', error);
+      setDepartments([]);
     }
   };
 
   const fetchStaff = async () => {
     try {
+      setLoading(true);
       const params = new URLSearchParams();
       if (filters.department) params.append('department', filters.department);
       if (filters.employment_type) params.append('employment_type', filters.employment_type);

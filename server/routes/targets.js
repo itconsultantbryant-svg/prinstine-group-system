@@ -486,12 +486,12 @@ router.get('/fund-sharing/history', authenticateToken, async (req, res) => {
 
     let query = `
       SELECT fs.*,
-             from_user.name as from_user_name,
-             from_user.email as from_user_email,
-             to_user.name as to_user_name,
-             to_user.email as to_user_email,
-             reverser.name as reversed_by_name,
-             pr.name as progress_report_name
+             COALESCE(from_user.name, 'Unknown User') as from_user_name,
+             COALESCE(from_user.email, '') as from_user_email,
+             COALESCE(to_user.name, 'Unknown User') as to_user_name,
+             COALESCE(to_user.email, '') as to_user_email,
+             COALESCE(reverser.name, 'System') as reversed_by_name,
+             COALESCE(pr.name, 'Manual Entry') as progress_report_name
       FROM fund_sharing fs
       LEFT JOIN users from_user ON fs.from_user_id = from_user.id
       LEFT JOIN users to_user ON fs.to_user_id = to_user.id

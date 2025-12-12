@@ -305,15 +305,18 @@ class PostgreSQLDatabase {
     }
 
     // Convert INTEGER PRIMARY KEY AUTOINCREMENT to SERIAL PRIMARY KEY
-    // Must handle this before converting AUTOINCREMENT alone
-    // Pattern: INTEGER PRIMARY KEY AUTOINCREMENT -> SERIAL PRIMARY KEY
-    pgSql = pgSql.replace(/INTEGER\s+PRIMARY\s+KEY\s+AUTOINCREMENT/gi, 'SERIAL PRIMARY KEY');
+    // PostgreSQL doesn't support AUTOINCREMENT - use SERIAL instead
+    // Must handle patterns in correct order
     
-    // Also handle: id INTEGER PRIMARY KEY AUTOINCREMENT (with id column name)
+    // Pattern 1: id INTEGER PRIMARY KEY AUTOINCREMENT -> id SERIAL PRIMARY KEY
+    // This must come first to match the full pattern with column name
     pgSql = pgSql.replace(/(\w+)\s+INTEGER\s+PRIMARY\s+KEY\s+AUTOINCREMENT/gi, '$1 SERIAL PRIMARY KEY');
     
-    // Convert remaining standalone AUTOINCREMENT - remove it (PostgreSQL uses SERIAL or sequences)
-    // But be careful - only remove if it's not already part of SERIAL
+    // Pattern 2: INTEGER PRIMARY KEY AUTOINCREMENT (without column name) -> SERIAL PRIMARY KEY
+    pgSql = pgSql.replace(/INTEGER\s+PRIMARY\s+KEY\s+AUTOINCREMENT/gi, 'SERIAL PRIMARY KEY');
+    
+    // Pattern 3: Remove any remaining standalone AUTOINCREMENT keywords
+    // PostgreSQL uses SERIAL or sequences, not AUTOINCREMENT
     pgSql = pgSql.replace(/\s+AUTOINCREMENT\b/gi, '');
 
     // Convert DATETIME to TIMESTAMP

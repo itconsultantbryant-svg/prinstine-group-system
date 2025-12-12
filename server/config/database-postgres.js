@@ -251,21 +251,39 @@ class PostgreSQLDatabase {
       pgSql = pgSql.replace(/\?/g, () => `$${paramIndex++}`);
     }
 
-    // Convert sqlite_master queries FIRST (before other conversions)
+    // Convert sqlite_master queries FIRST (before parameter conversion)
+    // But we need to handle parameters properly - check if there are parameters first
     if (pgSql.includes('sqlite_master')) {
-      // Convert: SELECT name FROM sqlite_master WHERE type='table' AND name='users'
+      // Convert: SELECT name FROM sqlite_master WHERE type='table' AND name=?
       if (pgSql.includes("type='table'") || pgSql.includes('type=\'table\'')) {
-        // Extract table name if present
-        const nameMatch = pgSql.match(/name\s*=\s*['"]?(\w+)['"]?/i);
-        if (nameMatch) {
-          const tableName = nameMatch[1];
-          pgSql = `SELECT table_name as name FROM information_schema.tables WHERE table_schema = 'public' AND table_name = '${tableName}'`;
+        // Check if there's a parameter placeholder (?)
+        if (pgSql.includes('name=?')) {
+          // Count how many ? placeholders exist before this point to determine the parameter number
+          const beforeName = pgSql.substring(0, pgSql.indexOf('name=?'));
+          const paramCount = (beforeName.match(/\?/g) || []).length;
+          const paramNum = paramCount + 1;
+          // Use parameter placeholder - will be converted to $1, $2, etc. later
+          pgSql = `SELECT table_name as name FROM information_schema.tables WHERE table_schema = 'public' AND table_name = $${paramNum}`;
         } else {
-          // Get all tables
-          pgSql = `SELECT table_name as name FROM information_schema.tables WHERE table_schema = 'public'`;
+          // Extract table name if it's a literal value
+          const nameMatch = pgSql.match(/name\s*=\s*['"]?(\w+)['"]?/i);
+          if (nameMatch) {
+            const tableName = nameMatch[1];
+            pgSql = `SELECT table_name as name FROM information_schema.tables WHERE table_schema = 'public' AND table_name = '${tableName}'`;
+          } else {
+            // Get all tables
+            pgSql = `SELECT table_name as name FROM information_schema.tables WHERE table_schema = 'public'`;
+          }
         }
         return pgSql;
       }
+    }
+
+    // Convert SQLite parameter placeholders (?) to PostgreSQL ($1, $2, etc.)
+    // This must be done AFTER sqlite_master conversion
+    if (pgSql.includes('?')) {
+      let paramIndex = 1;
+      pgSql = pgSql.replace(/\?/g, () => `$${paramIndex++}`);
     }
 
     // Convert PRAGMA table_info to PostgreSQL

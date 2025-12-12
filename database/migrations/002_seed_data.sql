@@ -2,8 +2,9 @@
 
 -- Insert default admin user (password: Admin@123)
 -- Password hash for 'Admin@123' using bcrypt
+-- Using admin@prinstinegroup.org as the admin email
 INSERT OR IGNORE INTO users (id, email, username, password_hash, role, name, is_active, email_verified) 
-VALUES (1, 'admin@prinstine.com', 'admin', '$2b$10$BakIGqdrzCUK6t9pQxFMBuvEkaQ4vJNMtos.PgjX8KLATZYPhs7dq', 'Admin', 'System Administrator', 1, 1);
+VALUES (1, 'admin@prinstinegroup.org', 'admin', '$2b$10$BakIGqdrzCUK6t9pQxFMBuvEkaQ4vJNMtos.PgjX8KLATZYPhs7dq', 'Admin', 'System Administrator', 1, 1);
 
 -- Insert default permissions for roles
 INSERT OR IGNORE INTO permissions (role, module, action, granted) VALUES

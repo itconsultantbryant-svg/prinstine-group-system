@@ -1326,8 +1326,39 @@ async function initializeDatabase() {
         }
       }
       
-      // Verify admin user exists
-      const adminUser = await db.get('SELECT id, email, role, is_active FROM users WHERE email = ?', ['admin@prinstine.com']);
+      // Verify admin user exists, create if missing
+      let adminUser = await db.get('SELECT id, email, role, is_active FROM users WHERE email = ?', ['admin@prinstinegroup.org']);
+      if (!adminUser) {
+        // Try the old email
+        adminUser = await db.get('SELECT id, email, role, is_active FROM users WHERE email = ?', ['admin@prinstine.com']);
+        if (adminUser) {
+          // Update to new email
+          await db.run('UPDATE users SET email = ? WHERE id = ?', ['admin@prinstinegroup.org', adminUser.id]);
+          console.log('✓ Admin email updated to admin@prinstinegroup.org');
+        }
+      }
+      
+      if (!adminUser) {
+        // Create admin user if it doesn't exist
+        console.log('Creating admin user...');
+        const bcrypt = require('bcrypt');
+        const passwordHash = await bcrypt.hash('Admin@123', 10);
+        
+        try {
+          const result = await db.run(
+            `INSERT INTO users (email, username, password_hash, role, name, is_active, email_verified)
+             VALUES (?, ?, ?, ?, ?, ?, ?)`,
+            ['admin@prinstinegroup.org', 'admin', passwordHash, 'Admin', 'System Administrator', 1, 1]
+          );
+          console.log('✓ Admin user created: admin@prinstinegroup.org');
+          
+          // Verify
+          adminUser = await db.get('SELECT id, email, role, is_active FROM users WHERE email = ?', ['admin@prinstinegroup.org']);
+        } catch (createError) {
+          console.error('Error creating admin user:', createError.message);
+        }
+      }
+      
       if (adminUser) {
         console.log('✓ Admin user found:', adminUser.email, '- Active:', adminUser.is_active);
       } else {

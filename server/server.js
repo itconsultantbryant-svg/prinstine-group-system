@@ -1588,12 +1588,6 @@ async function initializeDatabase() {
               await db.run(`CREATE INDEX IF NOT EXISTS idx_progress_reports_date ON progress_reports(date)`);
               await db.run(`CREATE INDEX IF NOT EXISTS idx_progress_reports_category ON progress_reports(category)`);
               await db.run(`CREATE INDEX IF NOT EXISTS idx_progress_reports_status ON progress_reports(status)`);
-              // Add amount column if it doesn't exist
-              try {
-                await db.run(`ALTER TABLE progress_reports ADD COLUMN amount DECIMAL(10, 2) DEFAULT 0`);
-              } catch (e) {
-                // Column may already exist
-              }
               console.log(`✓ ${table.name} table created directly`);
             } else if (table.name === 'department_reports') {
               await db.run(`
@@ -1766,6 +1760,25 @@ async function initializeDatabase() {
             if (!e.message.includes('duplicate column') && !e.message.includes('already exists')) {
               console.error(`Error adding '${col}' to courses:`, e.message);
             }
+          }
+        }
+      }
+    }
+    
+    // Check progress_reports table for amount column
+    const progressReportsTableCheck = await db.get("SELECT name FROM sqlite_master WHERE type='table' AND name='progress_reports'");
+    if (progressReportsTableCheck) {
+      const progressReportsInfo = await db.all("PRAGMA table_info(progress_reports)");
+      const progressReportsColumns = progressReportsInfo.map(col => col.name);
+      
+      if (!progressReportsColumns.includes('amount')) {
+        console.log('Adding missing column \'amount\' to progress_reports table...');
+        try {
+          await db.run('ALTER TABLE progress_reports ADD COLUMN amount DECIMAL(10, 2) DEFAULT 0');
+          console.log('✓ Added \'amount\' to progress_reports table');
+        } catch (e) {
+          if (!e.message.includes('duplicate column') && !e.message.includes('already exists')) {
+            console.error('Error adding \'amount\' to progress_reports:', e.message);
           }
         }
       }

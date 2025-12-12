@@ -1284,25 +1284,45 @@ async function initializeDatabase() {
       // Ensure certificates table has new columns
       const certTableExists = await db.get("SELECT name FROM sqlite_master WHERE type='table' AND name='certificates'");
       if (certTableExists) {
-        try {
-          await db.run('ALTER TABLE certificates ADD COLUMN file_path TEXT');
-        } catch (e) {
-          // Column may already exist
+        // Check if columns exist first (PostgreSQL doesn't support IF NOT EXISTS for ALTER TABLE)
+        const certColumns = await db.all("SELECT column_name FROM information_schema.columns WHERE table_name = 'certificates' AND table_schema = 'public'");
+        const certColumnNames = certColumns.map(col => col.column_name);
+        
+        if (!certColumnNames.includes('file_path')) {
+          try {
+            await db.run('ALTER TABLE certificates ADD COLUMN file_path TEXT');
+          } catch (e) {
+            if (!e.message.includes('already exists')) {
+              console.error('Error adding file_path column:', e.message);
+            }
+          }
         }
-        try {
-          await db.run('ALTER TABLE certificates ADD COLUMN file_type TEXT');
-        } catch (e) {
-          // Column may already exist
+        if (!certColumnNames.includes('file_type')) {
+          try {
+            await db.run('ALTER TABLE certificates ADD COLUMN file_type TEXT');
+          } catch (e) {
+            if (!e.message.includes('already exists')) {
+              console.error('Error adding file_type column:', e.message);
+            }
+          }
         }
-        try {
-          await db.run('ALTER TABLE certificates ADD COLUMN completion_date DATE');
-        } catch (e) {
-          // Column may already exist
+        if (!certColumnNames.includes('completion_date')) {
+          try {
+            await db.run('ALTER TABLE certificates ADD COLUMN completion_date DATE');
+          } catch (e) {
+            if (!e.message.includes('already exists')) {
+              console.error('Error adding completion_date column:', e.message);
+            }
+          }
         }
-        try {
-          await db.run('ALTER TABLE certificates ADD COLUMN updated_at DATETIME DEFAULT CURRENT_TIMESTAMP');
-        } catch (e) {
-          // Column may already exist
+        if (!certColumnNames.includes('updated_at')) {
+          try {
+            await db.run('ALTER TABLE certificates ADD COLUMN updated_at TIMESTAMP DEFAULT NOW()');
+          } catch (e) {
+            if (!e.message.includes('already exists')) {
+              console.error('Error adding updated_at column:', e.message);
+            }
+          }
         }
       }
       

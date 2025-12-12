@@ -210,5 +210,24 @@ class Database {
   }
 }
 
-module.exports = new Database();
+// Export appropriate database instance
+let dbInstance;
+
+if (USE_POSTGRESQL) {
+  // Use PostgreSQL if DATABASE_URL is set
+  try {
+    const PostgreSQLDatabase = require('./database-postgres');
+    dbInstance = PostgreSQLDatabase;
+    console.log('✓ PostgreSQL database module loaded');
+  } catch (error) {
+    console.error('Failed to load PostgreSQL module:', error.message);
+    console.error('Falling back to SQLite. Make sure pg package is installed: npm install pg');
+    dbInstance = new Database();
+  }
+} else {
+  // Use SQLite for local development
+  dbInstance = new Database();
+}
+
+module.exports = dbInstance;
 

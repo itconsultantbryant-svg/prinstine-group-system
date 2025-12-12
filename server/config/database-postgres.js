@@ -15,27 +15,62 @@ class PostgreSQLDatabase {
       }
 
       try {
+        // Parse and fix the connection string if needed
+        let connectionString = process.env.DATABASE_URL;
+        
+        // If the URL contains an IPv6 address, try to convert to IPv4 or use hostname
+        // Render internal URLs should use the hostname, not IP addresses
+        if (connectionString.includes('[') || connectionString.match(/:\/\/([0-9a-f:]+):/i)) {
+          console.warn('⚠️  IPv6 address detected in DATABASE_URL. This may cause connection issues.');
+          console.warn('⚠️  Make sure you are using the INTERNAL Database URL from Render, not External.');
+        }
+        
+        // Configure pool with better connection handling
         this.pool = new Pool({
-          connectionString: process.env.DATABASE_URL,
-          ssl: process.env.DATABASE_URL.includes('localhost') ? false : {
+          connectionString: connectionString,
+          ssl: connectionString.includes('localhost') || connectionString.includes('127.0.0.1') ? false : {
             rejectUnauthorized: false
           },
           max: 20, // Maximum number of clients in the pool
           idleTimeoutMillis: 30000,
-          connectionTimeoutMillis: 2000,
+          connectionTimeoutMillis: 10000, // Increased timeout for network issues
+          // Force IPv4 if IPv6 is causing issues
+          // Note: This is handled at the OS level, but we can add retry logic
         });
 
-        // Test connection
-        this.pool.query('SELECT NOW()', (err, result) => {
-          if (err) {
-            console.error('PostgreSQL connection error:', err.message);
-            reject(err);
-          } else {
-            console.log('✓ Connected to PostgreSQL database');
-            console.log('✓ Database time:', result.rows[0].now);
-            resolve(this.pool);
-          }
-        });
+        // Test connection with retry logic
+        const testConnection = (retries = 3) => {
+          this.pool.query('SELECT NOW()', (err, result) => {
+            if (err) {
+              console.error('PostgreSQL connection error:', err.message);
+              console.error('Error code:', err.code);
+              
+              // Provide helpful error messages
+              if (err.code === 'ENETUNREACH' || err.code === 'ECONNREFUSED') {
+                console.error('\n❌ Connection failed! Common issues:');
+                console.error('1. Make sure you are using the INTERNAL Database URL from Render');
+                console.error('2. The Internal URL should look like: postgresql://user:pass@hostname:5432/dbname');
+                console.error('3. Do NOT use the External Database URL');
+                console.error('4. Verify the database service is running on Render');
+                console.error('5. Check that both services are in the same region\n');
+              }
+              
+              // Retry logic for transient errors
+              if (retries > 0 && (err.code === 'ECONNREFUSED' || err.code === 'ETIMEDOUT')) {
+                console.log(`Retrying connection... (${retries} attempts remaining)`);
+                setTimeout(() => testConnection(retries - 1), 2000);
+              } else {
+                reject(err);
+              }
+            } else {
+              console.log('✓ Connected to PostgreSQL database');
+              console.log('✓ Database time:', result.rows[0].now);
+              resolve(this.pool);
+            }
+          });
+        };
+        
+        testConnection();
       } catch (error) {
         console.error('PostgreSQL initialization error:', error.message);
         reject(error);

@@ -41,9 +41,12 @@ const StaffManagement = () => {
       if (filters.search) params.append('search', filters.search);
 
       const response = await api.get(`/staff?${params.toString()}`);
-      setStaff(response.data.staff);
+      // Handle different response formats
+      const staff = response.data?.staff || response.data || [];
+      setStaff(Array.isArray(staff) ? staff : []);
     } catch (error) {
       console.error('Error fetching staff:', error);
+      setStaff([]);
     } finally {
       setLoading(false);
     }

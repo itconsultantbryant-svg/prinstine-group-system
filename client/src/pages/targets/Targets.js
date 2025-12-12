@@ -82,19 +82,30 @@ const Targets = () => {
     const socket = getSocket();
     if (socket) {
       const handleTargetCreated = () => {
+        console.log('Target created event received, refreshing...');
         fetchTargets();
+        fetchSharingHistory();
+      };
+
+      const handleTargetUpdated = () => {
+        console.log('Target updated event received, refreshing...');
+        fetchTargets();
+        fetchSharingHistory();
       };
 
       const handleFundShared = () => {
+        console.log('Fund shared event received, refreshing...');
         fetchTargets();
         fetchSharingHistory();
       };
 
       socket.on('target_created', handleTargetCreated);
+      socket.on('target_updated', handleTargetUpdated);
       socket.on('fund_shared', handleFundShared);
 
       return () => {
         socket.off('target_created', handleTargetCreated);
+        socket.off('target_updated', handleTargetUpdated);
         socket.off('fund_shared', handleFundShared);
       };
     }

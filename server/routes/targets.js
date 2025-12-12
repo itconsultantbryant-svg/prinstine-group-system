@@ -8,19 +8,37 @@ const { logAction } = require('../utils/audit');
 // Get all targets (Admin sees all, others see their own)
 router.get('/', authenticateToken, async (req, res) => {
   try {
+    // Check if using PostgreSQL
+    const USE_POSTGRESQL = !!process.env.DATABASE_URL;
+    
     // Check if targets table exists
-    const tableExists = await db.get(
-      "SELECT name FROM sqlite_master WHERE type='table' AND name='targets'"
-    );
+    let tableExists;
+    if (USE_POSTGRESQL) {
+      tableExists = await db.get(
+        "SELECT table_name as name FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'targets'"
+      );
+    } else {
+      tableExists = await db.get(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='targets'"
+      );
+    }
 
     if (!tableExists) {
+      console.log('Targets table does not exist yet');
       return res.json({ targets: [] });
     }
 
     // Check if fund_sharing table exists for subqueries
-    const fundSharingExists = await db.get(
-      "SELECT name FROM sqlite_master WHERE type='table' AND name='fund_sharing'"
-    );
+    let fundSharingExists;
+    if (USE_POSTGRESQL) {
+      fundSharingExists = await db.get(
+        "SELECT table_name as name FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'fund_sharing'"
+      );
+    } else {
+      fundSharingExists = await db.get(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='fund_sharing'"
+      );
+    }
 
     const sharedOutSubquery = fundSharingExists 
       ? `(SELECT COALESCE(SUM(CASE WHEN fs.status = 'Active' THEN fs.amount ELSE 0 END), 0)
@@ -180,6 +198,32 @@ router.post('/', authenticateToken, requireRole('Admin'), [
 
     await logAction(req.user.id, 'create_target', 'targets', result.lastID, { user_id, target_amount, category }, req);
 
+    // Get the created target with all details
+    const createdTarget = await db.get(`
+      SELECT t.*, 
+             COALESCE(u.name, 'Unknown User') as user_name, 
+             COALESCE(u.email, '') as user_email,
+             COALESCE(u.role, '') as user_role,
+             COALESCE(creator.name, 'System') as created_by_name,
+             0 as total_progress,
+             0 as shared_out,
+             0 as shared_in
+      FROM targets t
+      LEFT JOIN users u ON t.user_id = u.id
+      LEFT JOIN users creator ON t.created_by = creator.id
+      WHERE t.id = ?
+    `, [result.lastID]);
+
+    // Calculate initial progress
+    const netAmount = 0;
+    const progressPercentage = 0;
+    const targetWithProgress = {
+      ...createdTarget,
+      net_amount: netAmount,
+      progress_percentage: progressPercentage.toFixed(2),
+      remaining_amount: target_amount
+    };
+
     // Emit real-time update
     if (global.io) {
       global.io.emit('target_created', {
@@ -193,7 +237,7 @@ router.post('/', authenticateToken, requireRole('Admin'), [
 
     res.status(201).json({
       message: 'Target created successfully',
-      target: { id: result.lastID }
+      target: targetWithProgress
     });
   } catch (error) {
     console.error('Create target error:', error);
@@ -284,7 +328,56 @@ router.put('/:id', authenticateToken, requireRole('Admin'), [
 
     await logAction(req.user.id, 'update_target', 'targets', req.params.id, req.body, req);
 
-    res.json({ message: 'Target updated successfully' });
+    // Get updated target with all details
+    const updatedTarget = await db.get(`
+      SELECT t.*, 
+             COALESCE(u.name, 'Unknown User') as user_name, 
+             COALESCE(u.email, '') as user_email,
+             COALESCE(u.role, '') as user_role,
+             COALESCE(creator.name, 'System') as created_by_name,
+             (SELECT COALESCE(SUM(tp.amount), 0) 
+              FROM target_progress tp 
+              WHERE tp.target_id = t.id) as total_progress,
+             (SELECT COALESCE(SUM(CASE WHEN fs.status = 'Active' THEN fs.amount ELSE 0 END), 0)
+              FROM fund_sharing fs
+              WHERE fs.from_user_id = t.user_id) as shared_out,
+             (SELECT COALESCE(SUM(CASE WHEN fs.status = 'Active' THEN fs.amount ELSE 0 END), 0)
+              FROM fund_sharing fs
+              WHERE fs.to_user_id = t.user_id) as shared_in
+      FROM targets t
+      LEFT JOIN users u ON t.user_id = u.id
+      LEFT JOIN users creator ON t.created_by = creator.id
+      WHERE t.id = ?
+    `, [req.params.id]);
+
+    if (updatedTarget) {
+      const netAmount = (updatedTarget.total_progress || 0) + (updatedTarget.shared_in || 0) - (updatedTarget.shared_out || 0);
+      const progressPercentage = updatedTarget.target_amount > 0 
+        ? (netAmount / updatedTarget.target_amount) * 100 
+        : 0;
+      
+      const targetWithProgress = {
+        ...updatedTarget,
+        net_amount: netAmount,
+        progress_percentage: progressPercentage.toFixed(2),
+        remaining_amount: Math.max(0, updatedTarget.target_amount - netAmount)
+      };
+
+      // Emit real-time update
+      if (global.io) {
+        global.io.emit('target_updated', {
+          id: req.params.id,
+          updated_by: req.user.name
+        });
+      }
+
+      res.json({ 
+        message: 'Target updated successfully',
+        target: targetWithProgress
+      });
+    } else {
+      res.json({ message: 'Target updated successfully' });
+    }
   } catch (error) {
     console.error('Update target error:', error);
     res.status(500).json({ error: 'Failed to update target' });
@@ -336,9 +429,44 @@ router.post('/:id/extend', authenticateToken, requireRole('Admin'), [
       additional_amount 
     }, req);
 
+    // Get the extended target with all details
+    const extendedTarget = await db.get(`
+      SELECT t.*, 
+             COALESCE(u.name, 'Unknown User') as user_name, 
+             COALESCE(u.email, '') as user_email,
+             COALESCE(u.role, '') as user_role,
+             COALESCE(creator.name, 'System') as created_by_name,
+             0 as total_progress,
+             0 as shared_out,
+             0 as shared_in
+      FROM targets t
+      LEFT JOIN users u ON t.user_id = u.id
+      LEFT JOIN users creator ON t.created_by = creator.id
+      WHERE t.id = ?
+    `, [result.lastID]);
+
+    const netAmount = 0;
+    const progressPercentage = 0;
+    const targetWithProgress = {
+      ...extendedTarget,
+      net_amount: netAmount,
+      progress_percentage: progressPercentage.toFixed(2),
+      remaining_amount: newTargetAmount
+    };
+
+    // Emit real-time update
+    if (global.io) {
+      global.io.emit('target_created', {
+        id: result.lastID,
+        user_id: target.user_id,
+        target_amount: newTargetAmount,
+        created_by: req.user.name
+      });
+    }
+
     res.json({
       message: 'Target extended successfully',
-      target: { id: result.lastID }
+      target: targetWithProgress
     });
   } catch (error) {
     console.error('Extend target error:', error);
@@ -479,12 +607,23 @@ router.post('/reverse-sharing/:id', authenticateToken, requireRole('Admin'), [
 // Get fund sharing history
 router.get('/fund-sharing/history', authenticateToken, async (req, res) => {
   try {
+    // Check if using PostgreSQL
+    const USE_POSTGRESQL = !!process.env.DATABASE_URL;
+    
     // Check if fund_sharing table exists
-    const tableExists = await db.get(
-      "SELECT name FROM sqlite_master WHERE type='table' AND name='fund_sharing'"
-    );
+    let tableExists;
+    if (USE_POSTGRESQL) {
+      tableExists = await db.get(
+        "SELECT table_name as name FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'fund_sharing'"
+      );
+    } else {
+      tableExists = await db.get(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='fund_sharing'"
+      );
+    }
 
     if (!tableExists) {
+      console.log('Fund sharing table does not exist yet');
       return res.json({ sharing_history: [] });
     }
 

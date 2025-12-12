@@ -184,7 +184,15 @@ export const AuthProvider = ({ children }) => {
     localStorage.removeItem('user');
     setUser(null);
     disconnectSocket();
-    window.location.href = '/login';
+    // Use window.location for full page reload to clear all state
+    // But ensure we're going to the correct route
+    const currentPath = window.location.pathname;
+    if (currentPath !== '/login') {
+      window.location.href = '/login';
+    } else {
+      // If already on login, just reload
+      window.location.reload();
+    }
   };
 
   const updateUser = (userData) => {

@@ -47,9 +47,19 @@ const Dashboard = () => {
   const fetchStats = async () => {
     try {
       const response = await api.get('/dashboard/stats');
-      setStats(response.data.stats);
+      // Ensure we have the stats object
+      if (response.data && response.data.stats) {
+        setStats(response.data.stats);
+      } else if (response.data) {
+        // If stats is directly in data
+        setStats(response.data);
+      } else {
+        console.warn('Unexpected stats response format:', response.data);
+        setStats(null);
+      }
     } catch (error) {
       console.error('Error fetching stats:', error);
+      setStats(null);
     } finally {
       setLoading(false);
     }
@@ -58,7 +68,13 @@ const Dashboard = () => {
   const fetchProgressStats = async () => {
     try {
       const response = await api.get('/progress-reports');
-      const reports = response.data.reports || [];
+      // Handle different response formats
+      const reports = response.data?.reports || response.data || [];
+      
+      if (!Array.isArray(reports)) {
+        console.warn('Progress reports is not an array:', reports);
+        return;
+      }
       
       const byCategory = {};
       const byStatus = {};
@@ -79,6 +95,11 @@ const Dashboard = () => {
       });
     } catch (error) {
       console.error('Error fetching progress stats:', error);
+      setProgressStats({
+        total: 0,
+        byCategory: {},
+        byStatus: {}
+      });
     }
   };
 

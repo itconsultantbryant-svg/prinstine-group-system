@@ -29,14 +29,53 @@ const TopBar = () => {
       // Listen for real-time notifications via WebSocket
       if (socket) {
         const handleNotification = (notification) => {
+          // Parse notification if it's a string
+          let parsedNotification = notification;
+          if (typeof notification === 'string') {
+            try {
+              parsedNotification = JSON.parse(notification);
+            } catch (e) {
+              // If parsing fails, create a proper notification object
+              parsedNotification = {
+                id: Date.now(),
+                title: 'Notification',
+                message: notification,
+                type: 'info',
+                is_read: 0,
+                created_at: new Date().toISOString()
+              };
+            }
+          }
+          
+          // Ensure notification has required fields
+          if (!parsedNotification.id) {
+            parsedNotification.id = parsedNotification.id || Date.now();
+          }
+          if (!parsedNotification.created_at) {
+            parsedNotification.created_at = new Date().toISOString();
+          }
+          if (!parsedNotification.is_read) {
+            parsedNotification.is_read = 0;
+          }
+          
+          // Extract title and message properly
+          const title = parsedNotification.title || 'Notification';
+          const message = typeof parsedNotification.message === 'string' 
+            ? parsedNotification.message 
+            : JSON.stringify(parsedNotification.message);
+          
           // Add new notification to the list
-          setNotifications(prev => [notification, ...prev]);
+          setNotifications(prev => [{
+            ...parsedNotification,
+            title,
+            message
+          }, ...prev]);
           setUnreadCount(prev => prev + 1);
           
           // Show browser notification if permission granted
           if ('Notification' in window && Notification.permission === 'granted') {
-            new Notification(notification.title, {
-              body: notification.message,
+            new Notification(title, {
+              body: message,
               icon: '/logo192.png'
             });
           }
@@ -163,10 +202,16 @@ const TopBar = () => {
                       >
                         <div className="d-flex justify-content-between align-items-start">
                           <div className="flex-grow-1">
-                            <strong>{notification.title}</strong>
-                            <p className="mb-0 small text-muted">{notification.message}</p>
+                            <strong>{notification.title || 'Notification'}</strong>
+                            <p className="mb-0 small text-muted">
+                              {typeof notification.message === 'string' 
+                                ? notification.message 
+                                : (notification.message?.message || JSON.stringify(notification.message))}
+                            </p>
                             <small className="text-muted">
-                              {new Date(notification.created_at).toLocaleString()}
+                              {notification.created_at 
+                                ? new Date(notification.created_at).toLocaleString()
+                                : 'Just now'}
                             </small>
                           </div>
                           <span className={`badge bg-${
@@ -174,7 +219,7 @@ const TopBar = () => {
                             notification.type === 'warning' ? 'warning' :
                             notification.type === 'error' ? 'danger' : 'info'
                           } ms-2`}>
-                            {notification.type}
+                            {notification.type || 'info'}
                           </span>
                         </div>
                       </div>

@@ -27,14 +27,53 @@ const Navbar = () => {
       const socket = getSocket();
       if (socket) {
         const handleNotification = (notification) => {
+          // Parse notification if it's a string
+          let parsedNotification = notification;
+          if (typeof notification === 'string') {
+            try {
+              parsedNotification = JSON.parse(notification);
+            } catch (e) {
+              // If parsing fails, create a proper notification object
+              parsedNotification = {
+                id: Date.now(),
+                title: 'Notification',
+                message: notification,
+                type: 'info',
+                is_read: 0,
+                created_at: new Date().toISOString()
+              };
+            }
+          }
+          
+          // Ensure notification has required fields
+          if (!parsedNotification.id) {
+            parsedNotification.id = parsedNotification.id || Date.now();
+          }
+          if (!parsedNotification.created_at) {
+            parsedNotification.created_at = new Date().toISOString();
+          }
+          if (!parsedNotification.is_read) {
+            parsedNotification.is_read = 0;
+          }
+          
+          // Extract title and message properly
+          const title = parsedNotification.title || 'Notification';
+          const message = typeof parsedNotification.message === 'string' 
+            ? parsedNotification.message 
+            : JSON.stringify(parsedNotification.message);
+          
           // Add new notification to the list
-          setNotifications(prev => [notification, ...prev]);
+          setNotifications(prev => [{
+            ...parsedNotification,
+            title,
+            message
+          }, ...prev]);
           setUnreadCount(prev => prev + 1);
           
           // Show browser notification if permission granted
           if ('Notification' in window && Notification.permission === 'granted') {
-            new Notification(notification.title, {
-              body: notification.message,
+            new Notification(title, {
+              body: message,
               icon: '/logo192.png'
             });
           }
@@ -193,10 +232,14 @@ const Navbar = () => {
                           }}
                         >
                           <div className="d-flex justify-content-between">
-                            <div>
-                              <strong>{notification.title}</strong>
-                              <p className="mb-0 small">{notification.message}</p>
-                            </div>
+                          <div>
+                            <strong>{notification.title || 'Notification'}</strong>
+                            <p className="mb-0 small">
+                              {typeof notification.message === 'string' 
+                                ? notification.message 
+                                : (notification.message?.message || JSON.stringify(notification.message))}
+                            </p>
+                          </div>
                             <span className={`badge bg-${notification.type === 'success' ? 'success' : notification.type === 'warning' ? 'warning' : 'info'}`}>
                               {notification.type}
                             </span>

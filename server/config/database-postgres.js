@@ -205,17 +205,32 @@ class PostgreSQLDatabase {
 
     try {
       const pgSql = this.convertSQLiteToPostgres(sql);
+      
+      // Log the converted SQL for debugging (first 300 chars)
+      if (sql.toUpperCase().includes('CREATE TABLE') || sql.toUpperCase().includes('INSERT')) {
+        console.log('📝 Original SQL (first 150):', sql.substring(0, 150));
+        console.log('📝 Converted SQL (first 150):', pgSql.substring(0, 150));
+      }
+      
       const result = await this.pool.query(pgSql, params);
       
       // Return format compatible with SQLite
+      // For INSERT statements, PostgreSQL returns the inserted row via RETURNING clause
+      let lastID = null;
+      if (result.rows && result.rows.length > 0) {
+        // Try to get id from returned row (PostgreSQL returns via RETURNING)
+        lastID = result.rows[0].id || result.rows[0].ID || null;
+      }
+      
       return {
-        lastID: result.rows[0]?.id || result.insertId || null,
+        lastID: lastID,
         changes: result.rowCount || 0
       };
     } catch (err) {
-      console.error('Database run() error:', err.message);
-      console.error('SQL:', sql.substring(0, 200));
-      console.error('Params:', params);
+      console.error('❌ Database run() error:', err.message);
+      console.error('📝 Original SQL (first 200):', sql.substring(0, 200));
+      console.error('📝 Converted SQL (first 200):', this.convertSQLiteToPostgres(sql).substring(0, 200));
+      console.error('📝 Params:', params);
       throw err;
     }
   }

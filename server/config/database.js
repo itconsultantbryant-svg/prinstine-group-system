@@ -3,6 +3,9 @@ const path = require('path');
 const fs = require('fs');
 require('dotenv').config();
 
+// Check if PostgreSQL is configured
+const USE_POSTGRESQL = !!process.env.DATABASE_URL;
+
 // Use absolute path resolution to ensure consistency
 // Always use the root database/pms.db to avoid data loss
 const DB_PATH = process.env.DB_PATH 
@@ -10,7 +13,12 @@ const DB_PATH = process.env.DB_PATH
   : path.resolve(__dirname, '../../database/pms.db');
 
 // Log the resolved database path for debugging
-console.log('Database path resolved to:', DB_PATH);
+if (!USE_POSTGRESQL) {
+  console.log('Database path resolved to:', DB_PATH);
+  console.log('Using SQLite database (for PostgreSQL, set DATABASE_URL environment variable)');
+} else {
+  console.log('Using PostgreSQL database (DATABASE_URL detected)');
+}
 
 class Database {
   constructor() {

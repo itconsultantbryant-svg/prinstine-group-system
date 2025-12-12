@@ -244,15 +244,8 @@ class PostgreSQLDatabase {
       return pgSql;
     }
 
-    // Convert SQLite parameter placeholders (?) to PostgreSQL ($1, $2, etc.)
-    // This must be done FIRST before any other conversions
-    if (pgSql.includes('?')) {
-      let paramIndex = 1;
-      pgSql = pgSql.replace(/\?/g, () => `$${paramIndex++}`);
-    }
-
     // Convert sqlite_master queries FIRST (before parameter conversion)
-    // But we need to handle parameters properly - check if there are parameters first
+    // This needs to happen before parameter conversion so we can handle ? placeholders correctly
     if (pgSql.includes('sqlite_master')) {
       // Convert: SELECT name FROM sqlite_master WHERE type='table' AND name=?
       if (pgSql.includes("type='table'") || pgSql.includes('type=\'table\'')) {
@@ -277,6 +270,13 @@ class PostgreSQLDatabase {
         }
         return pgSql;
       }
+    }
+
+    // Convert SQLite parameter placeholders (?) to PostgreSQL ($1, $2, etc.)
+    // This must be done AFTER sqlite_master conversion
+    if (pgSql.includes('?')) {
+      let paramIndex = 1;
+      pgSql = pgSql.replace(/\?/g, () => `$${paramIndex++}`);
     }
 
     // Convert SQLite parameter placeholders (?) to PostgreSQL ($1, $2, etc.)

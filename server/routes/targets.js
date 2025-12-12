@@ -89,10 +89,10 @@ router.get('/:id', authenticateToken, async (req, res) => {
   try {
     let query = `
       SELECT t.*, 
-             u.name as user_name, 
-             u.email as user_email,
-             u.role as user_role,
-             creator.name as created_by_name,
+             COALESCE(u.name, 'Unknown User') as user_name, 
+             COALESCE(u.email, '') as user_email,
+             COALESCE(u.role, '') as user_role,
+             COALESCE(creator.name, 'System') as created_by_name,
              (SELECT COALESCE(SUM(tp.amount), 0) 
               FROM target_progress tp 
               WHERE tp.target_id = t.id) as total_progress,

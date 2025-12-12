@@ -103,11 +103,15 @@ const Targets = () => {
   const fetchTargets = async () => {
     try {
       setLoading(true);
+      setError('');
       const response = await api.get('/targets');
-      setTargets(response.data.targets || []);
+      // Handle different response formats
+      const targetsData = response.data?.targets || response.data || [];
+      setTargets(Array.isArray(targetsData) ? targetsData : []);
     } catch (err) {
       console.error('Error fetching targets:', err);
       setError('Failed to load targets');
+      setTargets([]);
     } finally {
       setLoading(false);
     }
@@ -145,7 +149,7 @@ const Targets = () => {
     setError('');
 
     try {
-      await api.post('/targets', createForm);
+      const response = await api.post('/targets', createForm);
       setShowCreateModal(false);
       setCreateForm({
         user_id: '',
@@ -155,9 +159,17 @@ const Targets = () => {
         period_end: '',
         notes: ''
       });
-      fetchTargets();
+      // Refresh targets list immediately
+      await fetchTargets();
+      
+      // Emit socket event for real-time update
+      const socket = getSocket();
+      if (socket) {
+        socket.emit('target_created');
+      }
     } catch (err) {
       setError(err.response?.data?.error || 'Failed to create target');
+      console.error('Error creating target:', err);
     }
   };
 
@@ -169,19 +181,20 @@ const Targets = () => {
       await api.put(`/targets/${selectedTarget.id}`, editForm);
       setShowEditModal(false);
       setSelectedTarget(null);
-      setEditForm({
-        target_amount: '',
-        category: '',
-        period_start: '',
-        period_end: '',
-        status: '',
-        notes: ''
-      });
-      fetchTargets();
+      // Refresh targets list immediately
+      await fetchTargets();
+      
+      // Emit socket event for real-time update
+      const socket = getSocket();
+      if (socket) {
+        socket.emit('target_created');
+      }
     } catch (err) {
       setError(err.response?.data?.error || 'Failed to update target');
+      console.error('Error updating target:', err);
     }
   };
+
 
   const handleOpenEditModal = (target) => {
     setSelectedTarget(target);
@@ -216,8 +229,15 @@ const Targets = () => {
         reason: ''
       });
       setAvailableAmount(0);
-      fetchTargets();
-      fetchSharingHistory();
+      // Refresh targets list immediately
+      await fetchTargets();
+      await fetchSharingHistory();
+      
+      // Emit socket event for real-time update
+      const socket = getSocket();
+      if (socket) {
+        socket.emit('fund_shared');
+      }
     } catch (err) {
       setError(err.response?.data?.error || 'Failed to share fund');
     }
@@ -249,9 +269,17 @@ const Targets = () => {
         additional_amount: '',
         period_end: ''
       });
-      fetchTargets();
+      // Refresh targets list immediately
+      await fetchTargets();
+      
+      // Emit socket event for real-time update
+      const socket = getSocket();
+      if (socket) {
+        socket.emit('target_created');
+      }
     } catch (err) {
       setError(err.response?.data?.error || 'Failed to extend target');
+      console.error('Error extending target:', err);
     }
   };
 

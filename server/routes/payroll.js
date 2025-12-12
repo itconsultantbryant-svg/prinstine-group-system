@@ -128,6 +128,7 @@ router.post('/', authenticateToken, requireRole('DepartmentHead', 'Admin'), [
 
     const {
       staff_id,
+      user_id, // For department heads who don't have staff records
       payroll_period_start,
       payroll_period_end,
       gross_salary,
@@ -140,10 +141,34 @@ router.post('/', authenticateToken, requireRole('DepartmentHead', 'Admin'), [
       notes
     } = req.body;
 
-    // Get staff record
-    const staff = await db.get('SELECT user_id FROM staff WHERE id = ?', [staff_id]);
-    if (!staff) {
-      return res.status(404).json({ error: 'Staff member not found' });
+    let targetUserId;
+    let targetStaffId = null;
+
+    // If staff_id is provided, get the user_id from staff table
+    if (staff_id) {
+      const staff = await db.get('SELECT user_id FROM staff WHERE id = ?', [staff_id]);
+      if (!staff) {
+        return res.status(404).json({ error: 'Staff member not found' });
+      }
+      targetUserId = staff.user_id;
+      targetStaffId = staff_id;
+    } else if (user_id) {
+      // For department heads who don't have staff records
+      const user = await db.get('SELECT id, role FROM users WHERE id = ?', [user_id]);
+      if (!user) {
+        return res.status(404).json({ error: 'User not found' });
+      }
+      if (user.role !== 'DepartmentHead' && user.role !== 'Staff') {
+        return res.status(400).json({ error: 'Payroll can only be created for Staff or DepartmentHead' });
+      }
+      targetUserId = user_id;
+      // Check if they have a staff record
+      const staffRecord = await db.get('SELECT id FROM staff WHERE user_id = ?', [user_id]);
+      if (staffRecord) {
+        targetStaffId = staffRecord.id;
+      }
+    } else {
+      return res.status(400).json({ error: 'Either staff_id or user_id is required' });
     }
 
     const result = await db.run(
@@ -153,7 +178,7 @@ router.post('/', authenticateToken, requireRole('DepartmentHead', 'Admin'), [
         status, submitted_by, submitted_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Submitted', ?, CURRENT_TIMESTAMP)`,
       [
-        staff_id, staff.user_id, payroll_period_start, payroll_period_end,
+        targetStaffId, targetUserId, payroll_period_start, payroll_period_end,
         gross_salary, deductions, net_salary, bonus, allowances,
         tax_deductions, other_deductions, notes || null, req.user.id
       ]

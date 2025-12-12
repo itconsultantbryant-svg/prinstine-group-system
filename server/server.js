@@ -152,6 +152,7 @@ async function initializeDatabase() {
     const communicationsPath = path.join(__dirname, '../database/migrations/004_communications_enhancement.sql');
     const progressReportPath = path.join(__dirname, '../database/migrations/005_progress_report_fields.sql');
     const progressReportsTablePath = path.join(__dirname, '../database/migrations/006_progress_reports_table.sql');
+    const payrollManagementPath = path.join(__dirname, '../database/migrations/010_payroll_management.sql');
     const staffEnhancementsPath = path.join(__dirname, 'database/migrations/007_staff_enhancements.sql');
     const staffClientReportsPath = path.join(__dirname, 'database/migrations/008_staff_client_reports.sql');
     const addAttachmentsToReportsPath = path.join(__dirname, 'database/migrations/009_add_attachments_to_reports.sql');
@@ -1284,18 +1285,25 @@ async function initializeDatabase() {
       { name: 'archived_documents', path: archivedDocumentsPath },
       { name: 'targets', path: targetsPath },
       { name: 'call_memos', path: callMemosPath },
-      { name: 'proposals', path: proposalsPath }
+      { name: 'proposals', path: proposalsPath },
+      { name: 'progress_reports', path: progressReportsTablePath },
+      { name: 'department_reports', path: null }, // Created in initial schema
+      { name: 'payroll_records', path: payrollManagementPath }
     ];
     
-    for (const table of requiredTables) {
-      console.log(`Checking table: ${table.name}...`);
-      console.log(`Migration path: ${table.path}`);
-      console.log(`File exists: ${fs.existsSync(table.path)}`);
-      
-      const tableExists = await db.get(`SELECT name FROM sqlite_master WHERE type='table' AND name=?`, [table.name]);
-      if (!tableExists) {
-        console.log(`⚠️ Table ${table.name} does not exist. Attempting to create...`);
-        if (fs.existsSync(table.path)) {
+      for (const table of requiredTables) {
+        console.log(`Checking table: ${table.name}...`);
+        if (table.path) {
+          console.log(`Migration path: ${table.path}`);
+          console.log(`File exists: ${fs.existsSync(table.path)}`);
+        } else {
+          console.log(`No migration path (table created in initial schema)`);
+        }
+        
+        const tableExists = await db.get(`SELECT name FROM sqlite_master WHERE type='table' AND name=?`, [table.name]);
+        if (!tableExists) {
+          console.log(`⚠️ Table ${table.name} does not exist. Attempting to create...`);
+          if (table.path && fs.existsSync(table.path)) {
           try {
             console.log(`Reading migration file: ${table.path}`);
             const migrationSQL = fs.readFileSync(table.path, 'utf8');
@@ -1555,6 +1563,98 @@ async function initializeDatabase() {
                 // Column may already exist
               }
               console.log(`✓ ${table.name} tables created directly`);
+            } else if (table.name === 'progress_reports') {
+              await db.run(`
+                CREATE TABLE IF NOT EXISTS progress_reports (
+                  id INTEGER PRIMARY KEY AUTOINCREMENT,
+                  name TEXT NOT NULL,
+                  date DATE NOT NULL,
+                  category TEXT NOT NULL CHECK(category IN ('Student', 'Client for Consultancy', 'Client for Audit', 'Others')),
+                  status TEXT NOT NULL CHECK(status IN ('Signed Contract', 'Pipeline Client', 'Submitted')),
+                  department_id INTEGER,
+                  department_name TEXT,
+                  created_by INTEGER NOT NULL,
+                  created_by_name TEXT NOT NULL,
+                  created_by_email TEXT,
+                  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                  amount DECIMAL(10, 2) DEFAULT 0,
+                  FOREIGN KEY (department_id) REFERENCES departments(id) ON DELETE SET NULL,
+                  FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE CASCADE
+                )
+              `);
+              await db.run(`CREATE INDEX IF NOT EXISTS idx_progress_reports_created_by ON progress_reports(created_by)`);
+              await db.run(`CREATE INDEX IF NOT EXISTS idx_progress_reports_department_id ON progress_reports(department_id)`);
+              await db.run(`CREATE INDEX IF NOT EXISTS idx_progress_reports_date ON progress_reports(date)`);
+              await db.run(`CREATE INDEX IF NOT EXISTS idx_progress_reports_category ON progress_reports(category)`);
+              await db.run(`CREATE INDEX IF NOT EXISTS idx_progress_reports_status ON progress_reports(status)`);
+              // Add amount column if it doesn't exist
+              try {
+                await db.run(`ALTER TABLE progress_reports ADD COLUMN amount DECIMAL(10, 2) DEFAULT 0`);
+              } catch (e) {
+                // Column may already exist
+              }
+              console.log(`✓ ${table.name} table created directly`);
+            } else if (table.name === 'department_reports') {
+              await db.run(`
+                CREATE TABLE IF NOT EXISTS department_reports (
+                  id INTEGER PRIMARY KEY AUTOINCREMENT,
+                  department_id INTEGER NOT NULL,
+                  submitted_by INTEGER NOT NULL,
+                  title TEXT NOT NULL,
+                  content TEXT NOT NULL,
+                  attachments TEXT,
+                  status TEXT DEFAULT 'Pending' CHECK(status IN ('Pending', 'Approved', 'Rejected')),
+                  admin_notes TEXT,
+                  reviewed_by INTEGER,
+                  reviewed_at DATETIME,
+                  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                  FOREIGN KEY (department_id) REFERENCES departments(id) ON DELETE CASCADE,
+                  FOREIGN KEY (submitted_by) REFERENCES users(id) ON DELETE CASCADE,
+                  FOREIGN KEY (reviewed_by) REFERENCES users(id) ON DELETE SET NULL
+                )
+              `);
+              console.log(`✓ ${table.name} table created directly`);
+            } else if (table.name === 'payroll_records') {
+              await db.run(`
+                CREATE TABLE IF NOT EXISTS payroll_records (
+                  id INTEGER PRIMARY KEY AUTOINCREMENT,
+                  staff_id INTEGER NOT NULL,
+                  user_id INTEGER NOT NULL,
+                  payroll_period_start DATE NOT NULL,
+                  payroll_period_end DATE NOT NULL,
+                  gross_salary REAL NOT NULL,
+                  deductions REAL DEFAULT 0,
+                  net_salary REAL NOT NULL,
+                  bonus REAL DEFAULT 0,
+                  allowances REAL DEFAULT 0,
+                  tax_deductions REAL DEFAULT 0,
+                  other_deductions REAL DEFAULT 0,
+                  notes TEXT,
+                  status TEXT DEFAULT 'Draft' CHECK(status IN ('Draft', 'Submitted', 'Admin_Approved', 'Admin_Rejected', 'Processed', 'Paid')),
+                  submitted_by INTEGER,
+                  submitted_at DATETIME,
+                  approved_by INTEGER,
+                  approved_at DATETIME,
+                  admin_notes TEXT,
+                  processed_at DATETIME,
+                  payment_date DATE,
+                  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                  FOREIGN KEY (staff_id) REFERENCES staff(id) ON DELETE CASCADE,
+                  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+                  FOREIGN KEY (submitted_by) REFERENCES users(id) ON DELETE SET NULL,
+                  FOREIGN KEY (approved_by) REFERENCES users(id) ON DELETE SET NULL
+                )
+              `);
+              await db.run(`CREATE INDEX IF NOT EXISTS idx_payroll_records_staff_id ON payroll_records(staff_id)`);
+              await db.run(`CREATE INDEX IF NOT EXISTS idx_payroll_records_user_id ON payroll_records(user_id)`);
+              await db.run(`CREATE INDEX IF NOT EXISTS idx_payroll_records_status ON payroll_records(status)`);
+              await db.run(`CREATE INDEX IF NOT EXISTS idx_payroll_records_period ON payroll_records(payroll_period_start, payroll_period_end)`);
+              await db.run(`CREATE INDEX IF NOT EXISTS idx_payroll_records_submitted_by ON payroll_records(submitted_by)`);
+              await db.run(`CREATE INDEX IF NOT EXISTS idx_payroll_records_approved_by ON payroll_records(approved_by)`);
+              console.log(`✓ ${table.name} table created directly`);
             }
             
             // Verify table was created

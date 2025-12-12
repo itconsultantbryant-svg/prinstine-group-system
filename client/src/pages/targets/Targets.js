@@ -311,7 +311,7 @@ const Targets = () => {
     if (!targets.length) return null;
 
     return {
-      labels: targets.map(t => t.user_name || 'Unknown'),
+      labels: targets.map(t => t.user_name || 'Unknown User'),
       datasets: [
         {
           label: 'Target Amount',
@@ -335,7 +335,7 @@ const Targets = () => {
     if (!targets.length) return null;
 
     return {
-      labels: targets.map(t => t.user_name || 'Unknown'),
+      labels: targets.map(t => t.user_name || 'Unknown User'),
       datasets: [{
         label: 'Progress %',
         data: targets.map(t => parseFloat(t.progress_percentage) || 0),
@@ -451,9 +451,9 @@ const Targets = () => {
                     <tr key={target.id}>
                       <td>
                         <div>
-                          <strong>{target.user_name || 'Unknown'}</strong>
+                          <strong>{target.user_name || 'Unknown User'}</strong>
                           <br />
-                          <small className="text-muted">{target.user_email}</small>
+                          <small className="text-muted">{target.user_email || 'No email'}</small>
                         </div>
                       </td>
                       <td>
@@ -948,7 +948,7 @@ const Targets = () => {
                     <input
                       type="text"
                       className="form-control"
-                      value={`${selectedTarget.user_name} - $${parseFloat(selectedTarget.target_amount || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
+                      value={`${selectedTarget.user_name || 'Unknown User'} - $${parseFloat(selectedTarget.target_amount || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
                       disabled
                     />
                   </div>

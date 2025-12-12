@@ -31,7 +31,14 @@ const MeetingHistory = () => {
     try {
       setLoading(true);
       const response = await api.get('/meetings');
-      const meetingsList = response.data.meetings || [];
+      // Handle different response formats
+      const meetingsList = response.data?.meetings || response.data || [];
+      
+      if (!Array.isArray(meetingsList)) {
+        console.warn('Meetings response is not an array:', meetingsList);
+        setMeetings([]);
+        return;
+      }
       
       // Update status for expired meetings
       const now = new Date();
@@ -53,6 +60,7 @@ const MeetingHistory = () => {
       setMeetings(meetingsList);
     } catch (error) {
       console.error('Error fetching meetings:', error);
+      setMeetings([]);
     } finally {
       setLoading(false);
     }

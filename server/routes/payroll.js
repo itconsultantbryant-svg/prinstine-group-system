@@ -21,11 +21,12 @@ router.get('/', authenticateToken, async (req, res) => {
     let query = `
       SELECT pr.*, 
              s.staff_id, s.position, s.department, s.employment_type,
-             u.name as staff_name, u.email as staff_email,
+             COALESCE(u.name, 'Unknown User') as staff_name, 
+             COALESCE(u.email, '') as staff_email,
              submitter.name as submitted_by_name,
              approver.name as approved_by_name
       FROM payroll_records pr
-      JOIN staff s ON pr.staff_id = s.id
+      LEFT JOIN staff s ON pr.staff_id = s.id
       JOIN users u ON pr.user_id = u.id
       LEFT JOIN users submitter ON pr.submitted_by = submitter.id
       LEFT JOIN users approver ON pr.approved_by = approver.id

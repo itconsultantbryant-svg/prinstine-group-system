@@ -597,6 +597,15 @@ router.post('/reverse-sharing/:id', authenticateToken, requireRole('Admin'), [
       reversal_reason: req.body.reversal_reason 
     }, req);
 
+    // Emit real-time update
+    if (global.io) {
+      global.io.emit('fund_shared', {
+        id: req.params.id,
+        status: 'Reversed',
+        reversed_by: req.user.name
+      });
+    }
+
     res.json({ message: 'Fund sharing reversed successfully' });
   } catch (error) {
     console.error('Reverse sharing error:', error);

@@ -39,7 +39,15 @@ class PostgreSQLDatabase {
             return;
           }
           
-          if (!url.port || url.port !== '5432') {
+          if (!url.port || url.port === '') {
+            console.warn('⚠️  No port specified in DATABASE_URL. Adding default port 5432.');
+            // Fix the URL by adding port if missing
+            // Pattern: postgresql://user:pass@host/db -> postgresql://user:pass@host:5432/db
+            if (connectionString.match(/@([^:\/]+)\/([^\/\s]+)/)) {
+              connectionString = connectionString.replace(/@([^:\/]+)\//, '@$1:5432/');
+              console.log('✓ Fixed DATABASE_URL by adding port 5432');
+            }
+          } else if (url.port !== '5432') {
             console.warn('⚠️  Unexpected port in DATABASE_URL. Expected 5432, got:', url.port);
           }
           
@@ -214,52 +222,129 @@ class PostgreSQLDatabase {
 
   // Convert SQLite syntax to PostgreSQL
   convertSQLiteToPostgres(sql) {
-    let pgSql = sql;
+    let pgSql = sql.trim();
+    
+    // Skip empty statements
+    if (!pgSql || pgSql.length < 10) {
+      return pgSql;
+    }
 
-    // Convert AUTOINCREMENT to SERIAL (handled in CREATE TABLE)
-    pgSql = pgSql.replace(/AUTOINCREMENT/gi, 'SERIAL');
-
-    // Convert INTEGER PRIMARY KEY to SERIAL PRIMARY KEY
-    pgSql = pgSql.replace(/INTEGER PRIMARY KEY AUTOINCREMENT/gi, 'SERIAL PRIMARY KEY');
-
-    // Convert DATETIME to TIMESTAMP
-    pgSql = pgSql.replace(/DATETIME/gi, 'TIMESTAMP');
-
-    // Convert BOOLEAN DEFAULT 0/1 to BOOLEAN DEFAULT false/true
-    pgSql = pgSql.replace(/BOOLEAN DEFAULT 0/gi, 'BOOLEAN DEFAULT false');
-    pgSql = pgSql.replace(/BOOLEAN DEFAULT 1/gi, 'BOOLEAN DEFAULT true');
-
-    // Convert CURRENT_TIMESTAMP to NOW()
-    pgSql = pgSql.replace(/CURRENT_TIMESTAMP/gi, 'NOW()');
-
-    // Convert sqlite_master to information_schema
-    pgSql = pgSql.replace(/sqlite_master/gi, 'information_schema.tables');
-    pgSql = pgSql.replace(/type='table'/gi, "table_type='BASE TABLE'");
-    pgSql = pgSql.replace(/name=/gi, "table_name=");
-
-    // Convert PRAGMA statements (these won't work in PostgreSQL, but we'll handle them)
-    if (pgSql.includes('PRAGMA')) {
-      // PRAGMA statements are SQLite-specific, skip them for PostgreSQL
-      if (pgSql.includes('PRAGMA table_info')) {
-        // Convert to PostgreSQL information_schema query
-        const tableName = pgSql.match(/table_info\(['"]?(\w+)['"]?\)/i)?.[1];
-        if (tableName) {
-          pgSql = `SELECT column_name as name, data_type as type, is_nullable, column_default as dflt_value 
-                   FROM information_schema.columns 
-                   WHERE table_name = '${tableName}'`;
+    // Convert sqlite_master queries FIRST (before other conversions)
+    if (pgSql.includes('sqlite_master')) {
+      // Convert: SELECT name FROM sqlite_master WHERE type='table' AND name='users'
+      if (pgSql.includes("type='table'") || pgSql.includes('type=\'table\'')) {
+        // Extract table name if present
+        const nameMatch = pgSql.match(/name\s*=\s*['"]?(\w+)['"]?/i);
+        if (nameMatch) {
+          const tableName = nameMatch[1];
+          pgSql = `SELECT table_name as name FROM information_schema.tables WHERE table_schema = 'public' AND table_name = '${tableName}'`;
+        } else {
+          // Get all tables
+          pgSql = `SELECT table_name as name FROM information_schema.tables WHERE table_schema = 'public'`;
         }
-      } else {
-        // For other PRAGMA statements, return empty result
-        return 'SELECT 1 WHERE 1=0';
+        return pgSql;
       }
     }
 
-    // Handle RETURNING clause for INSERT (PostgreSQL feature)
-    if (pgSql.toUpperCase().includes('INSERT INTO') && !pgSql.toUpperCase().includes('RETURNING')) {
-      const insertMatch = pgSql.match(/INSERT INTO\s+(\w+)/i);
+    // Convert PRAGMA table_info to PostgreSQL
+    if (pgSql.includes('PRAGMA table_info')) {
+      const tableName = pgSql.match(/table_info\(['"]?(\w+)['"]?\)/i)?.[1];
+      if (tableName) {
+        pgSql = `SELECT column_name as name, data_type as type, is_nullable, column_default as dflt_value 
+                 FROM information_schema.columns 
+                 WHERE table_name = '${tableName}' AND table_schema = 'public'`;
+        return pgSql;
+      }
+    }
+
+    // Skip other PRAGMA statements (they're SQLite-specific)
+    if (pgSql.toUpperCase().startsWith('PRAGMA')) {
+      return 'SELECT 1 WHERE 1=0'; // Return empty result
+    }
+
+    // Convert INSERT OR IGNORE to INSERT ... ON CONFLICT DO NOTHING
+    if (pgSql.toUpperCase().includes('INSERT OR IGNORE')) {
+      // Remove "OR IGNORE" from INSERT statement
+      pgSql = pgSql.replace(/INSERT\s+OR\s+IGNORE\s+INTO/gi, 'INSERT INTO');
+      
+      // Find the table name and column list
+      const insertMatch = pgSql.match(/INSERT\s+INTO\s+(\w+)\s*\(([^)]+)\)/i);
       if (insertMatch) {
         const tableName = insertMatch[1];
-        pgSql += ` RETURNING id`;
+        const columns = insertMatch[2];
+        
+        // Try to find the primary key column (usually 'id' or first column)
+        // For now, use a generic approach - conflict on all columns or id
+        let conflictColumns = 'id'; // Default to id
+        if (columns.includes('id')) {
+          conflictColumns = 'id';
+        } else {
+          // Use first column as fallback
+          const firstCol = columns.split(',')[0].trim();
+          conflictColumns = firstCol;
+        }
+        
+        // Add ON CONFLICT clause
+        if (pgSql.toUpperCase().includes('VALUES')) {
+          // Insert before VALUES
+          pgSql = pgSql.replace(/\s+VALUES\s+/i, ` ON CONFLICT (${conflictColumns}) DO NOTHING VALUES `);
+        } else if (pgSql.toUpperCase().includes('SELECT')) {
+          // Insert before SELECT
+          pgSql = pgSql.replace(/\s+SELECT\s+/i, ` ON CONFLICT (${conflictColumns}) DO NOTHING SELECT `);
+        } else {
+          // Add at the end if neither VALUES nor SELECT
+          pgSql += ` ON CONFLICT (${conflictColumns}) DO NOTHING`;
+        }
+      } else {
+        // If no column list, try simpler pattern
+        const simpleMatch = pgSql.match(/INSERT\s+INTO\s+(\w+)/i);
+        if (simpleMatch) {
+          pgSql = pgSql.replace(/\s+VALUES\s+/i, ' ON CONFLICT DO NOTHING VALUES ');
+        }
+      }
+    }
+
+    // Convert INTEGER PRIMARY KEY AUTOINCREMENT to SERIAL PRIMARY KEY
+    // Must handle this before converting AUTOINCREMENT alone
+    // Pattern: INTEGER PRIMARY KEY AUTOINCREMENT -> SERIAL PRIMARY KEY
+    pgSql = pgSql.replace(/INTEGER\s+PRIMARY\s+KEY\s+AUTOINCREMENT/gi, 'SERIAL PRIMARY KEY');
+    
+    // Also handle: id INTEGER PRIMARY KEY AUTOINCREMENT (with id column name)
+    pgSql = pgSql.replace(/(\w+)\s+INTEGER\s+PRIMARY\s+KEY\s+AUTOINCREMENT/gi, '$1 SERIAL PRIMARY KEY');
+    
+    // Convert remaining standalone AUTOINCREMENT - remove it (PostgreSQL uses SERIAL or sequences)
+    // But be careful - only remove if it's not already part of SERIAL
+    pgSql = pgSql.replace(/\s+AUTOINCREMENT\b/gi, '');
+
+    // Convert DATETIME to TIMESTAMP
+    pgSql = pgSql.replace(/\bDATETIME\b/gi, 'TIMESTAMP');
+
+    // Convert BOOLEAN DEFAULT 0/1 to BOOLEAN DEFAULT false/true
+    pgSql = pgSql.replace(/BOOLEAN\s+DEFAULT\s+0\b/gi, 'BOOLEAN DEFAULT false');
+    pgSql = pgSql.replace(/BOOLEAN\s+DEFAULT\s+1\b/gi, 'BOOLEAN DEFAULT true');
+
+    // Convert INTEGER DEFAULT 0/1 for boolean-like columns to BOOLEAN
+    // This is more complex, so we'll handle it case by case if needed
+
+    // Convert CURRENT_TIMESTAMP to NOW() (but not in DEFAULT CURRENT_TIMESTAMP which becomes DEFAULT NOW())
+    pgSql = pgSql.replace(/\bCURRENT_TIMESTAMP\b/gi, 'NOW()');
+    
+    // Convert CURRENT_DATE to CURRENT_DATE (PostgreSQL supports this)
+    // No change needed
+
+    // Handle RETURNING clause for INSERT (PostgreSQL feature)
+    // Only add if not already present and if it's an INSERT statement
+    if (pgSql.toUpperCase().includes('INSERT INTO') && 
+        !pgSql.toUpperCase().includes('RETURNING') &&
+        !pgSql.toUpperCase().includes('ON CONFLICT')) {
+      const insertMatch = pgSql.match(/INSERT\s+INTO\s+(\w+)/i);
+      if (insertMatch && pgSql.toUpperCase().includes('VALUES')) {
+        // Add RETURNING id at the end (before semicolon if present)
+        if (pgSql.endsWith(';')) {
+          pgSql = pgSql.slice(0, -1) + ' RETURNING id;';
+        } else {
+          pgSql += ' RETURNING id';
+        }
       }
     }
 

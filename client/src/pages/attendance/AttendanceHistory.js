@@ -53,10 +53,22 @@ const AttendanceHistory = () => {
 
   const handleSignIn = async () => {
     try {
-      await api.post('/attendance/sign-in', {
-        late_reason: lateReason || null
+      const now = new Date();
+      const standardStartTime = new Date(now);
+      standardStartTime.setHours(9, 0, 0, 0);
+      const isLate = now > standardStartTime;
+      
+      // If late, require reason
+      if (isLate && !lateReason) {
+        alert('Please provide a reason for signing in late (after 9:00 AM)');
+        return;
+      }
+      
+      const response = await api.post('/attendance/sign-in', {
+        late_reason: isLate ? lateReason : null
       });
-      alert('Signed in successfully');
+      
+      alert(response.data.message || 'Signed in successfully');
       setShowSignInModal(false);
       setLateReason('');
       fetchTodayStatus();
@@ -69,10 +81,22 @@ const AttendanceHistory = () => {
 
   const handleSignOut = async () => {
     try {
-      await api.post('/attendance/sign-out', {
-        early_reason: earlyReason || null
+      const now = new Date();
+      const standardEndTime = new Date(now);
+      standardEndTime.setHours(17, 0, 0, 0);
+      const isEarly = now < standardEndTime;
+      
+      // If early, require reason
+      if (isEarly && !earlyReason) {
+        alert('Please provide a reason for signing out early (before 5:00 PM)');
+        return;
+      }
+      
+      const response = await api.post('/attendance/sign-out', {
+        early_reason: isEarly ? earlyReason : null
       });
-      alert('Signed out successfully');
+      
+      alert(response.data.message || 'Signed out successfully');
       setShowSignOutModal(false);
       setEarlyReason('');
       fetchTodayStatus();

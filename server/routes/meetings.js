@@ -3,6 +3,7 @@ const router = express.Router();
 const db = require('../config/database');
 const { authenticateToken } = require('../utils/auth');
 const { createNotification, sendNotificationToUser } = require('../utils/notifications');
+const { getBirthdaysForDateRange } = require('../utils/birthdayNotifications');
 
 // Get all meetings (users see their own meetings, admin sees all)
 router.get('/', authenticateToken, async (req, res) => {
@@ -527,6 +528,18 @@ router.get('/calendar/events', authenticateToken, async (req, res) => {
                meeting.status === 'cancelled' ? '#dc3545' : '#007bff'
       };
     });
+    
+    // Add birthdays to calendar events
+    try {
+      const birthdays = await getBirthdaysForDateRange(
+        start_date || new Date().toISOString().split('T')[0],
+        end_date || new Date().toISOString().split('T')[0]
+      );
+      events.push(...birthdays);
+    } catch (birthdayError) {
+      console.error('Error fetching birthdays for calendar:', birthdayError);
+      // Continue without birthdays if there's an error
+    }
     
     res.json({ events });
   } catch (error) {

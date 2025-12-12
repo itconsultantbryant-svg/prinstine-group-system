@@ -9,6 +9,7 @@ require('dotenv').config();
 
 const db = require('./config/database');
 const { startPeriodicCheckpoint, stopPeriodicCheckpoint } = require('./utils/dbCheckpoint');
+const { checkAndSendBirthdayNotifications } = require('./utils/birthdayNotifications');
 const fs = require('fs');
 const path = require('path');
 
@@ -140,8 +141,8 @@ async function initializeDatabase() {
     console.log('Using database path:', dbPath);
 
     try {
-      await db.connect();
-      console.log('Database connected successfully');
+    await db.connect();
+    console.log('Database connected successfully');
     } catch (dbError) {
       // If PostgreSQL connection fails, provide helpful error and exit
       if (process.env.DATABASE_URL) {
@@ -163,12 +164,12 @@ async function initializeDatabase() {
     const tables = await db.all("SELECT name FROM sqlite_master WHERE type='table' AND name='users'");
     
     // Define migration paths (used in both if and else blocks)
-    const migrationPath = path.join(__dirname, '../database/migrations/001_initial_schema.sql');
-    const seedPath = path.join(__dirname, '../database/migrations/002_seed_data.sql');
-    const supportTicketsPath = path.join(__dirname, '../database/migrations/003_support_tickets.sql');
-    const communicationsPath = path.join(__dirname, '../database/migrations/004_communications_enhancement.sql');
-    const progressReportPath = path.join(__dirname, '../database/migrations/005_progress_report_fields.sql');
-    const progressReportsTablePath = path.join(__dirname, '../database/migrations/006_progress_reports_table.sql');
+      const migrationPath = path.join(__dirname, '../database/migrations/001_initial_schema.sql');
+      const seedPath = path.join(__dirname, '../database/migrations/002_seed_data.sql');
+      const supportTicketsPath = path.join(__dirname, '../database/migrations/003_support_tickets.sql');
+      const communicationsPath = path.join(__dirname, '../database/migrations/004_communications_enhancement.sql');
+      const progressReportPath = path.join(__dirname, '../database/migrations/005_progress_report_fields.sql');
+      const progressReportsTablePath = path.join(__dirname, '../database/migrations/006_progress_reports_table.sql');
     const payrollManagementPath = path.join(__dirname, '../database/migrations/010_payroll_management.sql');
     const staffEnhancementsPath = path.join(__dirname, 'database/migrations/007_staff_enhancements.sql');
     const staffClientReportsPath = path.join(__dirname, 'database/migrations/008_staff_client_reports.sql');
@@ -1226,8 +1227,8 @@ async function initializeDatabase() {
         const deptColumnNames = deptColumns.map(col => col.column_name);
         
         if (!deptColumnNames.includes('head_name')) {
-          try {
-            await db.run('ALTER TABLE departments ADD COLUMN head_name TEXT');
+        try {
+          await db.run('ALTER TABLE departments ADD COLUMN head_name TEXT');
           } catch (e) {
             if (!e.message.includes('already exists')) {
               console.error('Error adding head_name column:', e.message);
@@ -1235,8 +1236,8 @@ async function initializeDatabase() {
           }
         }
         if (!deptColumnNames.includes('head_phone')) {
-          try {
-            await db.run('ALTER TABLE departments ADD COLUMN head_phone TEXT');
+        try {
+          await db.run('ALTER TABLE departments ADD COLUMN head_phone TEXT');
           } catch (e) {
             if (!e.message.includes('already exists')) {
               console.error('Error adding head_phone column:', e.message);
@@ -1244,8 +1245,8 @@ async function initializeDatabase() {
           }
         }
         if (!deptColumnNames.includes('head_email')) {
-          try {
-            await db.run('ALTER TABLE departments ADD COLUMN head_email TEXT');
+        try {
+          await db.run('ALTER TABLE departments ADD COLUMN head_email TEXT');
           } catch (e) {
             if (!e.message.includes('already exists')) {
               console.error('Error adding head_email column:', e.message);
@@ -1292,36 +1293,36 @@ async function initializeDatabase() {
         const certColumnNames = certColumns.map(col => col.column_name);
         
         if (!certColumnNames.includes('file_path')) {
-          try {
-            await db.run('ALTER TABLE certificates ADD COLUMN file_path TEXT');
-          } catch (e) {
+        try {
+          await db.run('ALTER TABLE certificates ADD COLUMN file_path TEXT');
+        } catch (e) {
             if (!e.message.includes('already exists')) {
               console.error('Error adding file_path column:', e.message);
-            }
+        }
           }
         }
         if (!certColumnNames.includes('file_type')) {
-          try {
-            await db.run('ALTER TABLE certificates ADD COLUMN file_type TEXT');
-          } catch (e) {
+        try {
+          await db.run('ALTER TABLE certificates ADD COLUMN file_type TEXT');
+        } catch (e) {
             if (!e.message.includes('already exists')) {
               console.error('Error adding file_type column:', e.message);
-            }
+        }
           }
         }
         if (!certColumnNames.includes('completion_date')) {
-          try {
-            await db.run('ALTER TABLE certificates ADD COLUMN completion_date DATE');
-          } catch (e) {
+        try {
+          await db.run('ALTER TABLE certificates ADD COLUMN completion_date DATE');
+        } catch (e) {
             if (!e.message.includes('already exists')) {
               console.error('Error adding completion_date column:', e.message);
-            }
+        }
           }
         }
         if (!certColumnNames.includes('updated_at')) {
-          try {
+        try {
             await db.run('ALTER TABLE certificates ADD COLUMN updated_at TIMESTAMP DEFAULT NOW()');
-          } catch (e) {
+        } catch (e) {
             if (!e.message.includes('already exists')) {
               console.error('Error adding updated_at column:', e.message);
             }
@@ -2020,6 +2021,9 @@ async function startServer() {
       console.log(`Server running on port ${PORT}`);
       console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
       console.log(`✓ Server is ready to accept requests`);
+      
+      // Schedule birthday notifications to run daily at 8:00 AM
+      scheduleBirthdayNotifications();
     });
     
     server.on('error', (err) => {
@@ -2067,6 +2071,45 @@ async function gracefulShutdown(signal) {
   
   console.log('Graceful shutdown completed');
   process.exit(0);
+}
+
+// Birthday notification scheduler
+function scheduleBirthdayNotifications() {
+  // Check birthdays immediately on server start
+  checkAndSendBirthdayNotifications().catch(err => {
+    console.error('Error checking birthdays on startup:', err);
+  });
+  
+  // Schedule daily check at 8:00 AM
+  const scheduleNextCheck = () => {
+    const now = new Date();
+    const nextCheck = new Date();
+    nextCheck.setHours(8, 0, 0, 0);
+    
+    // If it's already past 8 AM today, schedule for tomorrow
+    if (now > nextCheck) {
+      nextCheck.setDate(nextCheck.getDate() + 1);
+    }
+    
+    const msUntilNextCheck = nextCheck.getTime() - now.getTime();
+    
+    setTimeout(() => {
+      checkAndSendBirthdayNotifications().catch(err => {
+        console.error('Error checking birthdays:', err);
+      });
+      
+      // Schedule next check (24 hours later)
+      setInterval(() => {
+        checkAndSendBirthdayNotifications().catch(err => {
+          console.error('Error checking birthdays:', err);
+        });
+      }, 24 * 60 * 60 * 1000); // 24 hours
+    }, msUntilNextCheck);
+    
+    console.log(`✓ Birthday notifications scheduled for ${nextCheck.toLocaleString()}`);
+  };
+  
+  scheduleNextCheck();
 }
 
 process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));

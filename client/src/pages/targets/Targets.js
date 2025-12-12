@@ -168,8 +168,15 @@ const Targets = () => {
         socket.emit('target_created');
       }
     } catch (err) {
-      setError(err.response?.data?.error || 'Failed to create target');
+      const errorMessage = err.response?.data?.error || 'Failed to create target';
+      setError(errorMessage);
       console.error('Error creating target:', err);
+      
+      // If user already has an active target, show helpful message
+      if (errorMessage.includes('already has an active target')) {
+        // Optionally, we could fetch and show the existing target here
+        alert(errorMessage + '\n\nPlease extend or cancel the existing target first, or wait for it to be completed.');
+      }
     }
   };
 

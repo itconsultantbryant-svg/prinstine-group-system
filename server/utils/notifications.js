@@ -204,9 +204,36 @@ async function sendBulkNotifications(userIds, title, message, type = 'info', lin
 
 /**
  * Send notification to all users with a specific role
+ * Supports both old signature: sendNotificationToRole(role, title, message, type, link, senderId, attachments)
+ * and new signature: sendNotificationToRole(role, { title, message, type, link, senderId, attachments })
  */
-async function sendNotificationToRole(role, title, message, type = 'info', link = null, senderId = null, attachments = null) {
+async function sendNotificationToRole(role, titleOrOptions, message, type = 'info', link = null, senderId = null, attachments = null) {
   try {
+    let title, notificationMessage, notificationType, notificationLink, notificationSenderId, notificationAttachments;
+    
+    // Check if second parameter is an options object (new signature)
+    if (typeof titleOrOptions === 'object' && titleOrOptions !== null && !Array.isArray(titleOrOptions)) {
+      title = titleOrOptions.title;
+      notificationMessage = titleOrOptions.message;
+      notificationType = titleOrOptions.type || 'info';
+      notificationLink = titleOrOptions.link || null;
+      notificationSenderId = titleOrOptions.senderId || null;
+      notificationAttachments = titleOrOptions.attachments || null;
+    } else {
+      // Old signature
+      title = titleOrOptions;
+      notificationMessage = message;
+      notificationType = type;
+      notificationLink = link;
+      notificationSenderId = senderId;
+      notificationAttachments = attachments;
+    }
+    
+    // Ensure message is a string, not an object
+    if (typeof notificationMessage !== 'string') {
+      notificationMessage = JSON.stringify(notificationMessage);
+    }
+    
     // Get all users with the specified role
     const users = await db.all(
       'SELECT id FROM users WHERE role = ? AND is_active = 1',
@@ -218,7 +245,7 @@ async function sendNotificationToRole(role, title, message, type = 'info', link 
     }
     
     const userIds = users.map(u => u.id);
-    return await sendBulkNotifications(userIds, title, message, type, link, senderId, attachments);
+    return await sendBulkNotifications(userIds, title, notificationMessage, notificationType, notificationLink, notificationSenderId, notificationAttachments);
   } catch (error) {
     console.error('Error sending notification to role:', error);
     throw error;

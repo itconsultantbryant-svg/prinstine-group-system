@@ -60,9 +60,28 @@ const TopBar = () => {
           
           // Extract title and message properly
           const title = parsedNotification.title || 'Notification';
-          const message = typeof parsedNotification.message === 'string' 
-            ? parsedNotification.message 
-            : JSON.stringify(parsedNotification.message);
+          let message = parsedNotification.message;
+          
+          // Handle message if it's a JSON string
+          if (typeof message === 'string') {
+            try {
+              // Try to parse if it looks like JSON
+              if (message.trim().startsWith('{') || message.trim().startsWith('[')) {
+                const parsed = JSON.parse(message);
+                // If parsed is an object, extract meaningful content
+                if (typeof parsed === 'object' && parsed !== null) {
+                  message = parsed.message || parsed.title || JSON.stringify(parsed);
+                } else {
+                  message = parsed;
+                }
+              }
+            } catch (e) {
+              // Not JSON, use as-is
+            }
+          } else if (typeof message === 'object' && message !== null) {
+            // If message is an object, extract meaningful content
+            message = message.message || message.title || JSON.stringify(message);
+          }
           
           // Add new notification to the list
           setNotifications(prev => [{

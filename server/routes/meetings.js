@@ -32,7 +32,15 @@ router.get('/', authenticateToken, async (req, res) => {
       params.push(req.user.id, req.user.id);
     }
     
-    query += ` GROUP BY m.id ORDER BY m.meeting_date DESC, m.start_time DESC`;
+    // Check if using PostgreSQL
+    const USE_POSTGRESQL = !!process.env.DATABASE_URL;
+    
+    if (USE_POSTGRESQL) {
+      // PostgreSQL requires all non-aggregated columns in GROUP BY
+      query += ` GROUP BY m.id, m.title, m.purpose, m.meeting_date, m.start_time, m.end_time, m.meeting_type, m.meeting_link, m.meeting_location, m.status, m.created_by, m.created_at, m.updated_at, u.name, u.email ORDER BY m.meeting_date DESC, m.start_time DESC`;
+    } else {
+      query += ` GROUP BY m.id ORDER BY m.meeting_date DESC, m.start_time DESC`;
+    }
     
     const meetings = await db.all(query, params);
     

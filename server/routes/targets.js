@@ -159,13 +159,17 @@ router.post('/', authenticateToken, requireRole('Admin'), [
     }
 
     // Check if user already has an active target
+    // Check for both 'Active' status and targets that haven't been completed
     const existingTarget = await db.get(
-      'SELECT id FROM targets WHERE user_id = ? AND status = ?',
+      'SELECT id, target_amount, period_start, period_end FROM targets WHERE user_id = ? AND (status = ? OR status IS NULL OR status = \'\')',
       [user_id, 'Active']
     );
 
     if (existingTarget) {
-      return res.status(400).json({ error: 'User already has an active target. Please extend or cancel the existing target first.' });
+      return res.status(400).json({ 
+        error: 'User already has an active target. Please extend or cancel the existing target first.',
+        existing_target_id: existingTarget.id
+      });
     }
 
     const result = await db.run(

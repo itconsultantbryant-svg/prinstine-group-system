@@ -311,6 +311,14 @@ router.put('/:id', authenticateToken, requireRole('DepartmentHead', 'Admin'), [
 
     await logAction(req.user.id, 'update_payroll', 'payroll_records', req.params.id, {}, req);
 
+    // Emit real-time update
+    if (global.io) {
+      global.io.emit('payroll_updated', {
+        id: req.params.id,
+        updated_by: req.user.name
+      });
+    }
+
     res.json({ message: 'Payroll record updated successfully' });
   } catch (error) {
     console.error('Update payroll record error:', error);

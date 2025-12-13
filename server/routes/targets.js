@@ -104,8 +104,20 @@ router.get('/', authenticateToken, async (req, res) => {
         user_id: targets[0].user_id,
         user_name: targets[0].user_name,
         target_amount: targets[0].target_amount,
+        total_progress: targets[0].total_progress,
+        shared_in: targets[0].shared_in,
+        shared_out: targets[0].shared_out,
         status: targets[0].status
       });
+      
+      // Debug: Check actual target_progress records for first target
+      if (targetProgressExists) {
+        const progressCheck = await db.all(
+          'SELECT SUM(amount) as total FROM target_progress WHERE target_id = ?',
+          [targets[0].id]
+        );
+        console.log('Direct progress check for target', targets[0].id, ':', progressCheck);
+      }
     } else {
       console.log('No targets found in database - checking if targets table has any rows...');
       // Try a simple query to see if there are any targets at all

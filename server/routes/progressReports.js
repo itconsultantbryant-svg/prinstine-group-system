@@ -271,8 +271,14 @@ router.post('/', authenticateToken, requireRole('Admin', 'DepartmentHead', 'Staf
     await logAction(req.user.id, 'create_progress_report', 'progress_reports', result.lastID, { name, category, status }, req);
 
     // Auto-update target progress if amount is provided
-    if (amount && amount > 0) {
+    if (amount && parseFloat(amount) > 0) {
       try {
+        console.log('Processing target progress update for progress report:', {
+          progress_report_id: result.lastID,
+          amount: amount,
+          user_id: req.user.id
+        });
+        
         // Find active target for the creator
         const target = await db.get(
           'SELECT * FROM targets WHERE user_id = ? AND status = ?',
@@ -280,6 +286,8 @@ router.post('/', authenticateToken, requireRole('Admin', 'DepartmentHead', 'Staf
         );
 
         if (target) {
+          console.log('Found active target:', { target_id: target.id, user_id: req.user.id });
+          
           // Check if progress already recorded for this report
           const existingProgress = await db.get(
             'SELECT id FROM target_progress WHERE progress_report_id = ?',
@@ -295,28 +303,58 @@ router.post('/', authenticateToken, requireRole('Admin', 'DepartmentHead', 'Staf
                 target.id,
                 req.user.id,
                 result.lastID,
-                amount,
+                parseFloat(amount),
                 category,
                 status,
                 date
               ]
             );
             
+            const progressId = progressResult.lastID || progressResult.id || (progressResult.rows && progressResult.rows[0] && progressResult.rows[0].id);
+            
+            console.log('Target progress created successfully:', {
+              progress_id: progressId,
+              target_id: target.id,
+              user_id: req.user.id,
+              amount: parseFloat(amount),
+              progress_report_id: result.lastID,
+              progressResult: progressResult
+            });
+            
+            // Verify the progress was created
+            const verifyProgress = await db.get(
+              'SELECT * FROM target_progress WHERE id = ?',
+              [progressId]
+            );
+            console.log('Verified target progress record:', verifyProgress);
+            
             // Emit real-time update for target progress
             if (global.io) {
               global.io.emit('target_progress_updated', {
                 target_id: target.id,
                 user_id: req.user.id,
-                amount: amount,
+                amount: parseFloat(amount),
                 progress_report_id: result.lastID
               });
+              console.log('Emitted target_progress_updated event');
             }
+          } else {
+            console.log('Target progress already exists for progress report:', result.lastID);
           }
+        } else {
+          console.log('No active target found for user:', req.user.id);
         }
       } catch (targetError) {
         // Log but don't fail the progress report creation
         console.error('Error updating target progress:', targetError);
+        console.error('Error details:', {
+          message: targetError.message,
+          code: targetError.code,
+          stack: targetError.stack?.split('\n').slice(0, 5).join('\n')
+        });
       }
+    } else {
+      console.log('No amount provided or amount is 0, skipping target progress update');
     }
 
     // Emit real-time update for progress report

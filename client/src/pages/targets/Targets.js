@@ -972,25 +972,53 @@ const Targets = () => {
                       <option value="Others">Others</option>
                     </select>
                   </div>
-                  <div className="mb-3">
-                    <label className="form-label">Period Start *</label>
-                    <input
-                      type="date"
-                      className="form-control"
-                      value={editForm.period_start}
-                      onChange={(e) => setEditForm({ ...editForm, period_start: e.target.value })}
-                      required
-                    />
-                  </div>
-                  <div className="mb-3">
-                    <label className="form-label">Period End</label>
-                    <input
-                      type="date"
-                      className="form-control"
-                      value={editForm.period_end}
-                      onChange={(e) => setEditForm({ ...editForm, period_end: e.target.value })}
-                    />
-                  </div>
+                  {user?.role === 'Admin' && (
+                    <>
+                      <div className="mb-3">
+                        <label className="form-label">Period Start *</label>
+                        <input
+                          type="date"
+                          className="form-control"
+                          value={editForm.period_start}
+                          onChange={(e) => setEditForm({ ...editForm, period_start: e.target.value })}
+                          required
+                        />
+                      </div>
+                      <div className="mb-3">
+                        <label className="form-label">Period End</label>
+                        <input
+                          type="date"
+                          className="form-control"
+                          value={editForm.period_end}
+                          onChange={(e) => setEditForm({ ...editForm, period_end: e.target.value })}
+                        />
+                      </div>
+                    </>
+                  )}
+                  {user?.role !== 'Admin' && (
+                    <>
+                      <div className="mb-3">
+                        <label className="form-label">Period Start</label>
+                        <input
+                          type="text"
+                          className="form-control"
+                          value={selectedTarget.period_start ? new Date(selectedTarget.period_start).toLocaleDateString() : 'N/A'}
+                          disabled
+                        />
+                        <small className="text-muted">Only Admin can edit period dates</small>
+                      </div>
+                      <div className="mb-3">
+                        <label className="form-label">Period End</label>
+                        <input
+                          type="text"
+                          className="form-control"
+                          value={selectedTarget.period_end ? new Date(selectedTarget.period_end).toLocaleDateString() : 'N/A'}
+                          disabled
+                        />
+                        <small className="text-muted">Only Admin can edit period dates</small>
+                      </div>
+                    </>
+                  )}
                   <div className="mb-3">
                     <label className="form-label">Status</label>
                     <select

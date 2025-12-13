@@ -275,11 +275,23 @@ const Targets = () => {
 
   const handleOpenEditModal = (target) => {
     setSelectedTarget(target);
+    // Format dates for date input (yyyy-MM-dd format)
+    const formatDateForInput = (dateValue) => {
+      if (!dateValue) return '';
+      try {
+        const date = new Date(dateValue);
+        if (isNaN(date.getTime())) return '';
+        return date.toISOString().split('T')[0];
+      } catch (e) {
+        return '';
+      }
+    };
+    
     setEditForm({
       target_amount: target.target_amount || '',
       category: target.category || '',
-      period_start: target.period_start || '',
-      period_end: target.period_end || '',
+      period_start: formatDateForInput(target.period_start),
+      period_end: formatDateForInput(target.period_end),
       status: target.status || 'Active',
       notes: target.notes || ''
     });

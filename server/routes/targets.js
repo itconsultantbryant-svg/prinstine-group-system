@@ -652,7 +652,14 @@ router.post('/share-fund', authenticateToken, [
       [from_user_id, to_user_id, amount, progress_report_id || null, reason || null, req.user.id]
     );
 
-    await logAction(req.user.id, 'share_fund', 'fund_sharing', result.lastID, { 
+    const sharingId = result.lastID || result.id || (result.rows && result.rows[0] && result.rows[0].id);
+    
+    if (!sharingId) {
+      console.error('Failed to get sharing ID after creation:', result);
+      return res.status(500).json({ error: 'Failed to create fund sharing - could not retrieve sharing ID' });
+    }
+
+    await logAction(req.user.id, 'share_fund', 'fund_sharing', sharingId, { 
       to_user_id, amount 
     }, req);
 
@@ -660,18 +667,24 @@ router.post('/share-fund', authenticateToken, [
     if (global.io) {
       const sender = await db.get('SELECT name FROM users WHERE id = ?', [from_user_id]);
       global.io.emit('fund_shared', {
-        id: result.lastID,
+        id: sharingId,
         from_user_id,
-        from_user_name: sender.name,
+        from_user_name: sender?.name || 'Unknown',
         to_user_id,
         to_user_name: recipient.name,
         amount
+      });
+      
+      // Also emit target update events for both users
+      global.io.emit('target_progress_updated', {
+        target_id: senderTarget.id,
+        user_id: from_user_id
       });
     }
 
     res.status(201).json({
       message: 'Fund shared successfully',
-      sharing: { id: result.lastID }
+      sharing: { id: sharingId }
     });
   } catch (error) {
     console.error('Share fund error:', error);

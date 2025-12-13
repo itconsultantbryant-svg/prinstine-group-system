@@ -99,14 +99,22 @@ const Targets = () => {
         fetchSharingHistory();
       };
 
+      const handleTargetProgressUpdated = () => {
+        console.log('Target progress updated event received, refreshing...');
+        fetchTargets();
+        fetchSharingHistory();
+      };
+
       socket.on('target_created', handleTargetCreated);
       socket.on('target_updated', handleTargetUpdated);
       socket.on('fund_shared', handleFundShared);
+      socket.on('target_progress_updated', handleTargetProgressUpdated);
 
       return () => {
         socket.off('target_created', handleTargetCreated);
         socket.off('target_updated', handleTargetUpdated);
         socket.off('fund_shared', handleFundShared);
+        socket.off('target_progress_updated', handleTargetProgressUpdated);
       };
     }
   }, [user]);

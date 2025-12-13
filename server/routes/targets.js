@@ -215,23 +215,37 @@ router.post('/', authenticateToken, requireRole('Admin'), [
              COALESCE(u.email, '') as user_email,
              COALESCE(u.role, '') as user_role,
              COALESCE(creator.name, 'System') as created_by_name,
-             0 as total_progress,
-             0 as shared_out,
-             0 as shared_in
+             (SELECT COALESCE(SUM(tp.amount), 0) 
+              FROM target_progress tp 
+              WHERE tp.target_id = t.id) as total_progress,
+             (SELECT COALESCE(SUM(CASE WHEN fs.status = 'Active' THEN fs.amount ELSE 0 END), 0)
+              FROM fund_sharing fs
+              WHERE fs.from_user_id = t.user_id) as shared_out,
+             (SELECT COALESCE(SUM(CASE WHEN fs.status = 'Active' THEN fs.amount ELSE 0 END), 0)
+              FROM fund_sharing fs
+              WHERE fs.to_user_id = t.user_id) as shared_in
       FROM targets t
       LEFT JOIN users u ON t.user_id = u.id
       LEFT JOIN users creator ON t.created_by = creator.id
       WHERE t.id = ?
     `, [targetId]);
 
+    if (!createdTarget) {
+      console.error('Failed to fetch created target:', targetId);
+      return res.status(500).json({ error: 'Target created but could not be retrieved' });
+    }
+
     // Calculate initial progress
-    const netAmount = 0;
-    const progressPercentage = 0;
+    const netAmount = (createdTarget.total_progress || 0) + (createdTarget.shared_in || 0) - (createdTarget.shared_out || 0);
+    const progressPercentage = target_amount > 0 
+      ? (netAmount / target_amount) * 100 
+      : 0;
+    
     const targetWithProgress = {
       ...createdTarget,
       net_amount: netAmount,
       progress_percentage: progressPercentage.toFixed(2),
-      remaining_amount: target_amount
+      remaining_amount: Math.max(0, target_amount - netAmount)
     };
 
     // Emit real-time update

@@ -321,21 +321,36 @@ router.post('/', authenticateToken, requireRole('Admin'), [
         const placeholders = columns.map(() => '?').join(', ');
         const columnList = columns.join(', ');
         
+        // Build parameters array to match columns exactly
+        const params = [
+          userResult.lastID, staffId, employment_type, position, department,
+          employment_date || new Date().toISOString().split('T')[0],
+          baseSalaryValue, bonus_structure || null, emergency_contact_name || null,
+          emergency_contact_phone || null, address || null,
+          date_of_birth || null, place_of_birth || null, nationality || null,
+          gender || null, marital_status || null, national_id || null, tax_id || null,
+          bank_name || null, bank_account_number || null, bank_branch || null,
+          next_of_kin_name || null, next_of_kin_relationship || null,
+          next_of_kin_phone || null, next_of_kin_address || null,
+          qualificationsData, previousEmploymentData
+        ];
+        
+        // Only add referencesData if the column exists
+        if (hasReferencesColumn) {
+          params.push(referencesData);
+        }
+        
+        // Always add notes at the end
+        params.push(notes || null);
+        
+        console.log(`Inserting staff with ${columns.length} columns and ${params.length} parameters`);
+        console.log('Columns:', columns);
+        console.log('Params count:', params.length);
+        
         staffResult = await db.run(
           `INSERT INTO staff (${columnList})
            VALUES (${placeholders})`,
-          [
-            userResult.lastID, staffId, employment_type, position, department,
-            employment_date || new Date().toISOString().split('T')[0],
-            baseSalaryValue, bonus_structure || null, emergency_contact_name || null,
-            emergency_contact_phone || null, address || null,
-            date_of_birth || null, place_of_birth || null, nationality || null,
-            gender || null, marital_status || null, national_id || null, tax_id || null,
-            bank_name || null, bank_account_number || null, bank_branch || null,
-            next_of_kin_name || null, next_of_kin_relationship || null,
-            next_of_kin_phone || null, next_of_kin_address || null,
-            qualificationsData, previousEmploymentData, referencesData, notes || null
-          ]
+          params
         );
       } else {
         // Fallback to basic fields only if enhanced fields don't exist

@@ -168,7 +168,26 @@ const Targets = () => {
     setError('');
 
     try {
+      console.log('Creating target with form data:', createForm);
       const response = await api.post('/targets', createForm);
+      console.log('Target creation response:', response.data);
+      
+      // If the response includes the target, add it to the list immediately
+      if (response.data?.target) {
+        console.log('Adding created target to list:', response.data.target);
+        setTargets(prev => {
+          // Check if target already exists (avoid duplicates)
+          const exists = prev.some(t => t.id === response.data.target.id);
+          if (exists) {
+            // Update existing target
+            return prev.map(t => t.id === response.data.target.id ? response.data.target : t);
+          } else {
+            // Add new target at the beginning
+            return [response.data.target, ...prev];
+          }
+        });
+      }
+      
       setShowCreateModal(false);
       setCreateForm({
         user_id: '',
@@ -178,7 +197,8 @@ const Targets = () => {
         period_end: '',
         notes: ''
       });
-      // Refresh all data immediately
+      
+      // Refresh all data to ensure consistency
       await Promise.all([
         fetchTargets(),
         fetchSharingHistory()
@@ -193,6 +213,7 @@ const Targets = () => {
       const errorMessage = err.response?.data?.error || 'Failed to create target';
       setError(errorMessage);
       console.error('Error creating target:', err);
+      console.error('Error response:', err.response?.data);
       
       // If user already has an active target, show helpful message
       if (errorMessage.includes('already has an active target')) {

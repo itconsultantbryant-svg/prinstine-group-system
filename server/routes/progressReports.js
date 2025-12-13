@@ -515,14 +515,23 @@ router.put('/:id', authenticateToken, requireRole('Admin', 'DepartmentHead', 'St
               );
             }
             
-            // Emit real-time update for target progress
+            // Verify the total progress for this target
+            const totalProgressCheck = await db.get(
+              'SELECT COALESCE(SUM(amount), 0) as total FROM target_progress WHERE target_id = ?',
+              [target.id]
+            );
+            console.log('Total progress for target', target.id, 'after update:', totalProgressCheck);
+            
+            // Emit real-time update for target progress - emit to all users
             if (global.io) {
               global.io.emit('target_progress_updated', {
                 target_id: target.id,
                 user_id: updatedReport.created_by,
                 amount: updatedReport.amount || 0,
-                progress_report_id: req.params.id
+                progress_report_id: req.params.id,
+                total_progress: totalProgressCheck?.total || 0
               });
+              console.log('Emitted target_progress_updated event to all users');
             }
           }
         }

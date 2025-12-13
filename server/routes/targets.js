@@ -73,7 +73,9 @@ router.get('/', authenticateToken, async (req, res) => {
     // Everyone can see all targets
     query += ' ORDER BY (total_progress + COALESCE(shared_in, 0) - COALESCE(shared_out, 0)) DESC, t.created_at DESC';
 
+    console.log('Executing targets query:', query.substring(0, 200) + '...');
     const targets = await db.all(query, params);
+    console.log(`Fetched ${targets.length} targets from database`);
 
     // Calculate progress percentage and net amount for each target
     // Allow progress to exceed 100% (users can exceed their targets)
@@ -91,6 +93,7 @@ router.get('/', authenticateToken, async (req, res) => {
       };
     });
 
+    console.log(`Returning ${targetsWithProgress.length} targets with progress calculations`);
     res.json({ targets: targetsWithProgress || [] });
   } catch (error) {
     console.error('Get targets error:', error);

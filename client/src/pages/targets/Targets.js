@@ -115,12 +115,17 @@ const Targets = () => {
     try {
       setLoading(true);
       setError('');
+      console.log('Fetching targets...');
       const response = await api.get('/targets');
+      console.log('Targets API response:', response.data);
       // Handle different response formats
       const targetsData = response.data?.targets || response.data || [];
-      setTargets(Array.isArray(targetsData) ? targetsData : []);
+      const targetsArray = Array.isArray(targetsData) ? targetsData : [];
+      console.log(`Setting ${targetsArray.length} targets in state`);
+      setTargets(targetsArray);
     } catch (err) {
       console.error('Error fetching targets:', err);
+      console.error('Error response:', err.response?.data);
       setError('Failed to load targets');
       setTargets([]);
     } finally {

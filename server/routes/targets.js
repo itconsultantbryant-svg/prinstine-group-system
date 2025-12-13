@@ -708,6 +708,8 @@ router.post('/share-fund', authenticateToken, [
     // Emit real-time update
     if (global.io) {
       const sender = await db.get('SELECT name FROM users WHERE id = ?', [from_user_id]);
+      
+      // Emit fund_shared event to all users
       global.io.emit('fund_shared', {
         id: sharingId,
         from_user_id,
@@ -716,12 +718,30 @@ router.post('/share-fund', authenticateToken, [
         to_user_name: recipient.name,
         amount
       });
+      console.log('Emitted fund_shared event to all users');
       
-      // Also emit target update events for both users
+      // Also emit target update events for both sender and recipient targets
       global.io.emit('target_progress_updated', {
         target_id: senderTarget.id,
-        user_id: from_user_id
+        user_id: from_user_id,
+        action: 'fund_shared_out'
       });
+      
+      // Check if recipient has an active target
+      const recipientTarget = await db.get(
+        'SELECT id FROM targets WHERE user_id = ? AND status = ?',
+        [to_user_id, 'Active']
+      );
+      
+      if (recipientTarget) {
+        global.io.emit('target_progress_updated', {
+          target_id: recipientTarget.id,
+          user_id: to_user_id,
+          action: 'fund_shared_in'
+        });
+      }
+      
+      console.log('Emitted target_progress_updated events for fund sharing');
     }
 
     res.status(201).json({

@@ -91,9 +91,51 @@ router.get('/', authenticateToken, async (req, res) => {
     // Use the column aliases in ORDER BY
     query += ' ORDER BY (COALESCE(total_progress, 0) + COALESCE(shared_in, 0) - COALESCE(shared_out, 0)) DESC, t.created_at DESC';
 
-    console.log('Executing targets query:', query.substring(0, 200) + '...');
+    console.log('Executing targets query:', query.substring(0, 300) + '...');
+    console.log('Query params:', params);
+    console.log('Tables exist - targets:', !!tableExists, 'fund_sharing:', !!fundSharingExists, 'target_progress:', !!targetProgressExists);
+    
     const targets = await db.all(query, params);
     console.log(`Fetched ${targets.length} targets from database`);
+    
+    if (targets && targets.length > 0) {
+      console.log('First target sample:', {
+        id: targets[0].id,
+        user_id: targets[0].user_id,
+        user_name: targets[0].user_name,
+        target_amount: targets[0].target_amount,
+        status: targets[0].status
+      });
+    } else {
+      console.log('No targets found in database - checking if targets table has any rows...');
+      // Try a simple query to see if there are any targets at all
+      try {
+        const simpleCheck = await db.all('SELECT COUNT(*) as count FROM targets', []);
+        console.log('Simple count query result:', simpleCheck);
+        if (simpleCheck && simpleCheck[0] && simpleCheck[0].count > 0) {
+          console.log(`WARNING: Found ${simpleCheck[0].count} targets in database but query returned 0!`);
+          console.log('This suggests the query has an issue. Trying simplified query...');
+          // Try a very simple query without subqueries
+          const simpleTargets = await db.all('SELECT t.*, u.name as user_name FROM targets t LEFT JOIN users u ON t.user_id = u.id ORDER BY t.created_at DESC', []);
+          console.log(`Simplified query returned ${simpleTargets.length} targets`);
+          if (simpleTargets.length > 0) {
+            // Return the simplified results
+            const simplifiedWithProgress = simpleTargets.map(target => ({
+              ...target,
+              total_progress: 0,
+              shared_out: 0,
+              shared_in: 0,
+              net_amount: 0,
+              progress_percentage: '0.00',
+              remaining_amount: target.target_amount || 0
+            }));
+            return res.json({ targets: simplifiedWithProgress });
+          }
+        }
+      } catch (checkError) {
+        console.error('Error checking target count:', checkError);
+      }
+    }
 
     // Calculate progress percentage and net amount for each target
     // Allow progress to exceed 100% (users can exceed their targets)

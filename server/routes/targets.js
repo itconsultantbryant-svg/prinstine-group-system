@@ -110,13 +110,20 @@ router.get('/', authenticateToken, async (req, res) => {
         status: targets[0].status
       });
       
-      // Debug: Check actual target_progress records for first target
-      if (targetProgressExists) {
-        const progressCheck = await db.all(
-          'SELECT SUM(amount) as total FROM target_progress WHERE target_id = ?',
-          [targets[0].id]
-        );
-        console.log('Direct progress check for target', targets[0].id, ':', progressCheck);
+      // Debug: Check actual target_progress records for all targets
+      if (targetProgressExists && targets.length > 0) {
+        for (const target of targets.slice(0, 3)) { // Check first 3 targets
+          const progressCheck = await db.get(
+            'SELECT COALESCE(SUM(amount), 0) as total, COUNT(*) as count FROM target_progress WHERE target_id = ?',
+            [target.id]
+          );
+          console.log(`Direct progress check for target ${target.id}:`, {
+            total_from_query: progressCheck?.total || 0,
+            count: progressCheck?.count || 0,
+            total_from_subquery: target.total_progress,
+            match: (progressCheck?.total || 0) === parseFloat(target.total_progress || 0)
+          });
+        }
       }
     } else {
       console.log('No targets found in database - checking if targets table has any rows...');

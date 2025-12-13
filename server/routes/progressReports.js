@@ -328,15 +328,23 @@ router.post('/', authenticateToken, requireRole('Admin', 'DepartmentHead', 'Staf
             );
             console.log('Verified target progress record:', verifyProgress);
             
-            // Emit real-time update for target progress
+            // Verify the total progress for this target
+            const totalProgressCheck = await db.get(
+              'SELECT COALESCE(SUM(amount), 0) as total FROM target_progress WHERE target_id = ?',
+              [target.id]
+            );
+            console.log('Total progress for target', target.id, ':', totalProgressCheck);
+            
+            // Emit real-time update for target progress - emit to all users so everyone sees the update
             if (global.io) {
               global.io.emit('target_progress_updated', {
                 target_id: target.id,
                 user_id: req.user.id,
                 amount: parseFloat(amount),
-                progress_report_id: result.lastID
+                progress_report_id: result.lastID,
+                total_progress: totalProgressCheck?.total || 0
               });
-              console.log('Emitted target_progress_updated event');
+              console.log('Emitted target_progress_updated event to all users');
             }
           } else {
             console.log('Target progress already exists for progress report:', result.lastID);

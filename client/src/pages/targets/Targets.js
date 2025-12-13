@@ -93,16 +93,24 @@ const Targets = () => {
         fetchSharingHistory();
       };
 
-      const handleFundShared = () => {
-        console.log('Fund shared event received, refreshing...');
-        fetchTargets();
-        fetchSharingHistory();
+      const handleFundShared = (data) => {
+        console.log('Fund shared event received:', data);
+        console.log('Refreshing targets and sharing history...');
+        // Add a small delay to ensure backend has committed the transaction
+        setTimeout(() => {
+          fetchTargets();
+          fetchSharingHistory();
+        }, 300);
       };
 
-      const handleTargetProgressUpdated = () => {
-        console.log('Target progress updated event received, refreshing...');
-        fetchTargets();
-        fetchSharingHistory();
+      const handleTargetProgressUpdated = (data) => {
+        console.log('Target progress updated event received:', data);
+        console.log('Refreshing targets and sharing history...');
+        // Add a small delay to ensure backend has committed the transaction
+        setTimeout(() => {
+          fetchTargets();
+          fetchSharingHistory();
+        }, 300);
       };
 
       socket.on('target_created', handleTargetCreated);

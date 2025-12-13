@@ -40,8 +40,25 @@ router.get('/', authenticateToken, async (req, res) => {
       );
     }
 
-    // Always use subqueries, but make them safe if tables don't exist
-    // PostgreSQL will handle non-existent tables in subqueries gracefully if we check first
+    // Check if target_progress table exists
+    let targetProgressExists;
+    if (USE_POSTGRESQL) {
+      targetProgressExists = await db.get(
+        "SELECT table_name as name FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'target_progress'"
+      );
+    } else {
+      targetProgressExists = await db.get(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='target_progress'"
+      );
+    }
+
+    // Build safe subqueries that won't fail if tables don't exist
+    const totalProgressSubquery = targetProgressExists
+      ? `(SELECT COALESCE(SUM(tp.amount), 0) 
+          FROM target_progress tp 
+          WHERE tp.target_id = t.id)`
+      : 'CAST(0 AS NUMERIC)';
+    
     const sharedOutSubquery = fundSharingExists 
       ? `(SELECT COALESCE(SUM(CASE WHEN fs.status = 'Active' THEN fs.amount ELSE 0 END), 0)
           FROM fund_sharing fs
@@ -60,9 +77,7 @@ router.get('/', authenticateToken, async (req, res) => {
              COALESCE(u.email, '') as user_email,
              COALESCE(u.role, '') as user_role,
              COALESCE(creator.name, 'System') as created_by_name,
-             (SELECT COALESCE(SUM(tp.amount), 0) 
-              FROM target_progress tp 
-              WHERE tp.target_id = t.id) as total_progress,
+             ${totalProgressSubquery} as total_progress,
              ${sharedOutSubquery} as shared_out,
              ${sharedInSubquery} as shared_in
       FROM targets t

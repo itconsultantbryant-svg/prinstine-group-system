@@ -185,9 +185,19 @@ const Targets = () => {
       const response = await api.post('/targets', createForm);
       console.log('Target creation response:', response.data);
       
-      // If the response includes the target, add it to the list immediately
+      setShowCreateModal(false);
+      setCreateForm({
+        user_id: '',
+        target_amount: '',
+        category: '',
+        period_start: new Date().toISOString().split('T')[0],
+        period_end: '',
+        notes: ''
+      });
+      
+      // If the response includes the target, add it to the list immediately as a temporary measure
       if (response.data?.target) {
-        console.log('Adding created target to list:', response.data.target);
+        console.log('Adding created target to list temporarily:', response.data.target);
         setTargets(prev => {
           // Check if target already exists (avoid duplicates)
           const exists = prev.some(t => t.id === response.data.target.id);
@@ -201,15 +211,8 @@ const Targets = () => {
         });
       }
       
-      setShowCreateModal(false);
-      setCreateForm({
-        user_id: '',
-        target_amount: '',
-        category: '',
-        period_start: new Date().toISOString().split('T')[0],
-        period_end: '',
-        notes: ''
-      });
+      // Wait a moment for the backend to commit, then refresh
+      await new Promise(resolve => setTimeout(resolve, 500));
       
       // Refresh all data to ensure consistency
       await Promise.all([

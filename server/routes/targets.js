@@ -100,11 +100,27 @@ router.get('/', authenticateToken, async (req, res) => {
     res.json({ targets: targetsWithProgress || [] });
   } catch (error) {
     console.error('Get targets error:', error);
+    console.error('Error message:', error.message);
+    console.error('Error code:', error.code);
+    console.error('Error stack:', error.stack?.split('\n').slice(0, 5).join('\n'));
+    
     // Return empty array instead of error if table doesn't exist
-    if (error.message && error.message.includes('no such table')) {
+    if (error.message && (error.message.includes('no such table') || error.message.includes('does not exist'))) {
+      console.log('Table does not exist, returning empty array');
       return res.json({ targets: [] });
     }
-    res.status(500).json({ error: 'Failed to fetch targets' });
+    
+    // Return 400 for syntax errors, 500 for other errors
+    const statusCode = error.message && (
+      error.message.includes('syntax error') || 
+      (error.message.includes('column') && error.message.includes('does not exist')) ||
+      error.message.includes('invalid')
+    ) ? 400 : 500;
+    
+    res.status(statusCode).json({ 
+      error: 'Failed to fetch targets',
+      details: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
   }
 });
 

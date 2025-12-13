@@ -152,17 +152,40 @@ router.get('/', authenticateToken, async (req, res) => {
     // Calculate progress percentage and net amount for each target
     // Allow progress to exceed 100% (users can exceed their targets)
     const targetsWithProgress = targets.map(target => {
-      const netAmount = (target.total_progress || 0) + (target.shared_in || 0) - (target.shared_out || 0);
-      const progressPercentage = target.target_amount > 0 
-        ? (netAmount / target.target_amount) * 100 
+      // Ensure all values are numbers
+      const totalProgress = parseFloat(target.total_progress || 0) || 0;
+      const sharedIn = parseFloat(target.shared_in || 0) || 0;
+      const sharedOut = parseFloat(target.shared_out || 0) || 0;
+      const targetAmount = parseFloat(target.target_amount || 0) || 0;
+      
+      const netAmount = totalProgress + sharedIn - sharedOut;
+      const progressPercentage = targetAmount > 0 
+        ? (netAmount / targetAmount) * 100 
         : 0;
       
-      return {
+      const result = {
         ...target,
+        total_progress: totalProgress,
+        shared_in: sharedIn,
+        shared_out: sharedOut,
         net_amount: netAmount,
         progress_percentage: progressPercentage.toFixed(2),
-        remaining_amount: Math.max(0, target.target_amount - netAmount)
+        remaining_amount: Math.max(0, targetAmount - netAmount)
       };
+      
+      // Log calculation for debugging
+      if (targets.indexOf(target) === 0) {
+        console.log('Net amount calculation for first target:', {
+          target_id: target.id,
+          total_progress: totalProgress,
+          shared_in: sharedIn,
+          shared_out: sharedOut,
+          net_amount: netAmount,
+          target_amount: targetAmount
+        });
+      }
+      
+      return result;
     });
 
     console.log(`Returning ${targetsWithProgress.length} targets with progress calculations`);

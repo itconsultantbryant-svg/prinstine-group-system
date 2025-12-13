@@ -40,17 +40,19 @@ router.get('/', authenticateToken, async (req, res) => {
       );
     }
 
+    // Always use subqueries, but make them safe if tables don't exist
+    // PostgreSQL will handle non-existent tables in subqueries gracefully if we check first
     const sharedOutSubquery = fundSharingExists 
       ? `(SELECT COALESCE(SUM(CASE WHEN fs.status = 'Active' THEN fs.amount ELSE 0 END), 0)
           FROM fund_sharing fs
           WHERE fs.from_user_id = t.user_id)`
-      : '0';
+      : 'CAST(0 AS NUMERIC)';
     
     const sharedInSubquery = fundSharingExists
       ? `(SELECT COALESCE(SUM(CASE WHEN fs.status = 'Active' THEN fs.amount ELSE 0 END), 0)
           FROM fund_sharing fs
           WHERE fs.to_user_id = t.user_id)`
-      : '0';
+      : 'CAST(0 AS NUMERIC)';
 
     let query = `
       SELECT t.*, 
@@ -71,7 +73,8 @@ router.get('/', authenticateToken, async (req, res) => {
     const params = [];
 
     // Everyone can see all targets
-    query += ' ORDER BY (total_progress + COALESCE(shared_in, 0) - COALESCE(shared_out, 0)) DESC, t.created_at DESC';
+    // Use the column aliases in ORDER BY
+    query += ' ORDER BY (COALESCE(total_progress, 0) + COALESCE(shared_in, 0) - COALESCE(shared_out, 0)) DESC, t.created_at DESC';
 
     console.log('Executing targets query:', query.substring(0, 200) + '...');
     const targets = await db.all(query, params);

@@ -945,18 +945,32 @@ const Targets = () => {
                       disabled
                     />
                   </div>
-                  <div className="mb-3">
-                    <label className="form-label">Target Amount *</label>
-                    <input
-                      type="number"
-                      step="0.01"
-                      min="0"
-                      className="form-control"
-                      value={editForm.target_amount}
-                      onChange={(e) => setEditForm({ ...editForm, target_amount: e.target.value })}
-                      required
-                    />
-                  </div>
+                  {user?.role === 'Admin' && (
+                    <div className="mb-3">
+                      <label className="form-label">Target Amount *</label>
+                      <input
+                        type="number"
+                        step="0.01"
+                        min="0"
+                        className="form-control"
+                        value={editForm.target_amount}
+                        onChange={(e) => setEditForm({ ...editForm, target_amount: e.target.value })}
+                        required
+                      />
+                    </div>
+                  )}
+                  {user?.role !== 'Admin' && (
+                    <div className="mb-3">
+                      <label className="form-label">Target Amount</label>
+                      <input
+                        type="text"
+                        className="form-control"
+                        value={`$${parseFloat(selectedTarget.target_amount || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
+                        disabled
+                      />
+                      <small className="text-muted">Only Admin can edit target amount</small>
+                    </div>
+                  )}
                   <div className="mb-3">
                     <label className="form-label">Category</label>
                     <select

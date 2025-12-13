@@ -375,6 +375,11 @@ class PostgreSQLDatabase {
     // Convert CURRENT_DATE to CURRENT_DATE (PostgreSQL supports this)
     // No change needed
 
+    // Convert SQLite square bracket column names [references] to PostgreSQL double quotes "references"
+    // This handles reserved keyword escaping differences between SQLite and PostgreSQL
+    pgSql = pgSql.replace(/\[references\]/gi, '"references"');
+    pgSql = pgSql.replace(/\[(\w+)\]/g, '"$1"'); // Convert any other [column] to "column"
+
     // Handle RETURNING clause for INSERT (PostgreSQL feature)
     // Only add if not already present and if it's an INSERT statement
     if (pgSql.toUpperCase().includes('INSERT INTO') && 

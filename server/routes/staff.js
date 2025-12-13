@@ -277,24 +277,53 @@ router.post('/', authenticateToken, requireRole('Admin'), [
     }
 
     // Check which columns exist in staff table
-    const staffTableInfo = await db.all("PRAGMA table_info(staff)");
-    const staffColumnNames = staffTableInfo.map(col => col.name);
+    const USE_POSTGRESQL = !!process.env.DATABASE_URL;
+    let staffTableInfo;
+    let staffColumnNames;
+    
+    if (USE_POSTGRESQL) {
+      staffTableInfo = await db.all(
+        "SELECT column_name as name FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'staff'"
+      );
+      staffColumnNames = staffTableInfo.map(col => col.name);
+    } else {
+      staffTableInfo = await db.all("PRAGMA table_info(staff)");
+      staffColumnNames = staffTableInfo.map(col => col.name);
+    }
+    
     const hasEnhancedFields = staffColumnNames.includes('date_of_birth') && 
                               staffColumnNames.includes('place_of_birth') &&
                               staffColumnNames.includes('nationality');
+    
+    // Check if references column exists (could be 'references' or '[references]')
+    const hasReferencesColumn = staffColumnNames.includes('references') || 
+                                 staffColumnNames.includes('[references]');
+    const referencesColumnName = USE_POSTGRESQL ? '"references"' : '[references]';
     
     // Create staff record - use appropriate columns based on what exists
     let staffResult;
     try {
       if (hasEnhancedFields) {
-        // Use all enhanced fields if they exist
+        // Build column list dynamically based on what exists
+        const columns = [
+          'user_id', 'staff_id', 'employment_type', 'position', 'department', 'employment_date',
+          'base_salary', 'bonus_structure', 'emergency_contact_name', 'emergency_contact_phone', 'address',
+          'date_of_birth', 'place_of_birth', 'nationality', 'gender', 'marital_status', 'national_id', 'tax_id',
+          'bank_name', 'bank_account_number', 'bank_branch', 'next_of_kin_name', 'next_of_kin_relationship',
+          'next_of_kin_phone', 'next_of_kin_address', 'qualifications', 'previous_employment'
+        ];
+        
+        if (hasReferencesColumn) {
+          columns.push(referencesColumnName);
+        }
+        columns.push('notes');
+        
+        const placeholders = columns.map(() => '?').join(', ');
+        const columnList = columns.join(', ');
+        
         staffResult = await db.run(
-          `INSERT INTO staff (user_id, staff_id, employment_type, position, department, employment_date,
-            base_salary, bonus_structure, emergency_contact_name, emergency_contact_phone, address,
-            date_of_birth, place_of_birth, nationality, gender, marital_status, national_id, tax_id,
-            bank_name, bank_account_number, bank_branch, next_of_kin_name, next_of_kin_relationship,
-            next_of_kin_phone, next_of_kin_address, qualifications, previous_employment, [references], notes)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          `INSERT INTO staff (${columnList})
+           VALUES (${placeholders})`,
           [
             userResult.lastID, staffId, employment_type, position, department,
             employment_date || new Date().toISOString().split('T')[0],
@@ -423,8 +452,19 @@ router.put('/:id', authenticateToken, requireRole('Admin'), async (req, res) => 
     }
 
     // Check which columns exist in staff table
-    const staffTableInfo = await db.all("PRAGMA table_info(staff)");
-    const staffColumnNames = staffTableInfo.map(col => col.name);
+    const USE_POSTGRESQL_UPDATE = !!process.env.DATABASE_URL;
+    let staffTableInfo;
+    let staffColumnNames;
+    
+    if (USE_POSTGRESQL_UPDATE) {
+      staffTableInfo = await db.all(
+        "SELECT column_name as name FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'staff'"
+      );
+      staffColumnNames = staffTableInfo.map(col => col.name);
+    } else {
+      staffTableInfo = await db.all("PRAGMA table_info(staff)");
+      staffColumnNames = staffTableInfo.map(col => col.name);
+    }
     
     // Update staff info - only update fields that exist in the table
     const staffUpdates = [];
@@ -443,8 +483,12 @@ router.put('/:id', authenticateToken, requireRole('Admin'), async (req, res) => 
         // Check if column exists in table
         let columnExists = false;
         if (field === 'references') {
-          // References column is escaped as [references] in SQLite
-          columnExists = staffColumnNames.includes('[references]');
+          // References column is escaped differently in SQLite vs PostgreSQL
+          if (USE_POSTGRESQL_UPDATE) {
+            columnExists = staffColumnNames.includes('references');
+          } else {
+            columnExists = staffColumnNames.includes('[references]') || staffColumnNames.includes('references');
+          }
         } else {
           columnExists = staffColumnNames.includes(field);
         }
@@ -464,8 +508,10 @@ router.put('/:id', authenticateToken, requireRole('Admin'), async (req, res) => 
             value = JSON.stringify([value]);
           }
         }
-        // Escape 'references' as it's a reserved keyword in SQL (use square brackets for SQLite)
-        const fieldName = field === 'references' ? '[references]' : field;
+        // Escape 'references' as it's a reserved keyword in SQL
+        const fieldName = field === 'references' 
+          ? (USE_POSTGRESQL_UPDATE ? '"references"' : '[references]')
+          : field;
         staffUpdates.push(`${fieldName} = ?`);
         staffParams.push(value || null);
       }

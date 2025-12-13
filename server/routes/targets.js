@@ -196,7 +196,14 @@ router.post('/', authenticateToken, requireRole('Admin'), [
       [user_id, target_amount, category || null, period_start, period_end || null, notes || null, req.user.id]
     );
 
-    await logAction(req.user.id, 'create_target', 'targets', result.lastID, { user_id, target_amount, category }, req);
+    const targetId = result.lastID || result.id || (result.rows && result.rows[0] && result.rows[0].id);
+    
+    if (!targetId) {
+      console.error('Failed to get target ID after creation:', result);
+      return res.status(500).json({ error: 'Failed to create target - could not retrieve target ID' });
+    }
+
+    await logAction(req.user.id, 'create_target', 'targets', targetId, { user_id, target_amount, category }, req);
 
     // Get the created target with all details
     const createdTarget = await db.get(`
@@ -212,7 +219,7 @@ router.post('/', authenticateToken, requireRole('Admin'), [
       LEFT JOIN users u ON t.user_id = u.id
       LEFT JOIN users creator ON t.created_by = creator.id
       WHERE t.id = ?
-    `, [result.lastID]);
+    `, [targetId]);
 
     // Calculate initial progress
     const netAmount = 0;
@@ -227,13 +234,20 @@ router.post('/', authenticateToken, requireRole('Admin'), [
     // Emit real-time update
     if (global.io) {
       global.io.emit('target_created', {
-        id: result.lastID,
+        id: targetId,
         user_id,
         user_name: user.name,
         target_amount,
         created_by: req.user.name
       });
     }
+
+    console.log('Target created successfully:', {
+      id: targetId,
+      user_id,
+      target_amount,
+      target: targetWithProgress
+    });
 
     res.status(201).json({
       message: 'Target created successfully',

@@ -326,6 +326,117 @@ router.post('/', authenticateToken, requireRole('Admin'), [
 
     await logAction(req.user.id, 'create_target', 'targets', targetId, { user_id, target_amount, category }, req);
 
+    // Auto-create/update admin target when staff targets are created
+    // Admin target aggregates all staff targets
+    if (user.role !== 'Admin') {
+      try {
+        // Find admin user
+        const adminUser = await db.get("SELECT id FROM users WHERE role = 'Admin' LIMIT 1");
+        
+        if (adminUser) {
+          // Check if admin already has an active target for the same period
+          const adminTarget = await db.get(
+            'SELECT id FROM targets WHERE user_id = ? AND status = ? AND period_start = ?',
+            [adminUser.id, 'Active', period_start]
+          );
+
+          if (adminTarget) {
+            // Update admin target: sum all staff targets for this period
+            const allStaffTargets = await db.all(
+              `SELECT 
+                COALESCE(SUM(target_amount), 0) as total_target,
+                COALESCE(SUM(
+                  (SELECT COALESCE(SUM(tp.amount), 0) FROM target_progress tp WHERE tp.target_id = t.id)
+                ), 0) as total_progress,
+                COALESCE(SUM(
+                  (SELECT COALESCE(SUM(CASE WHEN fs.status = 'Active' THEN fs.amount ELSE 0 END), 0)
+                   FROM fund_sharing fs WHERE fs.from_user_id = t.user_id)
+                ), 0) as total_shared_out,
+                COALESCE(SUM(
+                  (SELECT COALESCE(SUM(CASE WHEN fs.status = 'Active' THEN fs.amount ELSE 0 END), 0)
+                   FROM fund_sharing fs WHERE fs.to_user_id = t.user_id)
+                ), 0) as total_shared_in
+               FROM targets t
+               WHERE t.user_id != ? AND t.status = ? AND t.period_start = ?`,
+              [adminUser.id, 'Active', period_start]
+            );
+
+            if (allStaffTargets && allStaffTargets[0]) {
+              const staffData = allStaffTargets[0];
+              const adminNetAmount = (staffData.total_progress || 0) + (staffData.total_shared_in || 0) - (staffData.total_shared_out || 0);
+              
+              await db.run(
+                `UPDATE targets 
+                 SET target_amount = ?, 
+                     notes = ?,
+                     updated_at = CURRENT_TIMESTAMP
+                 WHERE id = ?`,
+                [
+                  staffData.total_target || 0,
+                  `Auto-aggregated from all staff targets for period ${period_start}`,
+                  adminTarget.id
+                ]
+              );
+              
+              console.log('Admin target updated with aggregated staff targets');
+              
+              // Emit update event
+              if (global.io) {
+                global.io.emit('target_updated', {
+                  id: adminTarget.id,
+                  updated_by: 'System'
+                });
+              }
+            }
+          } else {
+            // Create new admin target: sum all staff targets for this period
+            const allStaffTargets = await db.all(
+              `SELECT 
+                COALESCE(SUM(target_amount), 0) as total_target
+               FROM targets t
+               WHERE t.user_id != ? AND t.status = ? AND t.period_start = ?`,
+              [adminUser.id, 'Active', period_start]
+            );
+
+            if (allStaffTargets && allStaffTargets[0] && allStaffTargets[0].total_target > 0) {
+              const adminTargetResult = await db.run(
+                `INSERT INTO targets (user_id, target_amount, category, period_start, period_end, notes, created_by, status)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+                [
+                  adminUser.id,
+                  allStaffTargets[0].total_target || 0,
+                  category || 'Employee',
+                  period_start,
+                  period_end || null,
+                  `Auto-aggregated from all staff targets for period ${period_start}`,
+                  req.user.id,
+                  'Active'
+                ]
+              );
+              
+              const adminTargetId = adminTargetResult.lastID || adminTargetResult.id || (adminTargetResult.rows && adminTargetResult.rows[0] && adminTargetResult.rows[0].id);
+              
+              console.log('Admin target created with aggregated staff targets:', adminTargetId);
+              
+              // Emit create event
+              if (global.io) {
+                global.io.emit('target_created', {
+                  id: adminTargetId,
+                  user_id: adminUser.id,
+                  user_name: 'System Administrator',
+                  target_amount: allStaffTargets[0].total_target || 0,
+                  created_by: 'System'
+                });
+              }
+            }
+          }
+        }
+      } catch (adminTargetError) {
+        console.error('Error creating/updating admin target:', adminTargetError);
+        // Don't fail the staff target creation if admin target update fails
+      }
+    }
+
     // Get the created target with all details
     const createdTarget = await db.get(`
       SELECT t.*, 

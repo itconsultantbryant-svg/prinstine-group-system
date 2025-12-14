@@ -248,9 +248,20 @@ router.post('/', authenticateToken, upload.single('document'), async (req, res) 
       }
     }
 
-    // Determine initial status
-    // ALL requisitions go to Department Head first, then Admin
-    const initialStatus = 'Pending_DeptHead';
+    // Determine initial status based on request type
+    // - Sick leave, temporary leave, annual leave: Direct to Admin (Pending_Admin)
+    // - Office supplies: Finance Department Head → Admin (Pending_DeptHead)
+    // - Work support: No approval needed, direct (Approved)
+    let initialStatus;
+    if (request_type === 'work_support') {
+      initialStatus = 'Approved'; // No approval needed
+    } else if (['sick_leave', 'temporary_leave', 'annual_leave'].includes(request_type)) {
+      initialStatus = 'Pending_Admin'; // Direct to Admin
+    } else if (request_type === 'office_supplies') {
+      initialStatus = 'Pending_DeptHead'; // Finance Head → Admin
+    } else {
+      initialStatus = 'Pending_DeptHead'; // Default: Department Head → Admin
+    }
 
     const document_path = req.file ? `/uploads/requisitions/${req.file.filename}` : null;
     const document_name = req.file ? req.file.originalname : null;
@@ -578,7 +589,7 @@ router.put('/:id', authenticateToken, upload.single('document'), async (req, res
   }
 });
 
-// Department Head approval/rejection (for leave requests)
+// Department Head approval/rejection (for office supplies - Finance Head only)
 router.put('/:id/dept-head-review', authenticateToken, requireRole('DepartmentHead'), async (req, res) => {
   try {
     const { status, dept_head_notes } = req.body;
@@ -590,6 +601,25 @@ router.put('/:id/dept-head-review', authenticateToken, requireRole('DepartmentHe
     const requisition = await db.get('SELECT * FROM requisitions WHERE id = ?', [req.params.id]);
     if (!requisition) {
       return res.status(404).json({ error: 'Requisition not found' });
+    }
+
+    // Only office_supplies require Department Head (Finance Head) approval
+    // Leave requests (sick_leave, temporary_leave, annual_leave) go directly to Admin
+    // Work support doesn't need approval
+    if (requisition.request_type !== 'office_supplies') {
+      return res.status(400).json({ 
+        error: `This requisition type (${requisition.request_type}) does not require Department Head approval. ${['sick_leave', 'temporary_leave', 'annual_leave'].includes(requisition.request_type) ? 'It goes directly to Admin.' : 'It does not require approval.'}` 
+      });
+    }
+
+    // Verify user is Finance Department Head
+    const financeDept = await db.get(
+      "SELECT id, name FROM departments WHERE (manager_id = ? OR LOWER(TRIM(head_email)) = ?) AND LOWER(name) LIKE '%finance%'",
+      [req.user.id, req.user.email.toLowerCase().trim()]
+    );
+    
+    if (!financeDept) {
+      return res.status(403).json({ error: 'Only Finance Department Head can approve office supplies requisitions' });
     }
 
     // Check if user is the department head for this requisition

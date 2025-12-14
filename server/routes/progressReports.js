@@ -110,6 +110,10 @@ router.post('/', authenticateToken, requireRole('Admin', 'DepartmentHead', 'Staf
 
     const { name, date, category, status, amount } = req.body;
 
+    // All progress reports require admin approval
+    // Set initial status to 'Pending' (pending admin approval)
+    const reportStatus = 'Pending';
+
     // Get user's department information
     // For DepartmentHead: Join on head_email
     // For Staff: Get department from staff table
@@ -156,6 +160,9 @@ router.post('/', authenticateToken, requireRole('Admin', 'DepartmentHead', 'Staf
     const createdByName = req.user.name || user.name || 'Unknown';
     const createdByEmail = req.user.email || user.email || '';
     
+    // All progress reports require admin approval - set status to 'Pending'
+    const reportStatus = 'Pending';
+    
     const result = await db.run(
       `INSERT INTO progress_reports 
        (name, date, category, status, amount, department_id, department_name, created_by, created_by_name, created_by_email)
@@ -164,7 +171,7 @@ router.post('/', authenticateToken, requireRole('Admin', 'DepartmentHead', 'Staf
         name,
         date,
         category,
-        status,
+        reportStatus, // Always 'Pending' for admin approval
         amount || 0,
         user.department_id || null,
         user.department_name || null,
@@ -429,9 +436,14 @@ router.put('/:id', authenticateToken, requireRole('Admin', 'DepartmentHead', 'St
       return res.status(404).json({ error: 'Progress report not found' });
     }
 
-    // Only creator or admin can update
+    // Admin can edit all progress reports, others can only edit their own
     if (req.user.role !== 'Admin' && report.created_by !== req.user.id) {
       return res.status(403).json({ error: 'Insufficient permissions' });
+    }
+    
+    // Non-admin users can only edit if report is still pending approval
+    if (req.user.role !== 'Admin' && report.status !== 'Pending') {
+      return res.status(403).json({ error: 'Cannot edit progress report that has been approved or rejected' });
     }
 
     const updates = [];

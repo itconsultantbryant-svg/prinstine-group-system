@@ -160,9 +160,6 @@ router.post('/', authenticateToken, requireRole('Admin', 'DepartmentHead', 'Staf
     const createdByName = req.user.name || user.name || 'Unknown';
     const createdByEmail = req.user.email || user.email || '';
     
-    // All progress reports require admin approval - set status to 'Pending'
-    const reportStatus = 'Pending';
-    
     const result = await db.run(
       `INSERT INTO progress_reports 
        (name, date, category, status, amount, department_id, department_name, created_by, created_by_name, created_by_email)

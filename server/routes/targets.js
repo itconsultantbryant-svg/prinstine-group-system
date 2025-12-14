@@ -195,6 +195,60 @@ router.get('/', authenticateToken, async (req, res) => {
       return result;
     });
 
+    // For admin targets, recalculate with aggregated staff data
+    // Find admin user and update admin targets with aggregated data
+    try {
+      const adminUser = await db.get("SELECT id FROM users WHERE role = 'Admin' LIMIT 1");
+      if (adminUser) {
+        for (let i = 0; i < targetsWithProgress.length; i++) {
+          const target = targetsWithProgress[i];
+          if (target.user_id === adminUser.id && target.status === 'Active') {
+            // Recalculate admin target with aggregated staff data
+            const allStaffTargets = await db.all(
+              `SELECT 
+                COALESCE(SUM(target_amount), 0) as total_target,
+                COALESCE(SUM(
+                  (SELECT COALESCE(SUM(tp.amount), 0) FROM target_progress tp WHERE tp.target_id = t.id)
+                ), 0) as total_progress,
+                COALESCE(SUM(
+                  (SELECT COALESCE(SUM(CASE WHEN fs.status = 'Active' THEN fs.amount ELSE 0 END), 0)
+                   FROM fund_sharing fs WHERE fs.from_user_id = t.user_id)
+                ), 0) as total_shared_out,
+                COALESCE(SUM(
+                  (SELECT COALESCE(SUM(CASE WHEN fs.status = 'Active' THEN fs.amount ELSE 0 END), 0)
+                   FROM fund_sharing fs WHERE fs.to_user_id = t.user_id)
+                ), 0) as total_shared_in
+               FROM targets t
+               WHERE t.user_id != ? AND t.status = ? AND t.period_start = ?`,
+              [adminUser.id, 'Active', target.period_start]
+            );
+
+            if (allStaffTargets && allStaffTargets[0]) {
+              const staffData = allStaffTargets[0];
+              const adminNetAmount = (staffData.total_progress || 0) + (staffData.total_shared_in || 0) - (staffData.total_shared_out || 0);
+              const adminProgressPercentage = (staffData.total_target || 0) > 0 
+                ? (adminNetAmount / (staffData.total_target || 1)) * 100 
+                : 0;
+              
+              targetsWithProgress[i] = {
+                ...target,
+                target_amount: staffData.total_target || 0,
+                total_progress: staffData.total_progress || 0,
+                shared_in: staffData.total_shared_in || 0,
+                shared_out: staffData.total_shared_out || 0,
+                net_amount: adminNetAmount,
+                progress_percentage: adminProgressPercentage.toFixed(2),
+                remaining_amount: Math.max(0, (staffData.total_target || 0) - adminNetAmount)
+              };
+            }
+          }
+        }
+      }
+    } catch (adminTargetError) {
+      console.error('Error recalculating admin target:', adminTargetError);
+      // Don't fail the request if admin target recalculation fails
+    }
+
     console.log(`Returning ${targetsWithProgress.length} targets with progress calculations`);
     res.json({ targets: targetsWithProgress || [] });
   } catch (error) {

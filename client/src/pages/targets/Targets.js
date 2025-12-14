@@ -290,6 +290,28 @@ const Targets = () => {
     }
   };
 
+  const handleDeleteTarget = async (targetId) => {
+    if (!window.confirm('Are you sure you want to delete this target? This action cannot be undone.')) {
+      return;
+    }
+
+    try {
+      setError('');
+      await api.delete(`/targets/${targetId}`);
+      
+      // Remove from local state immediately
+      setTargets(prevTargets => prevTargets.filter(t => t.id !== targetId));
+      
+      // Refresh after a delay to ensure backend has processed
+      setTimeout(() => {
+        fetchTargets();
+        fetchSharingHistory();
+      }, 300);
+    } catch (error) {
+      console.error('Error deleting target:', error);
+      setError(error.response?.data?.error || 'Failed to delete target');
+    }
+  };
 
   const handleOpenEditModal = (target) => {
     setSelectedTarget(target);

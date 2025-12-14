@@ -15,19 +15,32 @@ const ClientManagement = () => {
   useEffect(() => {
     fetchClients();
     
-    // Set up real-time socket connection for new clients
+    // Set up real-time socket connection for new clients and updates
     if (user) {
       const socket = getSocket();
       if (socket) {
         const handleClientCreated = async (newClient) => {
+          console.log('Client created event received:', newClient);
           // Refresh the clients list to get the full client data
-          fetchClients();
+          setTimeout(() => {
+            fetchClients();
+          }, 300);
+        };
+
+        const handleClientUpdated = async (updatedClient) => {
+          console.log('Client updated event received:', updatedClient);
+          // Refresh the clients list to get the updated client data
+          setTimeout(() => {
+            fetchClients();
+          }, 300);
         };
 
         socket.on('client_created', handleClientCreated);
+        socket.on('client_updated', handleClientUpdated);
 
         return () => {
           socket.off('client_created', handleClientCreated);
+          socket.off('client_updated', handleClientUpdated);
         };
       }
     }

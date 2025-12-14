@@ -178,98 +178,206 @@ router.post('/', authenticateToken, requireRole('Admin', 'DepartmentHead', 'Staf
       ]
     );
 
-    // Also create a client entry from the progress report
+    // Also create a client entry from the progress report (only for client categories, not students)
     let clientId = null;
     let clientCreated = false;
-    try {
-      // Generate unique email for client based on name and timestamp
-      const sanitizedName = name.toLowerCase().replace(/[^a-z0-9]/g, '.');
-      const timestamp = Date.now().toString().slice(-6);
-      const clientEmail = `${sanitizedName}.${timestamp}@progress.local`;
-      
-      // Check if a client with this name already exists (by company_name)
-      const existingClientByName = await db.get(
-        'SELECT id, user_id FROM clients WHERE company_name = ? OR (SELECT name FROM users WHERE id = clients.user_id) = ?',
-        [name, name]
-      );
-      
-      if (!existingClientByName) {
-        // Check if user exists
-        let userId = null;
-        const existingUser = await db.get('SELECT id FROM users WHERE email = ?', [clientEmail]);
+    let createdClientId = null;
+    
+    // Only create client if category is not 'Student'
+    if (category !== 'Student' && (category === 'Client for Consultancy' || category === 'Client for Audit' || category === 'Others')) {
+      try {
+        // Check if clients table exists
+        const USE_POSTGRESQL = !!process.env.DATABASE_URL;
+        let clientsTableExists = false;
         
-        if (!existingUser) {
-          // Create user for client
-          const passwordHash = await hashPassword('Client@123'); // Default password
-          
-          const userResult = await db.run(
-            `INSERT INTO users (email, username, password_hash, role, name, is_active, email_verified)
-             VALUES (?, ?, ?, ?, ?, 1, 1)`,
-            [clientEmail, clientEmail.split('@')[0], passwordHash, 'Client', name]
+        if (USE_POSTGRESQL) {
+          const tableCheck = await db.get(
+            "SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'clients'"
           );
-          userId = userResult.lastID;
+          clientsTableExists = !!tableCheck;
         } else {
-          userId = existingUser.id;
+          const tableCheck = await db.get("SELECT name FROM sqlite_master WHERE type='table' AND name='clients'");
+          clientsTableExists = !!tableCheck;
         }
-
-        // Check if client already exists for this user
-        const existingClient = await db.get('SELECT id FROM clients WHERE user_id = ?', [userId]);
-        if (!existingClient) {
-          const generatedClientId = generateClientId();
+        
+        if (!clientsTableExists) {
+          console.log('Clients table does not exist, skipping client creation');
+        } else {
+          // Generate unique email for client based on name and timestamp
+          const sanitizedName = name.toLowerCase().replace(/[^a-z0-9]/g, '.');
+          const timestamp = Date.now().toString().slice(-6);
+          const clientEmail = `${sanitizedName}.${timestamp}@progress.local`;
           
-          // Map progress report category to client table category (lowercase)
-          const categoryMap = {
-            'Student': 'student',
-            'Client for Consultancy': 'client for consultancy',
-            'Client for Audit': 'client for audit',
-            'Others': 'others'
-          };
-          const clientCategory = categoryMap[category] || category.toLowerCase();
-          
-          // Map progress report status to client table progress_status (lowercase)
-          const statusMap = {
-            'Signed Contract': 'signed contract',
-            'Pipeline Client': 'pipeline client',
-            'Submitted': 'submit'
-          };
-          const clientProgressStatus = statusMap[status] || status.toLowerCase();
-          
-          const clientResult = await db.run(
-            `INSERT INTO clients (user_id, client_id, company_name, status, category, progress_status, created_by)
-             VALUES (?, ?, ?, ?, ?, ?, ?)`,
-            [
-              userId,
-              generatedClientId,
-              name, // Use name as company_name
-              'Active',
-              clientCategory,
-              clientProgressStatus,
-              req.user.id
-            ]
+          // Check if a client with this name already exists (by company_name or user name)
+          const existingClientByName = await db.get(
+            'SELECT id, user_id FROM clients WHERE company_name = ? OR (SELECT name FROM users WHERE id = clients.user_id) = ?',
+            [name, name]
           );
-          clientId = generatedClientId;
-          clientCreated = true;
           
-          // Emit real-time update for new client to all connected clients
-          if (global.io) {
-            global.io.emit('client_created', {
-              id: clientResult.lastID,
-              client_id: generatedClientId,
-              name: name,
-              category: category,
-              progress_status: status,
-              created_by: req.user.name || user.name,
-              created_by_email: req.user.email || user.email
-            });
-            console.log('Emitted client_created event for client:', generatedClientId);
+          if (!existingClientByName) {
+            // Check if user exists
+            let userId = null;
+            const existingUser = await db.get('SELECT id FROM users WHERE email = ?', [clientEmail]);
+            
+            if (!existingUser) {
+              // Create user for client
+              const { hashPassword } = require('../utils/auth');
+              const passwordHash = await hashPassword('Client@123'); // Default password
+              
+              const userResult = await db.run(
+                `INSERT INTO users (email, username, password_hash, role, name, is_active, email_verified)
+                 VALUES (?, ?, ?, ?, ?, 1, 1)`,
+                [clientEmail, clientEmail.split('@')[0], passwordHash, 'Client', name]
+              );
+              userId = USE_POSTGRESQL ? (userResult.rows && userResult.rows[0] && userResult.rows[0].id) : userResult.lastID;
+            } else {
+              userId = existingUser.id;
+            }
+
+            // Check if client already exists for this user
+            const existingClient = await db.get('SELECT id FROM clients WHERE user_id = ?', [userId]);
+            if (!existingClient) {
+              const generatedClientId = generateClientId();
+              
+              // Map progress report category to client table category
+              const categoryMap = {
+                'Client for Consultancy': 'client for consultancy',
+                'Client for Audit': 'client for audit',
+                'Others': 'others'
+              };
+              const clientCategory = categoryMap[category] || category.toLowerCase();
+              
+              // Map progress report status to client table progress_status
+              const statusMap = {
+                'Signed Contract': 'signed contract',
+                'Pipeline Client': 'pipeline client',
+                'Submitted': 'submitted',
+                'Pending': 'pending'
+              };
+              const clientProgressStatus = statusMap[status] || (status ? status.toLowerCase() : 'pending');
+              
+              // Check which columns exist in clients table
+              let clientsColumnNames = [];
+              if (USE_POSTGRESQL) {
+                const columns = await db.all(
+                  "SELECT column_name FROM information_schema.columns WHERE table_name = 'clients'"
+                );
+                clientsColumnNames = columns.map(col => col.column_name);
+              } else {
+                const tableInfo = await db.all("PRAGMA table_info(clients)");
+                clientsColumnNames = tableInfo.map(col => col.name);
+              }
+              
+              const hasCategory = clientsColumnNames.includes('category');
+              const hasProgressStatus = clientsColumnNames.includes('progress_status');
+              const hasCreatedBy = clientsColumnNames.includes('created_by');
+              
+              // Build INSERT query dynamically
+              let insertColumns = ['user_id', 'client_id', 'company_name', 'status'];
+              let insertValues = [userId, generatedClientId, name, 'Active'];
+              
+              if (hasCategory) {
+                insertColumns.push('category');
+                insertValues.push(clientCategory);
+              }
+              if (hasProgressStatus) {
+                insertColumns.push('progress_status');
+                insertValues.push(clientProgressStatus);
+              }
+              if (hasCreatedBy) {
+                insertColumns.push('created_by');
+                insertValues.push(req.user.id);
+              }
+              
+              const placeholders = insertColumns.map(() => '?').join(', ');
+              const clientResult = await db.run(
+                `INSERT INTO clients (${insertColumns.join(', ')})
+                 VALUES (${placeholders})`,
+                insertValues
+              );
+              
+              createdClientId = USE_POSTGRESQL 
+                ? (clientResult.rows && clientResult.rows[0] && clientResult.rows[0].id)
+                : clientResult.lastID;
+              
+              clientId = generatedClientId;
+              clientCreated = true;
+              
+              console.log('Client created from progress report:', {
+                client_id: generatedClientId,
+                client_db_id: createdClientId,
+                name: name,
+                category: clientCategory
+              });
+              
+              // Emit real-time update for new client to all connected clients
+              if (global.io) {
+                global.io.emit('client_created', {
+                  id: createdClientId,
+                  client_id: generatedClientId,
+                  name: name,
+                  company_name: name,
+                  category: clientCategory,
+                  progress_status: clientProgressStatus,
+                  status: 'Active',
+                  created_by: req.user.name || user.name,
+                  created_by_email: req.user.email || user.email
+                });
+                console.log('Emitted client_created event for client:', generatedClientId);
+              }
+            } else {
+              console.log('Client already exists for this user, skipping client creation');
+            }
+          } else {
+            console.log('Client with this name already exists, skipping client creation');
+            // Update existing client's progress_status if status changed
+            if (status) {
+              try {
+                const statusMap = {
+                  'Signed Contract': 'signed contract',
+                  'Pipeline Client': 'pipeline client',
+                  'Submitted': 'submitted',
+                  'Pending': 'pending'
+                };
+                const clientProgressStatus = statusMap[status] || status.toLowerCase();
+                
+                // Check if progress_status column exists
+                let clientsColumnNames = [];
+                if (USE_POSTGRESQL) {
+                  const columns = await db.all(
+                    "SELECT column_name FROM information_schema.columns WHERE table_name = 'clients'"
+                  );
+                  clientsColumnNames = columns.map(col => col.column_name);
+                } else {
+                  const tableInfo = await db.all("PRAGMA table_info(clients)");
+                  clientsColumnNames = tableInfo.map(col => col.name);
+                }
+                
+                if (clientsColumnNames.includes('progress_status')) {
+                  await db.run(
+                    'UPDATE clients SET progress_status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+                    [clientProgressStatus, existingClientByName.id]
+                  );
+                  
+                  // Emit update event
+                  if (global.io) {
+                    global.io.emit('client_updated', {
+                      id: existingClientByName.id,
+                      progress_status: clientProgressStatus,
+                      updated_by: req.user.name
+                    });
+                  }
+                }
+              } catch (updateError) {
+                console.error('Error updating existing client progress_status:', updateError);
+              }
+            }
           }
         }
-      } else {
-        console.log('Client with this name already exists, skipping client creation');
+      } catch (clientError) {
+        // Log error but don't fail the progress report creation
+        console.error('Error creating client from progress report:', clientError);
       }
-    } catch (clientError) {
-      // Log error but don't fail the progress report creation
-      console.error('Error creating client from progress report:', clientError);
     }
 
     await logAction(req.user.id, 'create_progress_report', 'progress_reports', result.lastID, { name, category, status }, req);

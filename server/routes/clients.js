@@ -316,7 +316,35 @@ router.put('/:id', authenticateToken, requireRole('Admin', 'Staff'), async (req,
 
     await logAction(req.user.id, 'update_client', 'clients', clientId, updates, req);
 
-    res.json({ message: 'Client updated successfully' });
+    // Get updated client for real-time update
+    const updatedClient = await db.get(
+      `SELECT c.*, u.name, u.email, u.phone, u.profile_image
+       FROM clients c
+       LEFT JOIN users u ON c.user_id = u.id
+       WHERE c.id = ?`,
+      [clientId]
+    );
+
+    // Emit real-time update for client edit
+    if (global.io && updatedClient) {
+      global.io.emit('client_updated', {
+        id: clientId,
+        client_id: updatedClient.client_id,
+        name: updatedClient.name,
+        company_name: updatedClient.company_name,
+        category: updatedClient.category,
+        progress_status: updatedClient.progress_status,
+        status: updatedClient.status,
+        updated_by: req.user.name,
+        updated_at: new Date().toISOString()
+      });
+      console.log('Emitted client_updated event for client:', updatedClient.client_id);
+    }
+
+    res.json({ 
+      message: 'Client updated successfully',
+      client: updatedClient
+    });
   } catch (error) {
     console.error('Update client error:', error);
     res.status(500).json({ error: 'Failed to update client' });

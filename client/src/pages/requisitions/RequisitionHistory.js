@@ -33,8 +33,10 @@ const RequisitionHistory = () => {
 
     const handleRequisitionCreated = (data) => {
       console.log('Requisition created event received:', data);
-      // Refresh if it's the current user's requisition or if user is admin
-      if (data.user_id === user.id || user.role === 'Admin') {
+      // Refresh if it's the current user's requisition, if user is admin, or if it's a work support for this user
+      const isWorkSupportForMe = data.requisition?.request_type === 'work_support' && 
+                                  data.requisition?.target_user_id === user.id;
+      if (data.user_id === user.id || user.role === 'Admin' || isWorkSupportForMe) {
         setTimeout(() => {
           fetchRequisitions();
         }, 300);
@@ -43,8 +45,10 @@ const RequisitionHistory = () => {
 
     const handleRequisitionUpdated = (data) => {
       console.log('Requisition updated event received:', data);
-      // Refresh if it's the current user's requisition or if user is admin/dept head
-      if (data.requisition?.user_id === user.id || user.role === 'Admin' || user.role === 'DepartmentHead') {
+      // Refresh if it's the current user's requisition, if user is admin/dept head, or if it's a work support for this user
+      const isWorkSupportForMe = data.requisition?.request_type === 'work_support' && 
+                                  data.requisition?.target_user_id === user.id;
+      if (data.requisition?.user_id === user.id || user.role === 'Admin' || user.role === 'DepartmentHead' || isWorkSupportForMe) {
         setTimeout(() => {
           fetchRequisitions();
         }, 300);

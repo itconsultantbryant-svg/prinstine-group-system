@@ -108,8 +108,12 @@ const PayrollManagement = () => {
     setSuccess('');
 
     try {
+      // Determine if we're using staff_id or user_id
+      const selectedStaff = staffMembers.find(s => (s.id && s.id.toString() === formData.staff_id) || (s.user_id && s.user_id.toString() === formData.staff_id));
       const payload = {
         ...formData,
+        // If staff has no id (dept head/admin without staff record), use user_id instead
+        ...(selectedStaff && !selectedStaff.id && selectedStaff.user_id ? { user_id: selectedStaff.user_id, staff_id: null } : {}),
         gross_salary: parseFloat(formData.gross_salary),
         deductions: parseFloat(formData.deductions) || 0,
         net_salary: parseFloat(formData.net_salary),

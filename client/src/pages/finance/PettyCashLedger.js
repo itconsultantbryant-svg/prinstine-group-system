@@ -87,12 +87,9 @@ const PettyCashLedger = () => {
   const fetchStaffMembers = async () => {
     try {
       const response = await api.get('/staff');
+      // Show all staff, department heads, and admin users (backend already filters based on role)
       const allStaff = response.data.staff || [];
-      // Filter Finance department staff for custodian selection
-      const financeStaff = allStaff.filter(s => 
-        s.department && s.department.toLowerCase().includes('finance')
-      );
-      setStaffMembers(financeStaff.length > 0 ? financeStaff : allStaff);
+      setStaffMembers(allStaff);
     } catch (error) {
       console.error('Error fetching staff:', error);
     }
@@ -104,7 +101,19 @@ const PettyCashLedger = () => {
     setSuccess('');
 
     try {
-      await api.post('/finance/petty-cash/ledgers', formData);
+      // Find the selected staff member to determine if we need to use user_id
+      const selectedStaff = staffMembers.find(s => 
+        (s.id && s.id.toString() === formData.petty_cash_custodian_id) || 
+        (s.user_id && s.user_id.toString() === formData.petty_cash_custodian_id)
+      );
+      
+      const payload = {
+        ...formData,
+        // Backend accepts petty_cash_custodian_id which can be either staff.id or user.id
+        petty_cash_custodian_id: selectedStaff?.id || selectedStaff?.user_id || formData.petty_cash_custodian_id
+      };
+      
+      await api.post('/finance/petty-cash/ledgers', payload);
       setSuccess('Petty cash ledger created successfully');
       setShowLedgerForm(false);
       setFormData({
@@ -391,8 +400,8 @@ const PettyCashLedger = () => {
                     >
                       <option value="">Select custodian...</option>
                       {staffMembers.map((staff) => (
-                        <option key={staff.id} value={staff.id}>
-                          {staff.name} - {staff.staff_id}
+                        <option key={staff.user_id || staff.id} value={staff.id || staff.user_id}>
+                          {staff.name} - {staff.staff_id || `User ID: ${staff.user_id}`} {staff.department ? `(${staff.department})` : ''}
                         </option>
                       ))}
                     </select>
@@ -600,8 +609,8 @@ const PettyCashLedger = () => {
                       >
                         <option value="">Select staff...</option>
                         {staffMembers.map((staff) => (
-                          <option key={staff.id} value={staff.id}>
-                            {staff.name} - {staff.staff_id}
+                          <option key={staff.user_id || staff.id} value={staff.id || staff.user_id}>
+                            {staff.name} - {staff.staff_id || `User ID: ${staff.user_id}`} {staff.department ? `(${staff.department})` : ''}
                           </option>
                         ))}
                       </select>

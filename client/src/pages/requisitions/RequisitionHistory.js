@@ -3,9 +3,11 @@ import api from '../../config/api';
 import { useAuth } from '../../hooks/useAuth';
 import RequisitionForm from './RequisitionForm';
 import { exportToPDF, exportToWord, printContent } from '../../utils/exportUtils';
+import { useSocket } from '../../context/SocketContext';
 
 const RequisitionHistory = () => {
   const { user } = useAuth();
+  const socket = useSocket();
   const [requisitions, setRequisitions] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
@@ -24,6 +26,57 @@ const RequisitionHistory = () => {
   useEffect(() => {
     fetchRequisitions();
   }, []);
+
+  // Real-time updates via socket.io
+  useEffect(() => {
+    if (!socket) return;
+
+    const handleRequisitionCreated = (data) => {
+      console.log('Requisition created event received:', data);
+      // Refresh if it's the current user's requisition or if user is admin
+      if (data.user_id === user.id || user.role === 'Admin') {
+        setTimeout(() => {
+          fetchRequisitions();
+        }, 300);
+      }
+    };
+
+    const handleRequisitionUpdated = (data) => {
+      console.log('Requisition updated event received:', data);
+      // Refresh if it's the current user's requisition or if user is admin/dept head
+      if (data.requisition?.user_id === user.id || user.role === 'Admin' || user.role === 'DepartmentHead') {
+        setTimeout(() => {
+          fetchRequisitions();
+        }, 300);
+      }
+    };
+
+    const handleRequisitionStatusUpdated = (data) => {
+      console.log('Requisition status updated event received:', data);
+      // Always refresh for status updates
+      setTimeout(() => {
+        fetchRequisitions();
+      }, 300);
+    };
+
+    const handleRequisitionDeleted = (data) => {
+      console.log('Requisition deleted event received:', data);
+      // Remove from local state
+      setRequisitions(prev => prev.filter(req => req.id !== data.requisition_id));
+    };
+
+    socket.on('requisition_created', handleRequisitionCreated);
+    socket.on('requisition_updated', handleRequisitionUpdated);
+    socket.on('requisition_status_updated', handleRequisitionStatusUpdated);
+    socket.on('requisition_deleted', handleRequisitionDeleted);
+
+    return () => {
+      socket.off('requisition_created', handleRequisitionCreated);
+      socket.off('requisition_updated', handleRequisitionUpdated);
+      socket.off('requisition_status_updated', handleRequisitionStatusUpdated);
+      socket.off('requisition_deleted', handleRequisitionDeleted);
+    };
+  }, [socket, user]);
 
   const fetchRequisitions = async () => {
     try {
@@ -110,7 +163,8 @@ const RequisitionHistory = () => {
       'DeptHead_Rejected': { color: 'danger', text: 'Dept Head Rejected' },
       'Pending_Admin': { color: 'warning', text: 'Pending Admin' },
       'Admin_Approved': { color: 'success', text: 'Approved' },
-      'Admin_Rejected': { color: 'danger', text: 'Rejected' }
+      'Admin_Rejected': { color: 'danger', text: 'Rejected' },
+      'Approved': { color: 'success', text: 'Approved' }
     };
     return badges[status] || { color: 'secondary', text: status };
   };

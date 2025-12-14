@@ -474,6 +474,16 @@ router.post('/', authenticateToken, upload.single('document'), async (req, res) 
       console.error('Error sending notifications:', notifError);
     }
 
+      // Emit real-time update
+      if (global.io) {
+        global.io.emit('requisition_created', {
+          requisition: newRequisition,
+          user_id: req.user.id,
+          user_name: userName
+        });
+        console.log('Emitted requisition_created event');
+      }
+
       res.status(201).json({ 
         message: 'Requisition submitted successfully',
         requisition: newRequisition 
@@ -661,6 +671,16 @@ router.put('/:id', authenticateToken, upload.single('document'), async (req, res
       }
     }
 
+    // Emit real-time update
+    if (global.io) {
+      global.io.emit('requisition_updated', {
+        requisition: updated,
+        user_id: req.user.id,
+        action: 'updated'
+      });
+      console.log('Emitted requisition_updated event');
+    }
+
     res.json({ 
       message: 'Requisition updated successfully',
       requisition: updated 
@@ -845,6 +865,19 @@ router.put('/:id/admin-review', authenticateToken, requireRole('Admin'), async (
       console.error('Error sending notifications:', notifError);
     }
 
+    // Emit real-time update
+    if (global.io) {
+      global.io.emit('requisition_status_updated', {
+        requisition: updated,
+        reviewer_id: req.user.id,
+        reviewer_name: req.user.name || 'Admin',
+        action: status === 'Admin_Approved' ? 'admin_approved' : 'admin_rejected',
+        previous_status: requisition.status,
+        new_status: status
+      });
+      console.log('Emitted requisition_status_updated event for admin review');
+    }
+
     res.json({ 
       message: `Requisition ${status === 'Admin_Approved' ? 'approved' : 'rejected'} by Admin`,
       requisition: updated 
@@ -877,7 +910,17 @@ router.delete('/:id', authenticateToken, async (req, res) => {
     }
 
     await db.run('DELETE FROM requisitions WHERE id = ?', [req.params.id]);
-    
+
+    // Emit real-time update
+    if (global.io) {
+      global.io.emit('requisition_deleted', {
+        requisition_id: req.params.id,
+        user_id: req.user.id,
+        deleted_by: req.user.name || 'User'
+      });
+      console.log('Emitted requisition_deleted event');
+    }
+
     res.json({ message: 'Requisition deleted successfully' });
   } catch (error) {
     console.error('Delete requisition error:', error);

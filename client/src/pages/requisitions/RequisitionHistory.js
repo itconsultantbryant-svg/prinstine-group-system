@@ -7,7 +7,6 @@ import { getSocket } from '../../config/socket';
 
 const RequisitionHistory = () => {
   const { user } = useAuth();
-  const socket = getSocket();
   const [requisitions, setRequisitions] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
@@ -29,6 +28,7 @@ const RequisitionHistory = () => {
 
   // Real-time updates via socket.io
   useEffect(() => {
+    const socket = getSocket();
     if (!socket) return;
 
     const handleRequisitionCreated = (data) => {

@@ -810,21 +810,47 @@ router.put('/:id/approve', authenticateToken, requireRole('Admin'), [
             
             // Verify the total progress for this target
             const totalProgressCheck = await db.get(
-              'SELECT COALESCE(SUM(amount), 0) as total FROM target_progress WHERE target_id = ?',
+              'SELECT COALESCE(SUM(amount), 0) as total, COUNT(*) as count FROM target_progress WHERE target_id = ?',
               [target.id]
             );
-            console.log('Total progress for target', target.id, ':', totalProgressCheck);
+            console.log('Total progress for target', target.id, ':', {
+              total: totalProgressCheck?.total || 0,
+              count: totalProgressCheck?.count || 0,
+              expected_amount: parseFloat(report.amount)
+            });
             
-            // Emit real-time update for target progress
+            // Double-check the record was created correctly
+            const verifyProgress = await db.get(
+              'SELECT * FROM target_progress WHERE progress_report_id = ? AND target_id = ?',
+              [req.params.id, target.id]
+            );
+            console.log('Verified target_progress record:', {
+              exists: !!verifyProgress,
+              target_id: verifyProgress?.target_id,
+              amount: verifyProgress?.amount,
+              progress_report_id: verifyProgress?.progress_report_id
+            });
+            
+            // Emit real-time update for target progress - emit to ALL users so everyone sees the update
             if (global.io) {
+              // Emit a general update event
               global.io.emit('target_progress_updated', {
                 target_id: target.id,
                 user_id: report.created_by,
                 amount: parseFloat(report.amount),
                 progress_report_id: req.params.id,
-                total_progress: totalProgressCheck?.total || 0
+                total_progress: totalProgressCheck?.total || 0,
+                action: 'progress_added'
               });
-              console.log('Emitted target_progress_updated event');
+              
+              // Also emit target_updated to force a full refresh
+              global.io.emit('target_updated', {
+                id: target.id,
+                updated_by: req.user.name || 'Admin',
+                reason: 'progress_report_approved'
+              });
+              
+              console.log('Emitted target_progress_updated and target_updated events');
             }
           } else {
             // Update existing progress record
@@ -843,14 +869,32 @@ router.put('/:id/approve', authenticateToken, requireRole('Admin'), [
             
             console.log('Target progress updated successfully for progress report:', req.params.id);
             
-            // Emit real-time update
+            // Verify the updated progress
+            const totalProgressCheck = await db.get(
+              'SELECT COALESCE(SUM(amount), 0) as total FROM target_progress WHERE target_id = ?',
+              [target.id]
+            );
+            console.log('Total progress after update for target', target.id, ':', totalProgressCheck?.total || 0);
+            
+            // Emit real-time update - emit to ALL users
             if (global.io) {
               global.io.emit('target_progress_updated', {
                 target_id: target.id,
                 user_id: report.created_by,
                 amount: parseFloat(report.amount),
-                progress_report_id: req.params.id
+                progress_report_id: req.params.id,
+                total_progress: totalProgressCheck?.total || 0,
+                action: 'progress_updated'
               });
+              
+              // Also emit target_updated to force a full refresh
+              global.io.emit('target_updated', {
+                id: target.id,
+                updated_by: req.user.name || 'Admin',
+                reason: 'progress_report_approved'
+              });
+              
+              console.log('Emitted target_progress_updated and target_updated events');
             }
           }
         } else {

@@ -679,17 +679,75 @@ router.put('/:id/approve', authenticateToken, requireRole('Admin'), [
       return res.status(400).json({ error: 'Progress report is not pending approval' });
     }
 
+    // Check if admin columns exist, and add them if they don't
+    const USE_POSTGRESQL = !!process.env.DATABASE_URL;
+    let hasAdminNotes = false;
+    let hasAdminReviewedBy = false;
+    
+    try {
+      if (USE_POSTGRESQL) {
+        const adminNotesCheck = await db.get(
+          "SELECT column_name FROM information_schema.columns WHERE table_name = 'progress_reports' AND column_name = 'admin_notes'"
+        );
+        hasAdminNotes = !!adminNotesCheck;
+        
+        const adminReviewedByCheck = await db.get(
+          "SELECT column_name FROM information_schema.columns WHERE table_name = 'progress_reports' AND column_name = 'admin_reviewed_by'"
+        );
+        hasAdminReviewedBy = !!adminReviewedByCheck;
+      } else {
+        const tableInfo = await db.all("PRAGMA table_info(progress_reports)");
+        hasAdminNotes = tableInfo.some(col => col.name === 'admin_notes');
+        hasAdminReviewedBy = tableInfo.some(col => col.name === 'admin_reviewed_by');
+      }
+      
+      if (!hasAdminNotes) {
+        await db.run('ALTER TABLE progress_reports ADD COLUMN admin_notes TEXT');
+        console.log('Added admin_notes column to progress_reports');
+      }
+      if (!hasAdminReviewedBy) {
+        await db.run('ALTER TABLE progress_reports ADD COLUMN admin_reviewed_by INTEGER');
+        await db.run('ALTER TABLE progress_reports ADD COLUMN admin_reviewed_at DATETIME');
+        console.log('Added admin_reviewed_by and admin_reviewed_at columns to progress_reports');
+      }
+    } catch (columnError) {
+      console.error('Error checking/adding admin columns (non-fatal):', columnError);
+      // Continue - columns might already exist or we'll handle it in the UPDATE
+    }
+
     // Update the progress report status
     try {
+      // Build UPDATE query dynamically based on which columns exist
+      const updateFields = ['status = ?', 'updated_at = CURRENT_TIMESTAMP'];
+      const updateParams = [status];
+      
+      if (hasAdminNotes) {
+        updateFields.push('admin_notes = ?');
+        updateParams.push(admin_notes || null);
+      }
+      
+      if (hasAdminReviewedBy) {
+        updateFields.push('admin_reviewed_by = ?', 'admin_reviewed_at = CURRENT_TIMESTAMP');
+        updateParams.push(req.user.id);
+      }
+      
+      updateParams.push(req.params.id);
+      
       await db.run(
         `UPDATE progress_reports 
-         SET status = ?, admin_notes = ?, admin_reviewed_by = ?, admin_reviewed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+         SET ${updateFields.join(', ')}
          WHERE id = ?`,
-        [status, admin_notes || null, req.user.id, req.params.id]
+        updateParams
       );
       console.log('Progress report status updated successfully:', { id: req.params.id, status });
     } catch (updateError) {
       console.error('Error updating progress report status:', updateError);
+      console.error('Update error details:', {
+        message: updateError.message,
+        code: updateError.code,
+        errno: updateError.errno,
+        sql: updateError.sql
+      });
       throw new Error(`Failed to update progress report: ${updateError.message}`);
     }
 

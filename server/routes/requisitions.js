@@ -110,7 +110,12 @@ router.get('/', authenticateToken, async (req, res) => {
     } else {
       // Regular users only see their own requisitions
       // Ensure user_id comparison works for both SQLite and PostgreSQL
-      query += ' AND CAST(r.user_id AS INTEGER) = CAST(? AS INTEGER)';
+      const USE_POSTGRESQL = !!process.env.DATABASE_URL;
+      if (USE_POSTGRESQL) {
+        query += ' AND CAST(r.user_id AS INTEGER) = CAST(? AS INTEGER)';
+      } else {
+        query += ' AND r.user_id = ?';
+      }
       params.push(req.user.id);
     }
     

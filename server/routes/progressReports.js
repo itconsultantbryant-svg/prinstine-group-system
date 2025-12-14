@@ -554,10 +554,79 @@ router.put('/:id', authenticateToken, requireRole('Admin', 'DepartmentHead', 'St
 
     await logAction(req.user.id, 'update_progress_report', 'progress_reports', req.params.id, req.body, req);
 
+    // Emit real-time update
+    if (global.io) {
+      global.io.emit('progress_report_updated', {
+        id: req.params.id,
+        updated_by: req.user.name
+      });
+    }
+
     res.json({ message: 'Progress report updated successfully' });
   } catch (error) {
     console.error('Update progress report error:', error);
     res.status(500).json({ error: 'Failed to update progress report' });
+  }
+});
+
+// Admin approval/rejection for progress reports
+router.put('/:id/approve', authenticateToken, requireRole('Admin'), [
+  body('status').isIn(['Approved', 'Rejected']).withMessage('Status must be Approved or Rejected'),
+  body('admin_notes').optional().trim()
+], async (req, res) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({ errors: errors.array() });
+    }
+
+    const { status, admin_notes } = req.body;
+    const report = await db.get('SELECT * FROM progress_reports WHERE id = ?', [req.params.id]);
+    
+    if (!report) {
+      return res.status(404).json({ error: 'Progress report not found' });
+    }
+
+    if (report.status !== 'Pending') {
+      return res.status(400).json({ error: 'Progress report is not pending approval' });
+    }
+
+    await db.run(
+      `UPDATE progress_reports 
+       SET status = ?, admin_notes = ?, admin_reviewed_by = ?, admin_reviewed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+       WHERE id = ?`,
+      [status, admin_notes || null, req.user.id, req.params.id]
+    );
+
+    await logAction(req.user.id, 'approve_progress_report', 'progress_reports', req.params.id, { status }, req);
+
+    // Send notification to creator
+    try {
+      const { sendNotificationToUser } = require('../utils/notifications');
+      await sendNotificationToUser(report.created_by, {
+        title: `Progress Report ${status}`,
+        message: `Your progress report "${report.name}" has been ${status.toLowerCase()}`,
+        link: `/progress-reports/${req.params.id}`,
+        type: status === 'Approved' ? 'success' : 'warning',
+        senderId: req.user.id
+      });
+    } catch (notifError) {
+      console.error('Error sending notification:', notifError);
+    }
+
+    // Emit real-time update
+    if (global.io) {
+      global.io.emit('progress_report_updated', {
+        id: req.params.id,
+        status: status,
+        reviewed_by: req.user.name
+      });
+    }
+
+    res.json({ message: `Progress report ${status.toLowerCase()} successfully` });
+  } catch (error) {
+    console.error('Approve progress report error:', error);
+    res.status(500).json({ error: 'Failed to approve progress report' });
   }
 });
 

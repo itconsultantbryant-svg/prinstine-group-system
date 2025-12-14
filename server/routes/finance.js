@@ -153,11 +153,13 @@ router.get('/petty-cash/ledgers/:id', authenticateToken, async (req, res) => {
   try {
     const ledger = await db.get(
       `SELECT pcl.*,
-              cust.name as custodian_name, cust_staff.staff_id as custodian_staff_id,
+              COALESCE(cust.name, cust_direct.name) as custodian_name, 
+              cust_staff.staff_id as custodian_staff_id,
               approver.name as approved_by_name
        FROM petty_cash_ledgers pcl
        LEFT JOIN staff cust_staff ON pcl.petty_cash_custodian_id = cust_staff.id
        LEFT JOIN users cust ON cust_staff.user_id = cust.id
+       LEFT JOIN users cust_direct ON pcl.petty_cash_custodian_id = cust_direct.id AND cust_staff.id IS NULL
        LEFT JOIN users approver ON pcl.approved_by_id = approver.id
        WHERE pcl.id = ?`,
       [req.params.id]
@@ -261,12 +263,74 @@ router.post('/petty-cash/ledgers', authenticateToken, [
       deptHeadStatus = 'Pending';
     }
 
-    const result = await db.run(
-      `INSERT INTO petty_cash_ledgers 
-       (month, year, starting_balance, petty_cash_custodian_id, created_by, approval_status, dept_head_status)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      [month, year, actualStartingBalance, petty_cash_custodian_id, req.user.id, initialStatus, deptHeadStatus]
-    );
+    // Handle constraint violation for approval_status
+    let result;
+    try {
+      result = await db.run(
+        `INSERT INTO petty_cash_ledgers 
+         (month, year, starting_balance, petty_cash_custodian_id, created_by, approval_status, dept_head_status)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        [month, year, actualStartingBalance, petty_cash_custodian_id, req.user.id, initialStatus, deptHeadStatus]
+      );
+    } catch (insertError) {
+      // If constraint violation, try to fix the constraint and retry
+      if (insertError.message && insertError.message.includes('check constraint') && insertError.message.includes('petty_cash_ledgers_approval_status_check')) {
+        console.log('Constraint violation detected, attempting to update constraint...');
+        const USE_POSTGRESQL = !!process.env.DATABASE_URL;
+        
+        if (USE_POSTGRESQL) {
+          try {
+            // Find and drop the existing constraint
+            const constraint = await db.get(`
+              SELECT constraint_name 
+              FROM information_schema.table_constraints 
+              WHERE table_name = 'petty_cash_ledgers' 
+              AND constraint_type = 'CHECK'
+              AND constraint_name LIKE '%approval_status%'
+            `);
+            
+            if (constraint) {
+              await db.run(`ALTER TABLE petty_cash_ledgers DROP CONSTRAINT ${constraint.constraint_name}`);
+            } else {
+              // Try common constraint names
+              const constraintNames = ['petty_cash_ledgers_approval_status_check', 'petty_cash_ledgers_approval_status_chk', 'check_approval_status'];
+              for (const constraintName of constraintNames) {
+                try {
+                  await db.run(`ALTER TABLE petty_cash_ledgers DROP CONSTRAINT IF EXISTS ${constraintName}`);
+                } catch (e) {
+                  // Ignore if doesn't exist
+                }
+              }
+            }
+            
+            // Add new constraint with all status values including workflow statuses
+            await db.run(`
+              ALTER TABLE petty_cash_ledgers 
+              ADD CONSTRAINT petty_cash_ledgers_approval_status_check 
+              CHECK (approval_status IN ('Draft', 'Pending Review', 'Pending Approval', 'Approved', 'Locked', 'Pending_DeptHead', 'Pending_Admin', 'Rejected'))
+            `);
+            console.log('✓ Updated petty_cash_ledgers approval_status constraint to include workflow statuses');
+            
+            // Retry the insert
+            result = await db.run(
+              `INSERT INTO petty_cash_ledgers 
+               (month, year, starting_balance, petty_cash_custodian_id, created_by, approval_status, dept_head_status)
+               VALUES (?, ?, ?, ?, ?, ?, ?)`,
+              [month, year, actualStartingBalance, petty_cash_custodian_id, req.user.id, initialStatus, deptHeadStatus]
+            );
+          } catch (constraintError) {
+            console.error('Error updating constraint:', constraintError);
+            throw insertError; // Re-throw original error
+          }
+        } else {
+          // SQLite doesn't support ALTER TABLE to modify CHECK constraints
+          console.error('SQLite constraint violation - cannot modify CHECK constraint dynamically');
+          throw insertError;
+        }
+      } else {
+        throw insertError;
+      }
+    }
 
     await logAction(req.user.id, 'create_petty_cash_ledger', 'finance', result.lastID, { month, year }, req);
 

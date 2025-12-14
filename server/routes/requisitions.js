@@ -108,15 +108,16 @@ router.get('/', authenticateToken, async (req, res) => {
         query += ' AND 1=0'; // Return no results
       }
     } else {
-      // Regular users only see their own requisitions
-      // Ensure user_id comparison works for both SQLite and PostgreSQL
+      // Regular users see:
+      // 1. Their own requisitions (as sender)
+      // 2. Work support requisitions where they are the recipient (target_user_id)
       const USE_POSTGRESQL = !!process.env.DATABASE_URL;
       if (USE_POSTGRESQL) {
-        query += ' AND CAST(r.user_id AS INTEGER) = CAST(? AS INTEGER)';
+        query += ' AND (CAST(r.user_id AS INTEGER) = CAST(? AS INTEGER) OR (r.request_type = ? AND CAST(r.target_user_id AS INTEGER) = CAST(? AS INTEGER)))';
       } else {
-        query += ' AND r.user_id = ?';
+        query += ' AND (r.user_id = ? OR (r.request_type = ? AND r.target_user_id = ?))';
       }
-      params.push(req.user.id);
+      params.push(req.user.id, 'work_support', req.user.id);
     }
     
     query += ' ORDER BY r.requisition_date DESC, r.created_at DESC';
@@ -843,9 +844,25 @@ router.put('/:id/admin-review', authenticateToken, requireRole('Admin'), async (
       return res.status(404).json({ error: 'Requisition not found' });
     }
 
-    // Require Department Head approval first for ALL requisitions
+    // Only leave types (sick_leave, temporary_leave, annual_leave) and office_supplies (after dept head approval) should reach admin
+    // Work support doesn't need approval
+    if (requisition.request_type === 'work_support') {
+      return res.status(400).json({ error: 'Work support requisitions do not require approval' });
+    }
+    
+    // Verify this requisition is in a state that requires admin approval
+    // Leave types go directly to admin (Pending_Admin)
+    // Office supplies go to admin after dept head approval (Pending_Admin)
     if (requisition.status !== 'Pending_Admin') {
-      return res.status(400).json({ error: 'Department Head must approve this requisition before Admin can review it' });
+      if (['sick_leave', 'temporary_leave', 'annual_leave'].includes(requisition.request_type)) {
+        // Leave types should be Pending_Admin (direct to admin)
+        return res.status(400).json({ error: `This leave requisition should be in Pending_Admin status. Current status: ${requisition.status}` });
+      } else if (requisition.request_type === 'office_supplies') {
+        // Office supplies need dept head approval first
+        return res.status(400).json({ error: 'Office supplies requisitions must be approved by Finance Department Head before Admin can review' });
+      } else {
+        return res.status(400).json({ error: `Requisition is not in a state that requires admin approval. Current status: ${requisition.status}` });
+      }
     }
 
     await db.run(`

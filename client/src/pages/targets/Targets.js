@@ -131,12 +131,25 @@ const Targets = () => {
         }, 300);
       };
 
+      const handleProgressReportApproved = (data) => {
+        console.log('Progress report approved event received:', data);
+        // If this affects a target, refresh the targets list
+        if (data.user_id) {
+          console.log('Refreshing targets after progress report approval...');
+          setTimeout(() => {
+            fetchTargets();
+            fetchSharingHistory();
+          }, 1000); // Longer delay to ensure database commit
+        }
+      };
+
       socket.on('target_created', handleTargetCreated);
       socket.on('target_updated', handleTargetUpdated);
       socket.on('fund_shared', handleFundShared);
       socket.on('fund_reversed', handleFundReversed);
       socket.on('target_progress_updated', handleTargetProgressUpdated);
       socket.on('target_deleted', handleTargetDeleted);
+      socket.on('progress_report_approved', handleProgressReportApproved);
 
       return () => {
         socket.off('target_created', handleTargetCreated);
@@ -145,6 +158,7 @@ const Targets = () => {
         socket.off('fund_reversed', handleFundReversed);
         socket.off('target_progress_updated', handleTargetProgressUpdated);
         socket.off('target_deleted', handleTargetDeleted);
+        socket.off('progress_report_approved', handleProgressReportApproved);
       };
     }
   }, [user]);

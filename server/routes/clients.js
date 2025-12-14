@@ -285,9 +285,19 @@ router.put('/:id', authenticateToken, requireRole('Admin', 'Staff'), async (req,
       }
     }
 
-    // Check which columns exist in clients table
-    const clientsTableInfo = await db.all("PRAGMA table_info(clients)");
-    const clientsColumnNames = clientsTableInfo.map(col => col.name);
+    // Check which columns exist in clients table (handle both SQLite and PostgreSQL)
+    const USE_POSTGRESQL = !!process.env.DATABASE_URL;
+    let clientsColumnNames = [];
+    
+    if (USE_POSTGRESQL) {
+      const columns = await db.all(
+        "SELECT column_name FROM information_schema.columns WHERE table_name = 'clients'"
+      );
+      clientsColumnNames = columns.map(col => col.column_name);
+    } else {
+      const clientsTableInfo = await db.all("PRAGMA table_info(clients)");
+      clientsColumnNames = clientsTableInfo.map(col => col.name);
+    }
     
     const allowedFields = ['company_name', 'services_availed', 'loan_amount', 'loan_interest_rate',
       'loan_repayment_schedule', 'status', 'category', 'progress_status'];

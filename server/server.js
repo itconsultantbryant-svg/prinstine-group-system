@@ -1721,6 +1721,77 @@ async function initializeDatabase() {
               await db.run(`CREATE INDEX IF NOT EXISTS idx_progress_reports_date ON progress_reports(date)`);
               await db.run(`CREATE INDEX IF NOT EXISTS idx_progress_reports_category ON progress_reports(category)`);
               await db.run(`CREATE INDEX IF NOT EXISTS idx_progress_reports_status ON progress_reports(status)`);
+              
+              // Update existing table to support new status values and approval fields
+              try {
+                const USE_POSTGRESQL = !!process.env.DATABASE_URL;
+                
+                // Check if table exists and has old constraint
+                let tableExists = false;
+                if (USE_POSTGRESQL) {
+                  const check = await db.get(
+                    "SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'progress_reports'"
+                  );
+                  tableExists = !!check;
+                } else {
+                  const check = await db.get("SELECT name FROM sqlite_master WHERE type='table' AND name='progress_reports'");
+                  tableExists = !!check;
+                }
+                
+                if (tableExists) {
+                  // Add approval columns if they don't exist
+                  let hasAdminNotes = false;
+                  let hasAdminReviewedBy = false;
+                  
+                  if (USE_POSTGRESQL) {
+                    const adminNotesCheck = await db.get(
+                      "SELECT column_name FROM information_schema.columns WHERE table_name = 'progress_reports' AND column_name = 'admin_notes'"
+                    );
+                    hasAdminNotes = !!adminNotesCheck;
+                    
+                    const adminReviewedByCheck = await db.get(
+                      "SELECT column_name FROM information_schema.columns WHERE table_name = 'progress_reports' AND column_name = 'admin_reviewed_by'"
+                    );
+                    hasAdminReviewedBy = !!adminReviewedByCheck;
+                  } else {
+                    const tableInfo = await db.all("PRAGMA table_info(progress_reports)");
+                    hasAdminNotes = tableInfo.some(col => col.name === 'admin_notes');
+                    hasAdminReviewedBy = tableInfo.some(col => col.name === 'admin_reviewed_by');
+                  }
+                  
+                  if (!hasAdminNotes) {
+                    await db.run('ALTER TABLE progress_reports ADD COLUMN admin_notes TEXT');
+                  }
+                  if (!hasAdminReviewedBy) {
+                    await db.run('ALTER TABLE progress_reports ADD COLUMN admin_reviewed_by INTEGER');
+                    await db.run('ALTER TABLE progress_reports ADD COLUMN admin_reviewed_at DATETIME');
+                  }
+                  
+                  // For PostgreSQL, we need to drop and recreate the constraint
+                  if (USE_POSTGRESQL) {
+                    try {
+                      // Drop old constraint if it exists
+                      await db.run(`
+                        ALTER TABLE progress_reports 
+                        DROP CONSTRAINT IF EXISTS progress_reports_status_check
+                      `);
+                      // Add new constraint with all status values
+                      await db.run(`
+                        ALTER TABLE progress_reports 
+                        ADD CONSTRAINT progress_reports_status_check 
+                        CHECK (status IN ('Pending', 'Signed Contract', 'Pipeline Client', 'Submitted', 'Approved', 'Rejected'))
+                      `);
+                      console.log('✓ Updated progress_reports status constraint to include Pending, Approved, Rejected');
+                    } catch (constraintError) {
+                      console.log('Note: Could not update status constraint (may already be updated):', constraintError.message);
+                    }
+                  }
+                  // SQLite doesn't support ALTER TABLE for CHECK constraints, but new tables will have the correct constraint
+                }
+              } catch (alterError) {
+                console.log('Note: Could not alter progress_reports table:', alterError.message);
+              }
+              
               console.log(`✓ ${table.name} table created directly`);
             } else if (table.name === 'department_reports') {
               await db.run(`

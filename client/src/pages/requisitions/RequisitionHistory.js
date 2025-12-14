@@ -3,11 +3,11 @@ import api from '../../config/api';
 import { useAuth } from '../../hooks/useAuth';
 import RequisitionForm from './RequisitionForm';
 import { exportToPDF, exportToWord, printContent } from '../../utils/exportUtils';
-import { useSocket } from '../../context/SocketContext';
+import { getSocket } from '../../config/socket';
 
 const RequisitionHistory = () => {
   const { user } = useAuth();
-  const socket = useSocket();
+  const socket = getSocket();
   const [requisitions, setRequisitions] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
@@ -543,6 +543,102 @@ ${req.admin_notes ? `Admin Notes: ${req.admin_notes}` : ''}
                     </div>
                   </div>
                 )}
+
+                {/* Action History Section */}
+                <div className="mb-3">
+                  <strong>Action History:</strong>
+                  <div className="mt-2">
+                    <div className="timeline">
+                      {/* Created */}
+                      <div className="timeline-item mb-2 p-2 border-start border-3 border-primary">
+                        <div className="d-flex justify-content-between">
+                          <div>
+                            <strong className="text-primary">Created</strong>
+                            <div className="text-muted small">
+                              {viewingRequisition.user_name || 'User'} submitted this requisition
+                            </div>
+                          </div>
+                          <div className="text-muted small">
+                            {viewingRequisition.created_at ? new Date(viewingRequisition.created_at).toLocaleString() : 'N/A'}
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Department Head Review */}
+                      {viewingRequisition.dept_head_reviewed_at && (
+                        <div className={`timeline-item mb-2 p-2 border-start border-3 ${
+                          viewingRequisition.status === 'DeptHead_Approved' || viewingRequisition.status === 'Pending_Admin' || viewingRequisition.status === 'Admin_Approved' || viewingRequisition.status === 'Approved'
+                            ? 'border-success'
+                            : 'border-danger'
+                        }`}>
+                          <div className="d-flex justify-content-between">
+                            <div>
+                              <strong className={viewingRequisition.status === 'DeptHead_Rejected' ? 'text-danger' : 'text-success'}>
+                                {viewingRequisition.status === 'DeptHead_Rejected' ? 'Rejected' : 'Approved'} by Department Head
+                              </strong>
+                              <div className="text-muted small">
+                                {viewingRequisition.dept_head_reviewer_name || 'Department Head'}
+                                {viewingRequisition.dept_head_notes && (
+                                  <div className="mt-1 p-2 bg-light rounded">
+                                    {viewingRequisition.dept_head_notes}
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                            <div className="text-muted small">
+                              {new Date(viewingRequisition.dept_head_reviewed_at).toLocaleString()}
+                            </div>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Admin Review */}
+                      {viewingRequisition.admin_reviewed_at && (
+                        <div className={`timeline-item mb-2 p-2 border-start border-3 ${
+                          viewingRequisition.status === 'Admin_Approved' || viewingRequisition.status === 'Approved'
+                            ? 'border-success'
+                            : 'border-danger'
+                        }`}>
+                          <div className="d-flex justify-content-between">
+                            <div>
+                              <strong className={viewingRequisition.status === 'Admin_Rejected' ? 'text-danger' : 'text-success'}>
+                                {viewingRequisition.status === 'Admin_Rejected' ? 'Rejected' : 'Approved'} by Admin
+                              </strong>
+                              <div className="text-muted small">
+                                {viewingRequisition.admin_reviewer_name || 'Admin'}
+                                {viewingRequisition.admin_notes && (
+                                  <div className="mt-1 p-2 bg-light rounded">
+                                    {viewingRequisition.admin_notes}
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                            <div className="text-muted small">
+                              {new Date(viewingRequisition.admin_reviewed_at).toLocaleString()}
+                            </div>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Work Support - Auto Approved */}
+                      {viewingRequisition.request_type === 'work_support' && viewingRequisition.status === 'Approved' && (
+                        <div className="timeline-item mb-2 p-2 border-start border-3 border-success">
+                          <div className="d-flex justify-content-between">
+                            <div>
+                              <strong className="text-success">Auto-Approved</strong>
+                              <div className="text-muted small">
+                                Work support requisitions are automatically approved
+                              </div>
+                            </div>
+                            <div className="text-muted small">
+                              {viewingRequisition.created_at ? new Date(viewingRequisition.created_at).toLocaleString() : 'N/A'}
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
 
                 {viewingRequisition.document_path && (
                   <div className="mb-3">

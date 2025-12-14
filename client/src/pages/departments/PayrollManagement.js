@@ -111,16 +111,23 @@ const PayrollManagement = () => {
       // Determine if we're using staff_id or user_id
       const selectedStaff = staffMembers.find(s => (s.id && s.id.toString() === formData.staff_id) || (s.user_id && s.user_id.toString() === formData.staff_id));
       const payload = {
-        ...formData,
         // If staff has no id (dept head/admin without staff record), use user_id instead
-        ...(selectedStaff && !selectedStaff.id && selectedStaff.user_id ? { user_id: selectedStaff.user_id, staff_id: null } : {}),
+        ...(selectedStaff && !selectedStaff.id && selectedStaff.user_id ? { 
+          user_id: selectedStaff.user_id, 
+          staff_id: null 
+        } : {
+          staff_id: selectedStaff?.id || formData.staff_id
+        }),
+        payroll_period_start: formData.payroll_period_start,
+        payroll_period_end: formData.payroll_period_end,
         gross_salary: parseFloat(formData.gross_salary),
         deductions: parseFloat(formData.deductions) || 0,
         net_salary: parseFloat(formData.net_salary),
         bonus: parseFloat(formData.bonus) || 0,
         allowances: parseFloat(formData.allowances) || 0,
         tax_deductions: parseFloat(formData.tax_deductions) || 0,
-        other_deductions: parseFloat(formData.other_deductions) || 0
+        other_deductions: parseFloat(formData.other_deductions) || 0,
+        notes: formData.notes || ''
       };
 
       if (editingRecord) {

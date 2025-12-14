@@ -866,24 +866,28 @@ router.put('/:id/approve', authenticateToken, requireRole('Admin'), [
             
             // Emit real-time update for target progress - emit to ALL users so everyone sees the update
             if (global.io) {
-              // Emit a general update event
-              global.io.emit('target_progress_updated', {
-                target_id: target.id,
-                user_id: report.created_by,
-                amount: parseFloat(report.amount),
-                progress_report_id: req.params.id,
-                total_progress: totalProgressCheck?.total || 0,
-                action: 'progress_added'
-              });
+              // Emit a general update event with consistent data types
+              const updateData = {
+                target_id: targetIdInt,
+                user_id: userIdInt,
+                amount: amountFloat,
+                progress_report_id: parseInt(req.params.id),
+                total_progress: parseFloat(totalProgressCheck?.total || 0),
+                action: 'progress_added',
+                progress_id: progressId
+              };
+              
+              global.io.emit('target_progress_updated', updateData);
+              console.log('Emitted target_progress_updated event:', updateData);
               
               // Also emit target_updated to force a full refresh
               global.io.emit('target_updated', {
-                id: target.id,
+                id: targetIdInt,
                 updated_by: req.user.name || 'Admin',
-                reason: 'progress_report_approved'
+                reason: 'progress_report_approved',
+                progress_added: true
               });
-              
-              console.log('Emitted target_progress_updated and target_updated events');
+              console.log('Emitted target_updated event for target:', targetIdInt);
             }
           } else {
             // Update existing progress record

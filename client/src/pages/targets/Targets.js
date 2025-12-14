@@ -121,9 +121,18 @@ const Targets = () => {
         }, 300);
       };
 
+      const handleFundReversed = (data) => {
+        console.log('Fund reversed event received:', data);
+        setTimeout(() => {
+          fetchTargets();
+          fetchSharingHistory();
+        }, 300);
+      };
+
       socket.on('target_created', handleTargetCreated);
       socket.on('target_updated', handleTargetUpdated);
       socket.on('fund_shared', handleFundShared);
+      socket.on('fund_reversed', handleFundReversed);
       socket.on('target_progress_updated', handleTargetProgressUpdated);
       socket.on('target_deleted', handleTargetDeleted);
 
@@ -131,6 +140,7 @@ const Targets = () => {
         socket.off('target_created', handleTargetCreated);
         socket.off('target_updated', handleTargetUpdated);
         socket.off('fund_shared', handleFundShared);
+        socket.off('fund_reversed', handleFundReversed);
         socket.off('target_progress_updated', handleTargetProgressUpdated);
         socket.off('target_deleted', handleTargetDeleted);
       };

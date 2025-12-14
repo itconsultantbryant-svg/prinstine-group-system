@@ -952,12 +952,26 @@ router.post('/reverse-sharing/:id', authenticateToken, requireRole('Admin'), [
       reversal_reason: req.body.reversal_reason 
     }, req);
 
-    // Emit real-time update
+    // Emit real-time updates for both sender and recipient targets
     if (global.io) {
-      global.io.emit('fund_shared', {
+      // Emit fund_reversed event
+      global.io.emit('fund_reversed', {
         id: req.params.id,
+        from_user_id: sharing.from_user_id,
+        to_user_id: sharing.to_user_id,
+        amount: sharing.amount,
         status: 'Reversed',
         reversed_by: req.user.name
+      });
+      
+      // Emit target progress updates for both users
+      global.io.emit('target_progress_updated', {
+        target_id: null, // Will be fetched by frontend
+        user_id: sharing.from_user_id
+      });
+      global.io.emit('target_progress_updated', {
+        target_id: null,
+        user_id: sharing.to_user_id
       });
     }
 
@@ -1008,7 +1022,13 @@ router.get('/fund-sharing/history', authenticateToken, async (req, res) => {
     `;
     const params = [];
 
-    // Everyone can see all sharing records
+    // Authorization: Filter sharing records based on user role
+    if (req.user.role !== 'Admin') {
+      // Non-admin users can only see their own transactions (as sender or recipient)
+      query += ' AND (fs.from_user_id = ? OR fs.to_user_id = ?)';
+      params.push(req.user.id, req.user.id);
+    }
+    
     query += ' ORDER BY fs.created_at DESC';
 
     const sharingHistory = await db.all(query, params);
@@ -1032,7 +1052,13 @@ router.get('/:id/progress', authenticateToken, async (req, res) => {
       return res.status(404).json({ error: 'Target not found' });
     }
 
-    // Everyone can view progress for all targets
+    // Authorization: Check if user has access to this target
+    if (req.user.role !== 'Admin') {
+      // Non-admin users can only view progress for their own targets
+      if (target.user_id !== req.user.id) {
+        return res.status(403).json({ error: 'Access denied. You can only view progress for your own targets.' });
+      }
+    }
 
     const progress = await db.all(
       `SELECT tp.*, 

@@ -1682,40 +1682,6 @@ async function initializeDatabase() {
                 )
               `);
               
-              // Try to alter existing table to add new status values and approval fields if they don't exist
-              try {
-                // Check if we need to add approval columns
-                const USE_POSTGRESQL = !!process.env.DATABASE_URL;
-                let hasAdminNotes = false;
-                let hasAdminReviewedBy = false;
-                
-                if (USE_POSTGRESQL) {
-                  const adminNotesCheck = await db.get(
-                    "SELECT column_name FROM information_schema.columns WHERE table_name = 'progress_reports' AND column_name = 'admin_notes'"
-                  );
-                  hasAdminNotes = !!adminNotesCheck;
-                  
-                  const adminReviewedByCheck = await db.get(
-                    "SELECT column_name FROM information_schema.columns WHERE table_name = 'progress_reports' AND column_name = 'admin_reviewed_by'"
-                  );
-                  hasAdminReviewedBy = !!adminReviewedByCheck;
-                } else {
-                  const tableInfo = await db.all("PRAGMA table_info(progress_reports)");
-                  hasAdminNotes = tableInfo.some(col => col.name === 'admin_notes');
-                  hasAdminReviewedBy = tableInfo.some(col => col.name === 'admin_reviewed_by');
-                }
-                
-                if (!hasAdminNotes) {
-                  await db.run('ALTER TABLE progress_reports ADD COLUMN admin_notes TEXT');
-                }
-                if (!hasAdminReviewedBy) {
-                  await db.run('ALTER TABLE progress_reports ADD COLUMN admin_reviewed_by INTEGER');
-                  await db.run('ALTER TABLE progress_reports ADD COLUMN admin_reviewed_at DATETIME');
-                }
-              } catch (alterError) {
-                // Ignore errors if columns already exist or table doesn't exist yet
-                console.log('Note: Could not alter progress_reports table (may already have columns):', alterError.message);
-              }
               await db.run(`CREATE INDEX IF NOT EXISTS idx_progress_reports_created_by ON progress_reports(created_by)`);
               await db.run(`CREATE INDEX IF NOT EXISTS idx_progress_reports_department_id ON progress_reports(department_id)`);
               await db.run(`CREATE INDEX IF NOT EXISTS idx_progress_reports_date ON progress_reports(date)`);
@@ -1770,11 +1736,32 @@ async function initializeDatabase() {
                   // For PostgreSQL, we need to drop and recreate the constraint
                   if (USE_POSTGRESQL) {
                     try {
-                      // Drop old constraint if it exists
-                      await db.run(`
-                        ALTER TABLE progress_reports 
-                        DROP CONSTRAINT IF EXISTS progress_reports_status_check
-                      `);
+                      // Drop old constraint if it exists (try different possible constraint names)
+                      const constraintNames = [
+                        'progress_reports_status_check',
+                        'progress_reports_status_chk',
+                        'check_status'
+                      ];
+                      
+                      for (const constraintName of constraintNames) {
+                        try {
+                          await db.run(`ALTER TABLE progress_reports DROP CONSTRAINT IF EXISTS ${constraintName}`);
+                        } catch (e) {
+                          // Try to find the actual constraint name
+                          const constraint = await db.get(`
+                            SELECT constraint_name 
+                            FROM information_schema.table_constraints 
+                            WHERE table_name = 'progress_reports' 
+                            AND constraint_type = 'CHECK'
+                            AND constraint_name LIKE '%status%'
+                          `);
+                          if (constraint) {
+                            await db.run(`ALTER TABLE progress_reports DROP CONSTRAINT ${constraint.constraint_name}`);
+                            break;
+                          }
+                        }
+                      }
+                      
                       // Add new constraint with all status values
                       await db.run(`
                         ALTER TABLE progress_reports 

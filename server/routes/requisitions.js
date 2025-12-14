@@ -65,47 +65,56 @@ router.get('/', authenticateToken, async (req, res) => {
       // Admin sees all requisitions
     } else if (req.user.role === 'DepartmentHead') {
       // Check if head_email column exists
-      const deptTableInfo = await db.all("PRAGMA table_info(departments)");
+      const USE_POSTGRESQL = !!process.env.DATABASE_URL;
+      let deptTableInfo;
+      if (USE_POSTGRESQL) {
+        deptTableInfo = await db.all("SELECT column_name as name FROM information_schema.columns WHERE table_name = 'departments'");
+      } else {
+        deptTableInfo = await db.all("PRAGMA table_info(departments)");
+      }
       const deptColumnNames = deptTableInfo.map(col => col.name);
       const hasHeadEmail = deptColumnNames.includes('head_email');
       
-      // Department Head sees requisitions from their department
-      // This includes: pending approval, approved by them, and rejected by them
-      // First, get the department(s) this user manages
-      let dept;
+      // Check if this is Finance Department Head
+      let financeDept;
       if (hasHeadEmail) {
-        dept = await db.get(
-          'SELECT id, name FROM departments WHERE manager_id = ? OR LOWER(TRIM(head_email)) = ?',
+        financeDept = await db.get(
+          "SELECT id, name FROM departments WHERE (manager_id = ? OR LOWER(TRIM(head_email)) = ?) AND LOWER(name) LIKE '%finance%'",
           [req.user.id, req.user.email.toLowerCase().trim()]
         );
       } else {
-        dept = await db.get(
-          'SELECT id, name FROM departments WHERE manager_id = ?',
+        financeDept = await db.get(
+          "SELECT id, name FROM departments WHERE manager_id = ? AND LOWER(name) LIKE '%finance%'",
           [req.user.id]
         );
       }
       
-      if (dept) {
-        // Show requisitions from this department that are:
-        // 1. Pending department head approval
-        // 2. Approved by this department head (Pending_Admin, Admin_Approved, Admin_Rejected)
-        // 3. Rejected by this department head
-        query += ` AND (r.department_id = ? OR LOWER(TRIM(r.department_name)) = ?) 
-                    AND (r.status = ? 
+      if (financeDept) {
+        // Finance Department Head sees:
+        // 1. Office supplies requisitions pending their approval
+        // 2. Office supplies they've approved/rejected
+        query += ` AND r.request_type = ? 
+                    AND ((r.status = ? AND (r.department_id = ? OR LOWER(TRIM(r.department_name)) = ?))
                          OR (r.status IN (?, ?, ?) AND r.dept_head_reviewed_by = ?)
                          OR (r.status = ? AND r.dept_head_reviewed_by = ?))`;
         params.push(
-          dept.id, 
-          dept.name.toLowerCase().trim(), 
+          'office_supplies',
           'Pending_DeptHead',
+          financeDept.id,
+          financeDept.name.toLowerCase().trim(),
           'Pending_Admin', 'Admin_Approved', 'Admin_Rejected',
           req.user.id,
           'DeptHead_Rejected',
           req.user.id
         );
       } else {
-        // If no department found, show nothing (or could show their own)
-        query += ' AND 1=0'; // Return no results
+        // Non-Finance Department Heads only see their own requisitions
+        if (USE_POSTGRESQL) {
+          query += ' AND CAST(r.user_id AS INTEGER) = CAST(? AS INTEGER)';
+        } else {
+          query += ' AND r.user_id = ?';
+        }
+        params.push(req.user.id);
       }
     } else {
       // Regular users see:

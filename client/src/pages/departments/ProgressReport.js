@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import api from '../../config/api';
 import { useAuth } from '../../hooks/useAuth';
+import { getSocket } from '../../config/socket';
 import { exportToPDF, exportToExcel, exportToWord, printContent, formatReportForExport, convertReportsToExcel } from '../../utils/exportUtils';
 
 const ProgressReport = ({ onClose }) => {
@@ -22,6 +23,32 @@ const ProgressReport = ({ onClose }) => {
 
   useEffect(() => {
     fetchReports();
+    
+    // Set up real-time socket connection for progress report updates
+    const socket = getSocket();
+    if (socket) {
+      const handleProgressReportUpdated = () => {
+        console.log('Progress report updated event received, refreshing...');
+        setTimeout(() => {
+          fetchReports();
+        }, 300);
+      };
+
+      const handleProgressReportApproved = (data) => {
+        console.log('Progress report approved event received:', data);
+        setTimeout(() => {
+          fetchReports();
+        }, 300);
+      };
+
+      socket.on('progress_report_updated', handleProgressReportUpdated);
+      socket.on('progress_report_approved', handleProgressReportApproved);
+
+      return () => {
+        socket.off('progress_report_updated', handleProgressReportUpdated);
+        socket.off('progress_report_approved', handleProgressReportApproved);
+      };
+    }
   }, []);
 
   useEffect(() => {
@@ -125,6 +152,32 @@ const ProgressReport = ({ onClose }) => {
       ...formData,
       [e.target.name]: e.target.value
     });
+  };
+
+  const handleApproveReport = async (reportId, status) => {
+    if (!window.confirm(`Are you sure you want to ${status.toLowerCase()} this progress report?`)) {
+      return;
+    }
+
+    try {
+      setError('');
+      setLoading(true);
+      await api.put(`/progress-reports/${reportId}/approve`, {
+        status: status,
+        admin_notes: `Progress report ${status.toLowerCase()} by ${user?.name || 'Admin'}`
+      });
+      
+      // Refresh reports after approval
+      await fetchReports();
+      
+      // Show success message
+      alert(`Progress report ${status.toLowerCase()} successfully. ${status === 'Approved' ? 'Target progress has been updated in real-time.' : ''}`);
+    } catch (err) {
+      console.error('Error approving report:', err);
+      setError(err.response?.data?.error || `Failed to ${status.toLowerCase()} progress report`);
+    } finally {
+      setLoading(false);
+    }
   };
 
   const getStatusBadge = (status) => {

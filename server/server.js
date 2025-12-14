@@ -1780,6 +1780,44 @@ async function initializeDatabase() {
               }
               
               console.log(`✓ ${table.name} table created directly`);
+            } else if (table.name === 'requisitions') {
+              // Update requisitions status constraint to include 'Approved' for work_support
+              if (USE_POSTGRESQL) {
+                try {
+                  const requisitionsConstraint = await db.get(`
+                    SELECT constraint_name 
+                    FROM information_schema.table_constraints 
+                    WHERE table_name = 'requisitions' 
+                    AND constraint_type = 'CHECK'
+                    AND constraint_name LIKE '%status%'
+                  `);
+                  
+                  if (requisitionsConstraint) {
+                    // Check if constraint already includes 'Approved'
+                    const constraintDef = await db.get(`
+                      SELECT check_clause 
+                      FROM information_schema.check_constraints 
+                      WHERE constraint_name = ?
+                    `, [requisitionsConstraint.constraint_name]);
+                    
+                    if (constraintDef && !constraintDef.check_clause.includes("'Approved'")) {
+                      // Drop old constraint
+                      await db.run(`ALTER TABLE requisitions DROP CONSTRAINT ${requisitionsConstraint.constraint_name}`);
+                      
+                      // Add new constraint with 'Approved' included
+                      await db.run(`
+                        ALTER TABLE requisitions 
+                        ADD CONSTRAINT requisitions_status_check 
+                        CHECK (status IN ('Pending_DeptHead', 'DeptHead_Approved', 'DeptHead_Rejected', 'Pending_Admin', 'Admin_Approved', 'Admin_Rejected', 'Approved'))
+                      `);
+                      console.log('✓ Updated requisitions status constraint to include Approved');
+                    }
+                  }
+                } catch (requisitionsConstraintError) {
+                  console.log('Note: Could not update requisitions constraint (may already be updated):', requisitionsConstraintError.message);
+                }
+              }
+              console.log(`✓ ${table.name} table constraint checked/updated`);
             } else if (table.name === 'department_reports') {
               await db.run(`
                 CREATE TABLE IF NOT EXISTS department_reports (

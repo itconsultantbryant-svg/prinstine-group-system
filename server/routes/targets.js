@@ -310,11 +310,25 @@ router.get('/:id', authenticateToken, async (req, res) => {
     `;
     const params = [req.params.id];
 
-    // Everyone can see all targets
     const target = await db.get(query, params);
 
     if (!target) {
       return res.status(404).json({ error: 'Target not found' });
+    }
+
+    // Authorization: Non-admin users can only view their own targets
+    // Admin can view all targets including admin aggregated targets
+    if (req.user.role !== 'Admin') {
+      // Check if this is an admin target (should be hidden from non-admin)
+      const adminUser = await db.get("SELECT id FROM users WHERE role = 'Admin' LIMIT 1");
+      if (adminUser && target.user_id === adminUser.id) {
+        return res.status(403).json({ error: 'Access denied. Admin targets are only visible to Admin users.' });
+      }
+      
+      // Non-admin users can only view their own targets
+      if (target.user_id !== req.user.id) {
+        return res.status(403).json({ error: 'Access denied. You can only view your own targets.' });
+      }
     }
 
     const netAmount = (target.total_progress || 0) + (target.shared_in || 0) - (target.shared_out || 0);

@@ -71,12 +71,14 @@ const RequisitionHistory = () => {
     socket.on('requisition_deleted', handleRequisitionDeleted);
 
     return () => {
-      socket.off('requisition_created', handleRequisitionCreated);
-      socket.off('requisition_updated', handleRequisitionUpdated);
-      socket.off('requisition_status_updated', handleRequisitionStatusUpdated);
-      socket.off('requisition_deleted', handleRequisitionDeleted);
+      if (socket) {
+        socket.off('requisition_created', handleRequisitionCreated);
+        socket.off('requisition_updated', handleRequisitionUpdated);
+        socket.off('requisition_status_updated', handleRequisitionStatusUpdated);
+        socket.off('requisition_deleted', handleRequisitionDeleted);
+      }
     };
-  }, [socket, user]);
+  }, [user]);
 
   const fetchRequisitions = async () => {
     try {

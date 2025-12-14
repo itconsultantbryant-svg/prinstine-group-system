@@ -109,13 +109,33 @@ router.get('/', authenticateToken, async (req, res) => {
       }
     } else {
       // Regular users only see their own requisitions
-      query += ' AND r.user_id = ?';
+      // Ensure user_id comparison works for both SQLite and PostgreSQL
+      query += ' AND CAST(r.user_id AS INTEGER) = CAST(? AS INTEGER)';
       params.push(req.user.id);
     }
     
     query += ' ORDER BY r.requisition_date DESC, r.created_at DESC';
     
+    console.log('Fetching requisitions for user:', {
+      user_id: req.user.id,
+      role: req.user.role,
+      email: req.user.email,
+      query: query.substring(0, 200) + '...',
+      params: params
+    });
+    
     const requisitions = await db.all(query, params);
+    
+    console.log(`Found ${requisitions.length} requisitions for user ${req.user.id} (${req.user.role})`);
+    if (requisitions.length > 0) {
+      console.log('Sample requisition:', {
+        id: requisitions[0].id,
+        user_id: requisitions[0].user_id,
+        status: requisitions[0].status,
+        request_type: requisitions[0].request_type
+      });
+    }
+    
     res.json({ requisitions });
   } catch (error) {
     console.error('Get requisitions error:', error);

@@ -779,6 +779,109 @@ router.put('/:id/approve', authenticateToken, requireRole('Admin'), [
 
     await logAction(req.user.id, 'approve_progress_report', 'progress_reports', req.params.id, { status }, req);
 
+    // Only update target progress if the report is APPROVED and has an amount
+    if (status === 'Approved' && report.amount && parseFloat(report.amount) > 0) {
+      try {
+        console.log('Processing target progress update for approved progress report:', {
+          progress_report_id: req.params.id,
+          amount: report.amount,
+          user_id: report.created_by
+        });
+        
+        // Find active target for the creator
+        const target = await db.get(
+          'SELECT * FROM targets WHERE user_id = ? AND status = ?',
+          [report.created_by, 'Active']
+        );
+
+        if (target) {
+          console.log('Found active target:', { target_id: target.id, user_id: report.created_by });
+          
+          // Check if progress already recorded for this report
+          const existingProgress = await db.get(
+            'SELECT id FROM target_progress WHERE progress_report_id = ?',
+            [req.params.id]
+          );
+
+          if (!existingProgress) {
+            // Create new progress record
+            const progressResult = await db.run(
+              `INSERT INTO target_progress (target_id, user_id, progress_report_id, amount, category, status, transaction_date)
+               VALUES (?, ?, ?, ?, ?, ?, ?)`,
+              [
+                target.id,
+                report.created_by,
+                req.params.id,
+                parseFloat(report.amount),
+                report.category,
+                report.status,
+                report.date
+              ]
+            );
+            
+            const progressId = progressResult.lastID || progressResult.id || (progressResult.rows && progressResult.rows[0] && progressResult.rows[0].id);
+            
+            console.log('Target progress created successfully:', {
+              progress_id: progressId,
+              target_id: target.id,
+              user_id: report.created_by,
+              amount: parseFloat(report.amount)
+            });
+            
+            // Verify the total progress for this target
+            const totalProgressCheck = await db.get(
+              'SELECT COALESCE(SUM(amount), 0) as total FROM target_progress WHERE target_id = ?',
+              [target.id]
+            );
+            console.log('Total progress for target', target.id, ':', totalProgressCheck);
+            
+            // Emit real-time update for target progress
+            if (global.io) {
+              global.io.emit('target_progress_updated', {
+                target_id: target.id,
+                user_id: report.created_by,
+                amount: parseFloat(report.amount),
+                progress_report_id: req.params.id,
+                total_progress: totalProgressCheck?.total || 0
+              });
+              console.log('Emitted target_progress_updated event');
+            }
+          } else {
+            // Update existing progress record
+            await db.run(
+              `UPDATE target_progress 
+               SET amount = ?, category = ?, status = ?, transaction_date = ?, updated_at = CURRENT_TIMESTAMP
+               WHERE progress_report_id = ?`,
+              [
+                parseFloat(report.amount),
+                report.category,
+                report.status,
+                report.date,
+                req.params.id
+              ]
+            );
+            
+            console.log('Target progress updated successfully for progress report:', req.params.id);
+            
+            // Emit real-time update
+            if (global.io) {
+              global.io.emit('target_progress_updated', {
+                target_id: target.id,
+                user_id: report.created_by,
+                amount: parseFloat(report.amount),
+                progress_report_id: req.params.id
+              });
+            }
+          }
+        } else {
+          console.log('No active target found for user:', report.created_by);
+        }
+      } catch (targetError) {
+        // Log but don't fail the approval if target update fails
+        console.error('Error updating target progress after approval:', targetError);
+      }
+    }
+
     // Send notification to creator
     try {
       const { sendNotificationToUser } = require('../utils/notifications');
@@ -793,16 +896,33 @@ router.put('/:id/approve', authenticateToken, requireRole('Admin'), [
       console.error('Error sending notification:', notifError);
     }
 
-    // Emit real-time update
+    // Emit real-time update for progress report
     if (global.io) {
       global.io.emit('progress_report_updated', {
         id: req.params.id,
         status: status,
-        reviewed_by: req.user.name
+        reviewed_by: req.user.name,
+        amount: report.amount
+      });
+      
+      // Also emit progress_report_approved event for frontend
+      global.io.emit('progress_report_approved', {
+        id: req.params.id,
+        status: status,
+        reviewed_by: req.user.name,
+        amount: report.amount,
+        user_id: report.created_by
       });
     }
 
-    res.json({ message: `Progress report ${status.toLowerCase()} successfully` });
+    res.json({ 
+      message: `Progress report ${status.toLowerCase()} successfully`,
+      report: {
+        id: req.params.id,
+        status: status,
+        amount: report.amount
+      }
+    });
   } catch (error) {
     console.error('Approve progress report error:', error);
     res.status(500).json({ error: 'Failed to approve progress report' });

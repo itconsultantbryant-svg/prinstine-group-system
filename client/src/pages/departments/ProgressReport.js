@@ -297,12 +297,13 @@ const ProgressReport = ({ onClose }) => {
                     <th>Amount</th>
                     <th>Department</th>
                     <th>Reported By</th>
+                    {user?.role === 'Admin' && <th>Actions</th>}
                   </tr>
                 </thead>
                 <tbody>
                   {loading ? (
                     <tr>
-                      <td colSpan="8" className="text-center">
+                      <td colSpan={user?.role === 'Admin' ? 9 : 8} className="text-center">
                         <div className="spinner-border spinner-border-sm" role="status">
                           <span className="visually-hidden">Loading...</span>
                         </div>
@@ -310,7 +311,7 @@ const ProgressReport = ({ onClose }) => {
                     </tr>
                   ) : filteredReports.length === 0 ? (
                     <tr>
-                      <td colSpan="8" className="text-center text-muted">
+                      <td colSpan={user?.role === 'Admin' ? 9 : 8} className="text-center text-muted">
                         No progress reports found
                       </td>
                     </tr>
@@ -331,7 +332,12 @@ const ProgressReport = ({ onClose }) => {
                         </td>
                         <td>
                           {report.status ? (
-                            <span className={`badge bg-${getStatusBadge(report.status.toLowerCase())}`}>
+                            <span className={`badge bg-${
+                              report.status === 'Pending' ? 'warning' :
+                              report.status === 'Approved' ? 'success' :
+                              report.status === 'Rejected' ? 'danger' :
+                              getStatusBadge(report.status.toLowerCase())
+                            }`}>
                               {report.status}
                             </span>
                           ) : (
@@ -362,6 +368,24 @@ const ProgressReport = ({ onClose }) => {
                         </td>
                         <td>
                           <div className="btn-group" role="group">
+                            {user?.role === 'Admin' && report.status === 'Pending' && (
+                              <>
+                                <button
+                                  className="btn btn-sm btn-success"
+                                  onClick={() => handleApproveReport(report.id, 'Approved')}
+                                  title="Approve"
+                                >
+                                  <i className="bi bi-check-circle"></i>
+                                </button>
+                                <button
+                                  className="btn btn-sm btn-danger"
+                                  onClick={() => handleApproveReport(report.id, 'Rejected')}
+                                  title="Reject"
+                                >
+                                  <i className="bi bi-x-circle"></i>
+                                </button>
+                              </>
+                            )}
                             <button
                               className="btn btn-sm btn-outline-secondary"
                               onClick={() => printContent(report.name, formatReportForExport(report, 'progress'))}

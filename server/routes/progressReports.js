@@ -679,14 +679,27 @@ router.put('/:id/approve', authenticateToken, requireRole('Admin'), [
       return res.status(400).json({ error: 'Progress report is not pending approval' });
     }
 
-    await db.run(
-      `UPDATE progress_reports 
-       SET status = ?, admin_notes = ?, admin_reviewed_by = ?, admin_reviewed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
-       WHERE id = ?`,
-      [status, admin_notes || null, req.user.id, req.params.id]
-    );
+    // Update the progress report status
+    try {
+      await db.run(
+        `UPDATE progress_reports 
+         SET status = ?, admin_notes = ?, admin_reviewed_by = ?, admin_reviewed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+         WHERE id = ?`,
+        [status, admin_notes || null, req.user.id, req.params.id]
+      );
+      console.log('Progress report status updated successfully:', { id: req.params.id, status });
+    } catch (updateError) {
+      console.error('Error updating progress report status:', updateError);
+      throw new Error(`Failed to update progress report: ${updateError.message}`);
+    }
 
-    await logAction(req.user.id, 'approve_progress_report', 'progress_reports', req.params.id, { status }, req);
+    // Log the action (don't fail if logging fails)
+    try {
+      await logAction(req.user.id, 'approve_progress_report', 'progress_reports', req.params.id, { status }, req);
+    } catch (logError) {
+      console.error('Error logging action (non-fatal):', logError);
+      // Continue even if logging fails
+    }
 
     // Only update target progress if the report is APPROVED and has an amount
     if (status === 'Approved' && report.amount && parseFloat(report.amount) > 0) {
@@ -791,37 +804,43 @@ router.put('/:id/approve', authenticateToken, requireRole('Admin'), [
       }
     }
 
-    // Send notification to creator
+    // Send notification to creator (don't fail if notification fails)
     try {
       const { sendNotificationToUser } = require('../utils/notifications');
       await sendNotificationToUser(report.created_by, {
         title: `Progress Report ${status}`,
-        message: `Your progress report "${report.name}" has been ${status.toLowerCase()}`,
+        message: `Your progress report "${report.name || 'Untitled'}" has been ${status.toLowerCase()}`,
         link: `/progress-reports/${req.params.id}`,
         type: status === 'Approved' ? 'success' : 'warning',
         senderId: req.user.id
       });
     } catch (notifError) {
-      console.error('Error sending notification:', notifError);
+      console.error('Error sending notification (non-fatal):', notifError);
+      // Continue even if notification fails
     }
 
     // Emit real-time update for progress report
     if (global.io) {
-      global.io.emit('progress_report_updated', {
-        id: req.params.id,
-        status: status,
-        reviewed_by: req.user.name,
-        amount: report.amount
-      });
-      
-      // Also emit progress_report_approved event for frontend
-      global.io.emit('progress_report_approved', {
-        id: req.params.id,
-        status: status,
-        reviewed_by: req.user.name,
-        amount: report.amount,
-        user_id: report.created_by
-      });
+      try {
+        global.io.emit('progress_report_updated', {
+          id: req.params.id,
+          status: status,
+          reviewed_by: req.user.name || req.user.email || 'Admin',
+          amount: report.amount
+        });
+        
+        // Also emit progress_report_approved event for frontend
+        global.io.emit('progress_report_approved', {
+          id: req.params.id,
+          status: status,
+          reviewed_by: req.user.name || req.user.email || 'Admin',
+          amount: report.amount,
+          user_id: report.created_by
+        });
+      } catch (emitError) {
+        console.error('Error emitting socket events (non-fatal):', emitError);
+        // Continue even if socket emit fails
+      }
     }
 
     res.json({ 
@@ -834,7 +853,28 @@ router.put('/:id/approve', authenticateToken, requireRole('Admin'), [
     });
   } catch (error) {
     console.error('Approve progress report error:', error);
-    res.status(500).json({ error: 'Failed to approve progress report' });
+    console.error('Error details:', {
+      message: error.message,
+      stack: error.stack,
+      code: error.code,
+      errno: error.errno,
+      sql: error.sql
+    });
+    
+    // Provide more specific error messages
+    let errorMessage = 'Failed to approve progress report';
+    if (error.message && error.message.includes('FOREIGN KEY')) {
+      errorMessage = 'Database constraint error. Please ensure all related records exist.';
+    } else if (error.message && error.message.includes('NOT NULL')) {
+      errorMessage = 'Required field is missing.';
+    } else if (error.message) {
+      errorMessage = error.message;
+    }
+    
+    res.status(500).json({ 
+      error: errorMessage,
+      details: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
   }
 });
 

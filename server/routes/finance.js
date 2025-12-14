@@ -219,6 +219,28 @@ router.post('/petty-cash/ledgers', authenticateToken, [
 
     const { month, year, starting_balance, petty_cash_custodian_id } = req.body;
 
+    // Validate custodian exists (can be staff, dept head, or admin user)
+    // For backward compatibility, try staff first, then user
+    let custodianExists = false;
+    let custodianIsUser = false;
+    
+    // Check if it's a staff member
+    const staff = await db.get('SELECT id, user_id FROM staff WHERE id = ?', [petty_cash_custodian_id]);
+    if (staff) {
+      custodianExists = true;
+    } else {
+      // Check if it's a user (dept head or admin without staff record)
+      const user = await db.get('SELECT id FROM users WHERE id = ?', [petty_cash_custodian_id]);
+      if (user) {
+        custodianExists = true;
+        custodianIsUser = true;
+      }
+    }
+    
+    if (!custodianExists) {
+      return res.status(400).json({ error: 'Invalid petty cash custodian. Must be a valid staff member, department head, or admin user.' });
+    }
+
     // Check if ledger already exists for this month/year
     const existing = await db.get(
       'SELECT id FROM petty_cash_ledgers WHERE year = ? AND month = ?',

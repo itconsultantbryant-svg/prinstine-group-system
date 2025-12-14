@@ -113,16 +113,26 @@ const Targets = () => {
         }, 300);
       };
 
+      const handleTargetDeleted = () => {
+        console.log('Target deleted event received, refreshing...');
+        setTimeout(() => {
+          fetchTargets();
+          fetchSharingHistory();
+        }, 300);
+      };
+
       socket.on('target_created', handleTargetCreated);
       socket.on('target_updated', handleTargetUpdated);
       socket.on('fund_shared', handleFundShared);
       socket.on('target_progress_updated', handleTargetProgressUpdated);
+      socket.on('target_deleted', handleTargetDeleted);
 
       return () => {
         socket.off('target_created', handleTargetCreated);
         socket.off('target_updated', handleTargetUpdated);
         socket.off('fund_shared', handleFundShared);
         socket.off('target_progress_updated', handleTargetProgressUpdated);
+        socket.off('target_deleted', handleTargetDeleted);
       };
     }
   }, [user]);

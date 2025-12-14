@@ -87,7 +87,15 @@ router.get('/', authenticateToken, async (req, res) => {
     `;
     const params = [];
 
-    // Everyone can see all targets
+    // Filter targets: Admin can see all targets including admin targets, others can only see non-admin targets
+    if (req.user.role !== 'Admin') {
+      // Non-admin users should not see admin targets
+      const adminUser = await db.get("SELECT id FROM users WHERE role = 'Admin' LIMIT 1");
+      if (adminUser) {
+        query += ' AND t.user_id != ?';
+        params.push(adminUser.id);
+      }
+    }
     // Use the column aliases in ORDER BY
     query += ' ORDER BY (COALESCE(total_progress, 0) + COALESCE(shared_in, 0) - COALESCE(shared_out, 0)) DESC, t.created_at DESC';
 
@@ -1117,6 +1125,109 @@ router.post('/update-progress', authenticateToken, async (req, res) => {
   } catch (error) {
     console.error('Update target progress error:', error);
     res.status(500).json({ error: 'Failed to update target progress' });
+  }
+});
+
+// Delete target (Admin only)
+router.delete('/:id', authenticateToken, requireRole('Admin'), async (req, res) => {
+  try {
+    const target = await db.get('SELECT * FROM targets WHERE id = ?', [req.params.id]);
+    
+    if (!target) {
+      return res.status(404).json({ error: 'Target not found' });
+    }
+
+    // Get user info to check if it's an admin target
+    const targetUser = await db.get('SELECT role FROM users WHERE id = ?', [target.user_id]);
+    const periodStart = target.period_start;
+    
+    // Delete the target
+    await db.run('DELETE FROM targets WHERE id = ?', [req.params.id]);
+    
+    // Also delete associated target_progress records
+    await db.run('DELETE FROM target_progress WHERE target_id = ?', [req.params.id]);
+    
+    await logAction(req.user.id, 'delete_target', 'targets', req.params.id, { 
+      user_id: target.user_id,
+      target_amount: target.target_amount 
+    }, req);
+
+    // If deleted target was a staff target, update admin target
+    if (targetUser && targetUser.role !== 'Admin') {
+      try {
+        const adminUser = await db.get("SELECT id FROM users WHERE role = 'Admin' LIMIT 1");
+        if (adminUser && periodStart) {
+          const adminTarget = await db.get(
+            'SELECT id FROM targets WHERE user_id = ? AND status = ? AND period_start = ?',
+            [adminUser.id, 'Active', periodStart]
+          );
+
+          if (adminTarget) {
+            // Recalculate admin target after staff target deletion
+            const allStaffTargets = await db.all(
+              `SELECT 
+                COALESCE(SUM(target_amount), 0) as total_target,
+                COALESCE(SUM(
+                  (SELECT COALESCE(SUM(tp.amount), 0) FROM target_progress tp WHERE tp.target_id = t.id)
+                ), 0) as total_progress,
+                COALESCE(SUM(
+                  (SELECT COALESCE(SUM(CASE WHEN fs.status = 'Active' THEN fs.amount ELSE 0 END), 0)
+                   FROM fund_sharing fs WHERE fs.from_user_id = t.user_id)
+                ), 0) as total_shared_out,
+                COALESCE(SUM(
+                  (SELECT COALESCE(SUM(CASE WHEN fs.status = 'Active' THEN fs.amount ELSE 0 END), 0)
+                   FROM fund_sharing fs WHERE fs.to_user_id = t.user_id)
+                ), 0) as total_shared_in
+               FROM targets t
+               WHERE t.user_id != ? AND t.status = ? AND t.period_start = ?`,
+              [adminUser.id, 'Active', periodStart]
+            );
+
+            if (allStaffTargets && allStaffTargets[0]) {
+              const staffData = allStaffTargets[0];
+              
+              await db.run(
+                `UPDATE targets 
+                 SET target_amount = ?, 
+                     notes = ?,
+                     updated_at = CURRENT_TIMESTAMP
+                 WHERE id = ?`,
+                [
+                  staffData.total_target || 0,
+                  `Auto-aggregated from all staff targets for period ${periodStart}`,
+                  adminTarget.id
+                ]
+              );
+              
+              console.log('Admin target updated after staff target deletion');
+              
+              // Emit update event
+              if (global.io) {
+                global.io.emit('target_updated', {
+                  id: adminTarget.id,
+                  updated_by: req.user.name
+                });
+              }
+            }
+          }
+        }
+      } catch (adminTargetError) {
+        console.error('Error updating admin target after deletion:', adminTargetError);
+      }
+    }
+
+    // Emit real-time update
+    if (global.io) {
+      global.io.emit('target_deleted', {
+        id: req.params.id,
+        deleted_by: req.user.name
+      });
+    }
+
+    res.json({ message: 'Target deleted successfully' });
+  } catch (error) {
+    console.error('Delete target error:', error);
+    res.status(500).json({ error: 'Failed to delete target' });
   }
 });
 

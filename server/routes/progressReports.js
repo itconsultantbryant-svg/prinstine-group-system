@@ -785,17 +785,32 @@ router.put('/:id/approve', authenticateToken, requireRole('Admin'), [
 
           if (!existingProgress) {
             // Create new progress record
+            // Ensure target_id is an integer
+            const targetIdInt = parseInt(target.id);
+            const userIdInt = parseInt(report.created_by);
+            const amountFloat = parseFloat(report.amount);
+            
+            console.log('Creating target_progress record with:', {
+              target_id: targetIdInt,
+              user_id: userIdInt,
+              progress_report_id: req.params.id,
+              amount: amountFloat,
+              category: report.category,
+              status: report.status,
+              date: report.date
+            });
+            
             const progressResult = await db.run(
               `INSERT INTO target_progress (target_id, user_id, progress_report_id, amount, category, status, transaction_date)
                VALUES (?, ?, ?, ?, ?, ?, ?)`,
               [
-                target.id,
-                report.created_by,
+                targetIdInt,
+                userIdInt,
                 req.params.id,
-                parseFloat(report.amount),
-                report.category,
-                report.status,
-                report.date
+                amountFloat,
+                report.category || null,
+                report.status || null,
+                report.date || null
               ]
             );
             
@@ -803,32 +818,50 @@ router.put('/:id/approve', authenticateToken, requireRole('Admin'), [
             
             console.log('Target progress created successfully:', {
               progress_id: progressId,
-              target_id: target.id,
-              user_id: report.created_by,
-              amount: parseFloat(report.amount)
+              target_id: targetIdInt,
+              user_id: userIdInt,
+              amount: amountFloat,
+              result: progressResult
             });
             
-            // Verify the total progress for this target
-            const totalProgressCheck = await db.get(
-              'SELECT COALESCE(SUM(amount), 0) as total, COUNT(*) as count FROM target_progress WHERE target_id = ?',
-              [target.id]
-            );
-            console.log('Total progress for target', target.id, ':', {
-              total: totalProgressCheck?.total || 0,
-              count: totalProgressCheck?.count || 0,
-              expected_amount: parseFloat(report.amount)
-            });
+            // Wait a moment for database commit (especially for PostgreSQL)
+            await new Promise(resolve => setTimeout(resolve, 100));
             
-            // Double-check the record was created correctly
+            // Verify the record was created and can be found
             const verifyProgress = await db.get(
-              'SELECT * FROM target_progress WHERE progress_report_id = ? AND target_id = ?',
-              [req.params.id, target.id]
+              'SELECT * FROM target_progress WHERE id = ?',
+              [progressId]
             );
-            console.log('Verified target_progress record:', {
-              exists: !!verifyProgress,
+            console.log('Verified target_progress record by ID:', {
+              found: !!verifyProgress,
+              id: verifyProgress?.id,
               target_id: verifyProgress?.target_id,
               amount: verifyProgress?.amount,
               progress_report_id: verifyProgress?.progress_report_id
+            });
+            
+            // Verify the total progress for this target using the same query as GET /targets
+            const totalProgressCheck = await db.get(
+              'SELECT COALESCE(SUM(amount), 0) as total, COUNT(*) as count FROM target_progress WHERE target_id = ?',
+              [targetIdInt]
+            );
+            console.log('Total progress for target', targetIdInt, ':', {
+              total: totalProgressCheck?.total || 0,
+              count: totalProgressCheck?.count || 0,
+              expected_amount: amountFloat,
+              match: (totalProgressCheck?.total || 0) >= amountFloat
+            });
+            
+            // Also verify using the exact subquery from GET /targets
+            const subqueryCheck = await db.get(
+              `SELECT COALESCE(SUM(tp.amount), 0) as total_progress
+               FROM target_progress tp 
+               WHERE tp.target_id = ?`,
+              [targetIdInt]
+            );
+            console.log('Subquery check (same as GET /targets):', {
+              total_progress: subqueryCheck?.total_progress || 0,
+              matches_direct_query: (subqueryCheck?.total_progress || 0) === (totalProgressCheck?.total || 0)
             });
             
             // Emit real-time update for target progress - emit to ALL users so everyone sees the update

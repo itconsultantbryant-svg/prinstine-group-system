@@ -160,23 +160,97 @@ router.post('/', authenticateToken, requireRole('Admin', 'DepartmentHead', 'Staf
     const createdByName = req.user.name || user.name || 'Unknown';
     const createdByEmail = req.user.email || user.email || '';
     
-    const result = await db.run(
-      `INSERT INTO progress_reports 
-       (name, date, category, status, amount, department_id, department_name, created_by, created_by_name, created_by_email)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [
-        name,
-        date,
-        category,
-        reportStatus, // Always 'Pending' for admin approval
-        amount || 0,
-        user.department_id || null,
-        user.department_name || null,
-        req.user.id,
-        createdByName,
-        createdByEmail
-      ]
-    );
+    // Ensure the constraint allows 'Pending' status before inserting
+    // Try to update constraint if it fails
+    let result;
+    try {
+      result = await db.run(
+        `INSERT INTO progress_reports 
+         (name, date, category, status, amount, department_id, department_name, created_by, created_by_name, created_by_email)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          name,
+          date,
+          category,
+          reportStatus, // Always 'Pending' for admin approval
+          amount || 0,
+          user.department_id || null,
+          user.department_name || null,
+          req.user.id,
+          createdByName,
+          createdByEmail
+        ]
+      );
+    } catch (insertError) {
+      // If constraint violation, try to fix the constraint and retry
+      if (insertError.message && insertError.message.includes('check constraint') && insertError.message.includes('progress_reports_status_check')) {
+        console.log('Constraint violation detected, attempting to update constraint...');
+        const USE_POSTGRESQL = !!process.env.DATABASE_URL;
+        
+        if (USE_POSTGRESQL) {
+          try {
+            // Find and drop the existing constraint
+            const constraint = await db.get(`
+              SELECT constraint_name 
+              FROM information_schema.table_constraints 
+              WHERE table_name = 'progress_reports' 
+              AND constraint_type = 'CHECK'
+              AND constraint_name LIKE '%status%'
+            `);
+            
+            if (constraint) {
+              await db.run(`ALTER TABLE progress_reports DROP CONSTRAINT ${constraint.constraint_name}`);
+            } else {
+              // Try common constraint names
+              const constraintNames = ['progress_reports_status_check', 'progress_reports_status_chk', 'check_status'];
+              for (const constraintName of constraintNames) {
+                try {
+                  await db.run(`ALTER TABLE progress_reports DROP CONSTRAINT IF EXISTS ${constraintName}`);
+                } catch (e) {
+                  // Ignore if doesn't exist
+                }
+              }
+            }
+            
+            // Add new constraint with all status values
+            await db.run(`
+              ALTER TABLE progress_reports 
+              ADD CONSTRAINT progress_reports_status_check 
+              CHECK (status IN ('Pending', 'Signed Contract', 'Pipeline Client', 'Submitted', 'Approved', 'Rejected'))
+            `);
+            console.log('✓ Updated progress_reports status constraint');
+            
+            // Retry the insert
+            result = await db.run(
+              `INSERT INTO progress_reports 
+               (name, date, category, status, amount, department_id, department_name, created_by, created_by_name, created_by_email)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+              [
+                name,
+                date,
+                category,
+                reportStatus,
+                amount || 0,
+                user.department_id || null,
+                user.department_name || null,
+                req.user.id,
+                createdByName,
+                createdByEmail
+              ]
+            );
+          } catch (constraintError) {
+            console.error('Error updating constraint:', constraintError);
+            throw insertError; // Re-throw original error
+          }
+        } else {
+          // SQLite doesn't support ALTER TABLE for CHECK constraints
+          // The constraint should be correct in the CREATE TABLE statement
+          throw insertError;
+        }
+      } else {
+        throw insertError;
+      }
+    }
 
     // Also create a client entry from the progress report (only for client categories, not students)
     let clientId = null;

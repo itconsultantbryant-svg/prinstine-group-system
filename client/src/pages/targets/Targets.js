@@ -635,6 +635,13 @@ const Targets = () => {
                               >
                                 <i className="bi bi-pencil"></i>
                               </button>
+                              <button
+                                className="btn btn-sm btn-outline-danger"
+                                onClick={() => handleDeleteTarget(target.id)}
+                                title="Delete Target"
+                              >
+                                <i className="bi bi-trash"></i>
+                              </button>
                               {target.status === 'Active' && parseFloat(target.progress_percentage || 0) >= 100 && (
                                 <button
                                   className="btn btn-sm btn-info"

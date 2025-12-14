@@ -458,45 +458,73 @@ router.post('/', authenticateToken, upload.single('document'), async (req, res) 
         senderId: req.user.id
       });
 
-      // Notify Department Head (for all requisitions)
-      if (departmentId || departmentName) {
-        let dept = null;
-        if (departmentId) {
-          dept = await db.get('SELECT manager_id, head_email, name FROM departments WHERE id = ?', [departmentId]);
-        } else if (departmentName) {
-          dept = await db.get('SELECT manager_id, head_email, name FROM departments WHERE LOWER(TRIM(name)) = ?', [departmentName.toLowerCase().trim()]);
-        }
+      // Handle notifications based on request type
+      if (request_type === 'office_supplies') {
+        // Office supplies: Notify Finance Department Head specifically
+        const financeDept = await db.get(
+          "SELECT manager_id, head_email, name FROM departments WHERE LOWER(name) LIKE '%finance%'"
+        );
         
-        let deptHeadId = dept?.manager_id;
+        let financeHeadId = financeDept?.manager_id;
         
-        if (!deptHeadId && dept?.head_email) {
-          const deptHead = await db.get(
+        if (!financeHeadId && financeDept?.head_email) {
+          const financeHead = await db.get(
             'SELECT id FROM users WHERE LOWER(TRIM(email)) = ?',
-            [dept.head_email.toLowerCase().trim()]
+            [financeDept.head_email.toLowerCase().trim()]
           );
-          if (deptHead) deptHeadId = deptHead.id;
+          if (financeHead) financeHeadId = financeHead.id;
         }
         
-        if (deptHeadId) {
-          await sendNotificationToUser(deptHeadId, {
-            title: 'New Requisition for Approval',
-            message: `${userName} from ${dept?.name || departmentName || 'your department'} has submitted a ${request_type.replace('_', ' ')} requisition that requires your approval`,
+        if (financeHeadId) {
+          await sendNotificationToUser(financeHeadId, {
+            title: 'New Office Supplies Requisition for Approval',
+            message: `${userName} has submitted an office supplies requisition that requires your approval`,
             link: `/requisitions/${result.lastID}`,
             type: 'info',
             senderId: req.user.id
           });
+          console.log(`Notified Finance Department Head (ID: ${financeHeadId}) about office supplies requisition`);
         } else {
-          // If no department head found, notify Admin as fallback
+          // If no finance head found, notify Admin as fallback
           await sendNotificationToRole('Admin', {
-            title: 'New Requisition (No Dept Head)',
-            message: `${userName} has submitted a ${request_type.replace('_', ' ')} requisition but no department head was found`,
+            title: 'New Office Supplies Requisition (No Finance Head)',
+            message: `${userName} has submitted an office supplies requisition but no Finance Department Head was found`,
             link: `/requisitions/${result.lastID}`,
             type: 'warning',
             senderId: req.user.id
           });
         }
+      } else if (['sick_leave', 'temporary_leave', 'annual_leave'].includes(request_type)) {
+        // Leave types: Notify Admin directly
+        await sendNotificationToRole('Admin', {
+          title: 'New Leave Requisition for Approval',
+          message: `${userName} has submitted a ${request_type.replace('_', ' ')} requisition that requires your approval`,
+          link: `/requisitions/${result.lastID}`,
+          type: 'info',
+          senderId: req.user.id
+        });
+      } else if (request_type === 'work_support') {
+        // Work support: Notify recipient if specified
+        if (cleanTargetUserId) {
+          await sendNotificationToUser(cleanTargetUserId, {
+            title: 'New Work Support Request',
+            message: `${userName} has sent you a work support request`,
+            link: `/requisitions/${result.lastID}`,
+            type: 'info',
+            senderId: req.user.id
+          });
+          console.log(`Notified work support recipient (ID: ${cleanTargetUserId})`);
+        }
+        // Also notify Admin for visibility
+        await sendNotificationToRole('Admin', {
+          title: 'New Work Support Requisition',
+          message: `${userName} has submitted a work support requisition${cleanTargetUserId ? ` for a user` : ''}`,
+          link: `/requisitions/${result.lastID}`,
+          type: 'info',
+          senderId: req.user.id
+        });
       } else {
-        // If no department info, notify Admin directly
+        // Other types: Notify Admin
         await sendNotificationToRole('Admin', {
           title: 'New Requisition',
           message: `${userName} has submitted a ${request_type.replace('_', ' ')} requisition`,

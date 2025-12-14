@@ -84,11 +84,12 @@ router.get('/', authenticateToken, async (req, res) => {
 
     const staff = await db.all(query, params);
     
-    // If Admin or Finance Head, also include Department Heads who don't have staff records
+    // If Admin or Finance Head, also include Department Heads and Admin users who don't have staff records
     if (req.user.role === 'Admin' || 
         (req.user.role === 'DepartmentHead' && 
          req.user.email && req.user.email.toLowerCase().includes('finance'))) {
       try {
+        // Include Department Heads who don't have staff records
         const deptHeadsQuery = `
           SELECT 
             NULL as id,
@@ -117,9 +118,38 @@ router.get('/', authenticateToken, async (req, res) => {
         `;
         const deptHeads = await db.all(deptHeadsQuery);
         staff.push(...deptHeads);
+        
+        // Also include Admin users who don't have staff records
+        const adminUsersQuery = `
+          SELECT 
+            NULL as id,
+            u.id as user_id,
+            'ADMIN-' || u.id as staff_id,
+            'Full-time' as employment_type,
+            'Administrator' as position,
+            'Administration' as department,
+            NULL as employment_date,
+            NULL as base_salary,
+            NULL as bonus_structure,
+            NULL as emergency_contact_name,
+            NULL as emergency_contact_phone,
+            NULL as address,
+            u.created_at as created_at,
+            u.updated_at as updated_at,
+            u.name,
+            u.email,
+            u.phone,
+            u.profile_image,
+            u.is_active
+          FROM users u
+          WHERE u.role = 'Admin'
+          AND NOT EXISTS (SELECT 1 FROM staff s WHERE s.user_id = u.id)
+        `;
+        const adminUsers = await db.all(adminUsersQuery);
+        staff.push(...adminUsers);
       } catch (error) {
-        console.error('Error fetching department heads for payroll:', error);
-        // Continue without department heads if there's an error
+        console.error('Error fetching department heads and admin users:', error);
+        // Continue without department heads/admin if there's an error
       }
     }
     

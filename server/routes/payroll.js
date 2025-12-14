@@ -159,8 +159,9 @@ router.post('/', authenticateToken, requireRole('DepartmentHead', 'Admin'), [
       if (!user) {
         return res.status(404).json({ error: 'User not found' });
       }
-      if (user.role !== 'DepartmentHead' && user.role !== 'Staff') {
-        return res.status(400).json({ error: 'Payroll can only be created for Staff or DepartmentHead' });
+      // Allow payroll for Staff, DepartmentHead, and Admin
+      if (!['Staff', 'DepartmentHead', 'Admin'].includes(user.role)) {
+        return res.status(400).json({ error: 'Payroll can only be created for Staff, DepartmentHead, or Admin' });
       }
       targetUserId = user_id;
       // Check if they have a staff record

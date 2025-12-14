@@ -1216,7 +1216,7 @@ const Targets = () => {
                           </td>
                           <td>{progress.category}</td>
                           <td>{progress.status}</td>
-                          <td>{progress.progress_report_name || 'Manual Entry'}</td>
+                          <td>{progress.source_user_name || progress.progress_report_name || 'Manual Entry'}</td>
                         </tr>
                       ))}
                     </tbody>

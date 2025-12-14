@@ -1076,12 +1076,14 @@ router.get('/:id/progress', authenticateToken, async (req, res) => {
 
     const progress = await db.all(
       `SELECT tp.*, 
-              pr.name as progress_report_name,
-              pr.date as progress_report_date,
-              pr.category as progress_report_category,
-              pr.status as progress_report_status
+              COALESCE(pr.name, 'Manual Entry') as progress_report_name,
+              COALESCE(pr.date, tp.transaction_date) as progress_report_date,
+              COALESCE(pr.category, tp.category) as progress_report_category,
+              COALESCE(pr.status, tp.status) as progress_report_status,
+              COALESCE(u.name, 'System') as source_user_name
        FROM target_progress tp
        LEFT JOIN progress_reports pr ON tp.progress_report_id = pr.id
+       LEFT JOIN users u ON tp.user_id = u.id
        WHERE tp.target_id = ?
        ORDER BY tp.transaction_date DESC, tp.created_at DESC`,
       [req.params.id]

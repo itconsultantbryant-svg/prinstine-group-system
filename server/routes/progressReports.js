@@ -456,8 +456,9 @@ router.post('/', authenticateToken, requireRole('Admin', 'DepartmentHead', 'Staf
 
     await logAction(req.user.id, 'create_progress_report', 'progress_reports', result.lastID, { name, category, status }, req);
 
-    // Auto-update target progress if amount is provided
-    if (amount && parseFloat(amount) > 0) {
+    // DO NOT auto-update target progress on creation - wait for admin approval
+    // Target progress will be updated only when admin approves the report
+    // This ensures that pending reports don't affect targets until approved
       try {
         console.log('Processing target progress update for progress report:', {
           progress_report_id: result.lastID,

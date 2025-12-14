@@ -106,13 +106,15 @@ const Targets = () => {
       const handleTargetProgressUpdated = (data) => {
         console.log('Target progress updated event received:', data);
         console.log('Refreshing targets and sharing history...');
-        // Add a longer delay to ensure backend has committed the transaction
-        // Also force a hard refresh by clearing state first
+        // Force immediate refresh, then refresh again after delay to ensure consistency
+        fetchTargets();
+        fetchSharingHistory();
+        // Also refresh again after delay to ensure database commit
         setTimeout(() => {
-          console.log('Fetching targets after progress update...');
+          console.log('Second refresh after progress update (ensuring database commit)...');
           fetchTargets();
           fetchSharingHistory();
-        }, 800); // Increased delay to 800ms for database commit
+        }, 1000); // 1 second delay for database commit
       };
 
       const handleTargetDeleted = () => {
@@ -133,13 +135,18 @@ const Targets = () => {
 
       const handleProgressReportApproved = (data) => {
         console.log('Progress report approved event received:', data);
-        // If this affects a target, refresh the targets list
+        // If this affects a target, refresh the targets list immediately and again after delay
         if (data.user_id) {
           console.log('Refreshing targets after progress report approval...');
+          // Immediate refresh
+          fetchTargets();
+          fetchSharingHistory();
+          // Also refresh again after delay to ensure database commit
           setTimeout(() => {
+            console.log('Second refresh after progress report approval (ensuring database commit)...');
             fetchTargets();
             fetchSharingHistory();
-          }, 1000); // Longer delay to ensure database commit
+          }, 1200); // 1.2 second delay for database commit
         }
       };
 

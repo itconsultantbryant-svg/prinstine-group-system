@@ -889,6 +889,47 @@ async function initializeDatabase() {
             }
             console.log('✓ Finance approval workflow migration completed');
           }
+          
+          // Update petty_cash_ledgers approval_status constraint for PostgreSQL
+          const USE_POSTGRESQL = !!process.env.DATABASE_URL;
+          if (USE_POSTGRESQL && pettyCashLedgerTableExists) {
+            try {
+              // Find and drop the existing constraint
+              const constraint = await db.get(`
+                SELECT constraint_name 
+                FROM information_schema.table_constraints 
+                WHERE table_name = 'petty_cash_ledgers' 
+                AND constraint_type = 'CHECK'
+                AND constraint_name LIKE '%approval_status%'
+              `);
+              
+              if (constraint) {
+                await db.run(`ALTER TABLE petty_cash_ledgers DROP CONSTRAINT ${constraint.constraint_name}`);
+                console.log(`✓ Dropped existing constraint: ${constraint.constraint_name}`);
+              } else {
+                // Try common constraint names
+                const constraintNames = ['petty_cash_ledgers_approval_status_check', 'petty_cash_ledgers_approval_status_chk', 'check_approval_status'];
+                for (const constraintName of constraintNames) {
+                  try {
+                    await db.run(`ALTER TABLE petty_cash_ledgers DROP CONSTRAINT IF EXISTS ${constraintName}`);
+                  } catch (e) {
+                    // Ignore if doesn't exist
+                  }
+                }
+              }
+              
+              // Add new constraint with all status values including workflow statuses
+              await db.run(`
+                ALTER TABLE petty_cash_ledgers 
+                ADD CONSTRAINT petty_cash_ledgers_approval_status_check 
+                CHECK (approval_status IN ('Draft', 'Pending Review', 'Pending Approval', 'Approved', 'Locked', 'Pending_DeptHead', 'Pending_Admin', 'Rejected'))
+              `);
+              console.log('✓ Updated petty_cash_ledgers approval_status constraint to include workflow statuses');
+            } catch (constraintError) {
+              console.error('Error updating petty_cash_ledgers constraint (non-fatal):', constraintError.message);
+              // Continue even if constraint update fails
+            }
+          }
         }
       }
 

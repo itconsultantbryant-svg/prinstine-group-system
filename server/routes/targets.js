@@ -54,9 +54,9 @@ router.get('/', authenticateToken, async (req, res) => {
 
     // Build safe subqueries that won't fail if tables don't exist
     const totalProgressSubquery = targetProgressExists
-      ? `(SELECT COALESCE(SUM(tp.amount), 0) 
+      ? `(SELECT COALESCE(SUM(CAST(tp.amount AS NUMERIC)), 0) 
           FROM target_progress tp 
-          WHERE tp.target_id = t.id)`
+          WHERE CAST(tp.target_id AS INTEGER) = CAST(t.id AS INTEGER))`
       : 'CAST(0 AS NUMERIC)';
     
     const sharedOutSubquery = fundSharingExists 

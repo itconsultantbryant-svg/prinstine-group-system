@@ -100,7 +100,7 @@ router.post('/', authenticateToken, requireRole('Admin', 'DepartmentHead', 'Staf
   body('name').trim().notEmpty().withMessage('Name is required'),
   body('date').isISO8601().withMessage('Valid date is required'),
   body('category').isIn(['Student', 'Client for Consultancy', 'Client for Audit', 'Others']).withMessage('Valid category is required'),
-  body('status').isIn(['Signed Contract', 'Pipeline Client', 'Submitted']).withMessage('Valid status is required')
+  body('status').optional().isIn(['Signed Contract', 'Pipeline Client', 'Submitted']).withMessage('Valid status is required')
 ], async (req, res) => {
   try {
     const errors = validationResult(req);

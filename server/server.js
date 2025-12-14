@@ -1664,7 +1664,7 @@ async function initializeDatabase() {
                   name TEXT NOT NULL,
                   date DATE NOT NULL,
                   category TEXT NOT NULL CHECK(category IN ('Student', 'Client for Consultancy', 'Client for Audit', 'Others')),
-                  status TEXT NOT NULL CHECK(status IN ('Signed Contract', 'Pipeline Client', 'Submitted')),
+                  status TEXT NOT NULL CHECK(status IN ('Pending', 'Signed Contract', 'Pipeline Client', 'Submitted', 'Approved', 'Rejected')),
                   department_id INTEGER,
                   department_name TEXT,
                   created_by INTEGER NOT NULL,
@@ -1673,10 +1673,49 @@ async function initializeDatabase() {
                   created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                   updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                   amount DECIMAL(10, 2) DEFAULT 0,
+                  admin_notes TEXT,
+                  admin_reviewed_by INTEGER,
+                  admin_reviewed_at DATETIME,
                   FOREIGN KEY (department_id) REFERENCES departments(id) ON DELETE SET NULL,
-                  FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE CASCADE
+                  FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE CASCADE,
+                  FOREIGN KEY (admin_reviewed_by) REFERENCES users(id) ON DELETE SET NULL
                 )
               `);
+              
+              // Try to alter existing table to add new status values and approval fields if they don't exist
+              try {
+                // Check if we need to add approval columns
+                const USE_POSTGRESQL = !!process.env.DATABASE_URL;
+                let hasAdminNotes = false;
+                let hasAdminReviewedBy = false;
+                
+                if (USE_POSTGRESQL) {
+                  const adminNotesCheck = await db.get(
+                    "SELECT column_name FROM information_schema.columns WHERE table_name = 'progress_reports' AND column_name = 'admin_notes'"
+                  );
+                  hasAdminNotes = !!adminNotesCheck;
+                  
+                  const adminReviewedByCheck = await db.get(
+                    "SELECT column_name FROM information_schema.columns WHERE table_name = 'progress_reports' AND column_name = 'admin_reviewed_by'"
+                  );
+                  hasAdminReviewedBy = !!adminReviewedByCheck;
+                } else {
+                  const tableInfo = await db.all("PRAGMA table_info(progress_reports)");
+                  hasAdminNotes = tableInfo.some(col => col.name === 'admin_notes');
+                  hasAdminReviewedBy = tableInfo.some(col => col.name === 'admin_reviewed_by');
+                }
+                
+                if (!hasAdminNotes) {
+                  await db.run('ALTER TABLE progress_reports ADD COLUMN admin_notes TEXT');
+                }
+                if (!hasAdminReviewedBy) {
+                  await db.run('ALTER TABLE progress_reports ADD COLUMN admin_reviewed_by INTEGER');
+                  await db.run('ALTER TABLE progress_reports ADD COLUMN admin_reviewed_at DATETIME');
+                }
+              } catch (alterError) {
+                // Ignore errors if columns already exist or table doesn't exist yet
+                console.log('Note: Could not alter progress_reports table (may already have columns):', alterError.message);
+              }
               await db.run(`CREATE INDEX IF NOT EXISTS idx_progress_reports_created_by ON progress_reports(created_by)`);
               await db.run(`CREATE INDEX IF NOT EXISTS idx_progress_reports_department_id ON progress_reports(department_id)`);
               await db.run(`CREATE INDEX IF NOT EXISTS idx_progress_reports_date ON progress_reports(date)`);

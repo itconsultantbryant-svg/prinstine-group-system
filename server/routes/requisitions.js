@@ -275,32 +275,114 @@ router.post('/', authenticateToken, upload.single('document'), async (req, res) 
     const parsedQuantity = quantity && quantity.toString().trim() !== '' ? parseInt(quantity) : null;
 
     try {
-      const result = await db.run(`
-        INSERT INTO requisitions (
-          user_id, user_name, department_id, department_name,
+      let result;
+      try {
+        result = await db.run(`
+          INSERT INTO requisitions (
+            user_id, user_name, department_id, department_name,
+            requisition_date, request_type,
+            materials, cost, quantity,
+            purpose,
+            period_from, period_to, leave_purpose,
+            document_path, document_name,
+            target_user_id, target_role,
+            status
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `, [
+          req.user.id, userName, departmentId, departmentName,
           requisition_date, request_type,
-          materials, cost, quantity,
-          purpose,
-          period_from, period_to, leave_purpose,
+          materials && materials.trim() !== '' ? materials : null,
+          parsedCost,
+          parsedQuantity,
+          purpose && purpose.trim() !== '' ? purpose : null,
+          period_from && period_from.trim() !== '' ? period_from : null,
+          period_to && period_to.trim() !== '' ? period_to : null,
+          leave_purpose && leave_purpose.trim() !== '' ? leave_purpose : null,
           document_path, document_name,
-          target_user_id, target_role,
-          status
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `, [
-        req.user.id, userName, departmentId, departmentName,
-        requisition_date, request_type,
-        materials && materials.trim() !== '' ? materials : null,
-        parsedCost,
-        parsedQuantity,
-        purpose && purpose.trim() !== '' ? purpose : null,
-        period_from && period_from.trim() !== '' ? period_from : null,
-        period_to && period_to.trim() !== '' ? period_to : null,
-        leave_purpose && leave_purpose.trim() !== '' ? leave_purpose : null,
-        document_path, document_name,
-        cleanTargetUserId,
-        cleanTargetRole,
-        initialStatus
-      ]);
+          cleanTargetUserId,
+          cleanTargetRole,
+          initialStatus
+        ]);
+      } catch (insertError) {
+        // If constraint violation, try to fix the constraint and retry
+        if (insertError.message && insertError.message.includes('check constraint') && insertError.message.includes('requisitions_status_check')) {
+          console.log('Constraint violation detected, attempting to update constraint...');
+          const USE_POSTGRESQL = !!process.env.DATABASE_URL;
+          
+          if (USE_POSTGRESQL) {
+            try {
+              // Find and drop the existing constraint
+              const constraint = await db.get(`
+                SELECT constraint_name 
+                FROM information_schema.table_constraints 
+                WHERE table_name = 'requisitions' 
+                AND constraint_type = 'CHECK'
+                AND constraint_name LIKE '%status%'
+              `);
+              
+              if (constraint) {
+                await db.run(`ALTER TABLE requisitions DROP CONSTRAINT ${constraint.constraint_name}`);
+              } else {
+                // Try common constraint names
+                const constraintNames = ['requisitions_status_check', 'requisitions_status_chk', 'check_status'];
+                for (const constraintName of constraintNames) {
+                  try {
+                    await db.run(`ALTER TABLE requisitions DROP CONSTRAINT IF EXISTS ${constraintName}`);
+                  } catch (e) {
+                    // Ignore if doesn't exist
+                  }
+                }
+              }
+              
+              // Add new constraint with all status values including 'Approved'
+              await db.run(`
+                ALTER TABLE requisitions 
+                ADD CONSTRAINT requisitions_status_check 
+                CHECK (status IN ('Pending_DeptHead', 'DeptHead_Approved', 'DeptHead_Rejected', 'Pending_Admin', 'Admin_Approved', 'Admin_Rejected', 'Approved'))
+              `);
+              console.log('✓ Updated requisitions status constraint to include Approved');
+              
+              // Retry the insert
+              result = await db.run(`
+                INSERT INTO requisitions (
+                  user_id, user_name, department_id, department_name,
+                  requisition_date, request_type,
+                  materials, cost, quantity,
+                  purpose,
+                  period_from, period_to, leave_purpose,
+                  document_path, document_name,
+                  target_user_id, target_role,
+                  status
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+              `, [
+                req.user.id, userName, departmentId, departmentName,
+                requisition_date, request_type,
+                materials && materials.trim() !== '' ? materials : null,
+                parsedCost,
+                parsedQuantity,
+                purpose && purpose.trim() !== '' ? purpose : null,
+                period_from && period_from.trim() !== '' ? period_from : null,
+                period_to && period_to.trim() !== '' ? period_to : null,
+                leave_purpose && leave_purpose.trim() !== '' ? leave_purpose : null,
+                document_path, document_name,
+                cleanTargetUserId,
+                cleanTargetRole,
+                initialStatus
+              ]);
+            } catch (constraintError) {
+              console.error('Error updating constraint:', constraintError);
+              throw insertError; // Re-throw original error
+            }
+          } else {
+            // SQLite doesn't support ALTER TABLE to modify CHECK constraints
+            // We'll need to recreate the table or handle it differently
+            console.error('SQLite constraint violation - cannot modify CHECK constraint dynamically');
+            throw insertError;
+          }
+        } else {
+          throw insertError;
+        }
+      }
 
       if (!result || !result.lastID) {
         throw new Error('Failed to insert requisition: No lastID returned');

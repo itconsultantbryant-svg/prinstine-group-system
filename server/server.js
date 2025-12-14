@@ -1482,7 +1482,7 @@ async function initializeDatabase() {
                   title TEXT NOT NULL,
                   description TEXT,
                   amount DECIMAL(10, 2) NOT NULL,
-                  status TEXT DEFAULT 'Pending_DeptHead' CHECK(status IN ('Pending_DeptHead', 'Pending_Admin', 'Admin_Approved', 'Admin_Rejected', 'DeptHead_Approved', 'DeptHead_Rejected')),
+                  status TEXT DEFAULT 'Pending_DeptHead' CHECK(status IN ('Pending_DeptHead', 'DeptHead_Approved', 'DeptHead_Rejected', 'Pending_Admin', 'Admin_Approved', 'Admin_Rejected', 'Approved')),
                   dept_head_reviewed_by INTEGER,
                   dept_head_reviewed_at DATETIME,
                   dept_head_notes TEXT,

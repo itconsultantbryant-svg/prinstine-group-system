@@ -28,7 +28,7 @@ CREATE TABLE IF NOT EXISTS requisitions (
     document_name TEXT,
     target_user_id INTEGER,
     target_role TEXT,
-    status TEXT DEFAULT 'Pending_DeptHead' CHECK(status IN ('Pending_DeptHead', 'DeptHead_Approved', 'DeptHead_Rejected', 'Pending_Admin', 'Admin_Approved', 'Admin_Rejected')),
+    status TEXT DEFAULT 'Pending_DeptHead' CHECK(status IN ('Pending_DeptHead', 'DeptHead_Approved', 'DeptHead_Rejected', 'Pending_Admin', 'Admin_Approved', 'Admin_Rejected', 'Approved')),
     dept_head_reviewed_by INTEGER,
     dept_head_reviewed_at DATETIME,
     dept_head_notes TEXT,

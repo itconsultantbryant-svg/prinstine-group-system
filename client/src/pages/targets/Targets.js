@@ -185,10 +185,18 @@ const Targets = () => {
       console.log(`Setting ${targetsArray.length} targets in state`);
       
       if (targetsArray.length > 0) {
+        const sample = targetsArray[0];
         console.log('Sample target:', {
-          id: targetsArray[0].id,
-          user_name: targetsArray[0].user_name,
-          target_amount: targetsArray[0].target_amount
+          id: sample.id,
+          user_name: sample.user_name,
+          target_amount: sample.target_amount,
+          total_progress: sample.total_progress,
+          shared_in: sample.shared_in,
+          shared_out: sample.shared_out,
+          net_amount: sample.net_amount,
+          progress_percentage: sample.progress_percentage,
+          remaining_amount: sample.remaining_amount,
+          status: sample.status
         });
       }
       

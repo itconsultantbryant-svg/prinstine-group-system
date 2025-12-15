@@ -235,6 +235,29 @@ const Targets = () => {
     }
   };
 
+  const handleApproveProgress = async (progressId, status) => {
+    try {
+      const response = await api.put(`/targets/progress/${progressId}/approve`, { status });
+      
+      if (response.data) {
+        // Refresh the progress list
+        if (selectedTarget) {
+          fetchTargetProgress(selectedTarget.id);
+        }
+        
+        // Refresh targets to update net amounts
+        fetchTargets();
+        fetchSharingHistory();
+        
+        // Show success message
+        alert(`Progress entry ${status.toLowerCase()} successfully`);
+      }
+    } catch (err) {
+      console.error('Error approving progress:', err);
+      alert(err.response?.data?.error || 'Failed to approve progress entry');
+    }
+  };
+
   const handleCreateTarget = async (e) => {
     e.preventDefault();
     setError('');

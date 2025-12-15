@@ -160,7 +160,14 @@ run_terminal_cmd
       setApprovingId(null);
       setApprovalNotes('');
       setApprovalAction('');
-      fetchRequisitions();
+      // Close viewing modal if open
+      if (viewingRequisition && viewingRequisition.id === requisitionId) {
+        setViewingRequisition(null);
+      }
+      // Refresh requisitions list with a slight delay to ensure backend transaction commits
+      setTimeout(() => {
+        fetchRequisitions();
+      }, 300);
     } catch (error) {
       console.error('Error approving requisition:', error);
       alert(error.response?.data?.error || 'Failed to approve requisition');

@@ -188,25 +188,59 @@ router.get('/:id', authenticateToken, async (req, res) => {
     if (req.user.role === 'Admin') {
       // Admin can see all requisitions
     } else if (req.user.role === 'DepartmentHead') {
-      // Department Head can see requisitions from their department
-      const dept = await db.get(
-        'SELECT id, name FROM departments WHERE manager_id = ? OR LOWER(TRIM(head_email)) = ?',
-        [req.user.id, req.user.email.toLowerCase().trim()]
-      );
-      
-      if (dept) {
-        // Allow if it's from their department
-        query += ' AND (r.department_id = ? OR LOWER(TRIM(r.department_name)) = ?)';
-        params.push(dept.id, dept.name.toLowerCase().trim());
+      // Check if this is Finance Department Head
+      const USE_POSTGRESQL = !!process.env.DATABASE_URL;
+      let deptTableInfo;
+      if (USE_POSTGRESQL) {
+        deptTableInfo = await db.all("SELECT column_name as name FROM information_schema.columns WHERE table_name = 'departments'");
       } else {
-        // If no department found, only show their own
-        query += ' AND r.user_id = ?';
-        params.push(req.user.id);
+        deptTableInfo = await db.all("PRAGMA table_info(departments)");
+      }
+      const deptColumnNames = deptTableInfo.map(col => col.name);
+      const hasHeadEmail = deptColumnNames.includes('head_email');
+      
+      let financeDept;
+      if (hasHeadEmail) {
+        financeDept = await db.get(
+          "SELECT id, name FROM departments WHERE (manager_id = ? OR LOWER(TRIM(head_email)) = ?) AND LOWER(name) LIKE '%finance%'",
+          [req.user.id, req.user.email.toLowerCase().trim()]
+        );
+      } else {
+        financeDept = await db.get(
+          "SELECT id, name FROM departments WHERE manager_id = ? AND LOWER(name) LIKE '%finance%'",
+          [req.user.id]
+        );
+      }
+      
+      if (financeDept) {
+        // Finance Department Head can view ALL office supplies requisitions (from any department)
+        // For other requisition types, they can only see their own
+        query += ' AND (r.request_type = ? OR r.user_id = ?)';
+        params.push('office_supplies', req.user.id);
+      } else {
+        // Non-Finance Department Heads can only see requisitions from their department or their own
+        const dept = await db.get(
+          'SELECT id, name FROM departments WHERE manager_id = ? OR LOWER(TRIM(head_email)) = ?',
+          [req.user.id, req.user.email.toLowerCase().trim()]
+        );
+        
+        if (dept) {
+          query += ' AND (r.department_id = ? OR LOWER(TRIM(r.department_name)) = ? OR r.user_id = ?)';
+          params.push(dept.id, dept.name.toLowerCase().trim(), req.user.id);
+        } else {
+          query += ' AND r.user_id = ?';
+          params.push(req.user.id);
+        }
       }
     } else {
-      // Regular users can only see their own requisitions
-      query += ' AND r.user_id = ?';
-      params.push(req.user.id);
+      // Regular users can only see their own requisitions or work support where they are recipient
+      const USE_POSTGRESQL = !!process.env.DATABASE_URL;
+      if (USE_POSTGRESQL) {
+        query += ' AND (CAST(r.user_id AS INTEGER) = CAST(? AS INTEGER) OR (r.request_type = ? AND CAST(r.target_user_id AS INTEGER) = CAST(? AS INTEGER)))';
+      } else {
+        query += ' AND (r.user_id = ? OR (r.request_type = ? AND r.target_user_id = ?))';
+      }
+      params.push(req.user.id, 'work_support', req.user.id);
     }
     
     const requisition = await db.get(query, params);
@@ -776,36 +810,34 @@ router.put('/:id/dept-head-review', authenticateToken, requireRole('DepartmentHe
     }
 
     // Verify user is Finance Department Head
-    const financeDept = await db.get(
-      "SELECT id, name FROM departments WHERE (manager_id = ? OR LOWER(TRIM(head_email)) = ?) AND LOWER(name) LIKE '%finance%'",
-      [req.user.id, req.user.email.toLowerCase().trim()]
-    );
+    const USE_POSTGRESQL = !!process.env.DATABASE_URL;
+    let deptTableInfo;
+    if (USE_POSTGRESQL) {
+      deptTableInfo = await db.all("SELECT column_name as name FROM information_schema.columns WHERE table_name = 'departments'");
+    } else {
+      deptTableInfo = await db.all("PRAGMA table_info(departments)");
+    }
+    const deptColumnNames = deptTableInfo.map(col => col.name);
+    const hasHeadEmail = deptColumnNames.includes('head_email');
+    
+    let financeDept;
+    if (hasHeadEmail) {
+      financeDept = await db.get(
+        "SELECT id, name FROM departments WHERE (manager_id = ? OR LOWER(TRIM(head_email)) = ?) AND LOWER(name) LIKE '%finance%'",
+        [req.user.id, req.user.email.toLowerCase().trim()]
+      );
+    } else {
+      financeDept = await db.get(
+        "SELECT id, name FROM departments WHERE manager_id = ? AND LOWER(name) LIKE '%finance%'",
+        [req.user.id]
+      );
+    }
     
     if (!financeDept) {
       return res.status(403).json({ error: 'Only Finance Department Head can approve office supplies requisitions' });
     }
 
-    // Check if user is the department head for this requisition
-    // Match by department_id or department_name
-    let dept = null;
-    if (requisition.department_id) {
-      dept = await db.get(
-        'SELECT id FROM departments WHERE (manager_id = ? OR LOWER(TRIM(head_email)) = ?) AND id = ?',
-        [req.user.id, req.user.email.toLowerCase().trim(), requisition.department_id]
-      );
-    }
-    
-    // If not found by ID, try matching by department name
-    if (!dept && requisition.department_name) {
-      dept = await db.get(
-        'SELECT id FROM departments WHERE (manager_id = ? OR LOWER(TRIM(head_email)) = ?) AND LOWER(TRIM(name)) = ?',
-        [req.user.id, req.user.email.toLowerCase().trim(), requisition.department_name.toLowerCase().trim()]
-      );
-    }
-
-    if (!dept) {
-      return res.status(403).json({ error: 'You can only review requisitions from your department' });
-    }
+    // Finance Department Head can approve office supplies from ANY department (no department check needed)
 
     if (requisition.status !== 'Pending_DeptHead') {
       return res.status(400).json({ error: 'Requisition is not pending department head review' });

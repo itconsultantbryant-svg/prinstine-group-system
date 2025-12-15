@@ -105,16 +105,41 @@ const Targets = () => {
 
       const handleTargetProgressUpdated = (data) => {
         console.log('Target progress updated event received:', data);
+        console.log('Event data:', {
+          target_id: data.target_id,
+          action: data.action,
+          status: data.status,
+          total_progress: data.total_progress,
+          net_amount: data.net_amount,
+          progress_percentage: data.progress_percentage,
+          remaining_amount: data.remaining_amount
+        });
         console.log('Refreshing targets and sharing history...');
-        // Force immediate refresh, then refresh again after delay to ensure consistency
+        
+        // Force immediate refresh
         fetchTargets();
         fetchSharingHistory();
+        
+        // If viewing progress for this target, refresh it
+        if (data.target_id && selectedTarget && selectedTarget.id === data.target_id) {
+          fetchTargetProgress(selectedTarget.id);
+        }
+        
         // Also refresh again after delay to ensure database commit
         setTimeout(() => {
           console.log('Second refresh after progress update (ensuring database commit)...');
           fetchTargets();
           fetchSharingHistory();
+          if (data.target_id && selectedTarget && selectedTarget.id === data.target_id) {
+            fetchTargetProgress(selectedTarget.id);
+          }
         }, 1000); // 1 second delay for database commit
+        
+        // Third refresh for safety
+        setTimeout(() => {
+          console.log('Third refresh after progress update (final verification)...');
+          fetchTargets();
+        }, 2000);
       };
 
       const handleTargetDeleted = () => {
@@ -270,9 +295,22 @@ const Targets = () => {
 
   const handleApproveProgress = async (progressId, status) => {
     try {
+      console.log(`Approving progress entry ${progressId} with status: ${status}`);
       const response = await api.put(`/targets/progress/${progressId}/approve`, { status });
       
+      console.log('Approval response:', response.data);
+      
       if (response.data) {
+        // Log the returned target data
+        if (response.data.target) {
+          console.log('Updated target values from approval:', {
+            net_amount: response.data.target.net_amount,
+            progress_percentage: response.data.target.progress_percentage,
+            remaining_amount: response.data.target.remaining_amount,
+            total_progress: response.data.target.total_progress
+          });
+        }
+        
         // Refresh the progress list immediately
         if (selectedTarget) {
           fetchTargetProgress(selectedTarget.id);
@@ -282,21 +320,36 @@ const Targets = () => {
         fetchTargets();
         fetchSharingHistory();
         
-        // Also refresh again after a delay to ensure database commit
+        // Also refresh again after delays to ensure database commit
         setTimeout(() => {
-          console.log('Refreshing targets after progress approval (ensuring database commit)...');
+          console.log('First refresh after progress approval (500ms delay)...');
           fetchTargets();
           fetchSharingHistory();
           if (selectedTarget) {
             fetchTargetProgress(selectedTarget.id);
           }
-        }, 1000);
+        }, 500);
+        
+        setTimeout(() => {
+          console.log('Second refresh after progress approval (1500ms delay)...');
+          fetchTargets();
+          fetchSharingHistory();
+          if (selectedTarget) {
+            fetchTargetProgress(selectedTarget.id);
+          }
+        }, 1500);
+        
+        setTimeout(() => {
+          console.log('Third refresh after progress approval (3000ms delay - final verification)...');
+          fetchTargets();
+        }, 3000);
         
         // Show success message
         alert(`Progress entry ${status.toLowerCase()} successfully`);
       }
     } catch (err) {
       console.error('Error approving progress:', err);
+      console.error('Error response:', err.response?.data);
       alert(err.response?.data?.error || 'Failed to approve progress entry');
     }
   };

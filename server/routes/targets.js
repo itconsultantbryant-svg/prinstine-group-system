@@ -1328,6 +1328,7 @@ router.put('/progress/:id/approve', authenticateToken, requireRole('Admin'), [
       // Continue without updated_at
     }
     
+    // Update the status
     if (hasUpdatedAt) {
       await db.run(
         `UPDATE target_progress 
@@ -1344,53 +1345,121 @@ router.put('/progress/:id/approve', authenticateToken, requireRole('Admin'), [
       );
     }
 
+    console.log(`Target progress entry ${req.params.id} status updated to: ${status}`);
+
+    // Verify the update was successful
+    const verifyUpdate = await db.get(
+      'SELECT id, status, amount, target_id FROM target_progress WHERE id = ?',
+      [req.params.id]
+    );
+    console.log('Verified target_progress update:', verifyUpdate);
+
     // If approved, update the target and admin target in real-time
     if (status === 'Approved') {
-      // Update admin target in database
+      // Wait a moment for database commit
+      await new Promise(resolve => setTimeout(resolve, 100));
+
+      // Update admin target in database first
       if (progressEntry.period_start) {
         await updateAdminTargetInDatabase(progressEntry.period_start);
       }
 
-      // Get updated target to calculate new values
+      // Wait again for admin target update to complete
+      await new Promise(resolve => setTimeout(resolve, 200));
+
+      // Get updated target to calculate new values - use explicit CAST for PostgreSQL compatibility
       const updatedTarget = await db.get(
         `SELECT t.*,
-                (SELECT COALESCE(SUM(tp.amount), 0) 
+                (SELECT COALESCE(SUM(CAST(tp.amount AS NUMERIC)), 0) 
                  FROM target_progress tp 
-                 WHERE tp.target_id = t.id
+                 WHERE CAST(tp.target_id AS INTEGER) = CAST(t.id AS INTEGER)
                    AND (tp.status = 'Approved' OR tp.status IS NULL)) as total_progress,
-                (SELECT COALESCE(SUM(CASE WHEN fs.status = 'Active' THEN fs.amount ELSE 0 END), 0)
-                 FROM fund_sharing fs WHERE fs.from_user_id = t.user_id) as shared_out,
-                (SELECT COALESCE(SUM(CASE WHEN fs.status = 'Active' THEN fs.amount ELSE 0 END), 0)
-                 FROM fund_sharing fs WHERE fs.to_user_id = t.user_id) as shared_in
+                (SELECT COALESCE(SUM(CASE WHEN fs.status = 'Active' THEN CAST(fs.amount AS NUMERIC) ELSE 0 END), 0)
+                 FROM fund_sharing fs WHERE CAST(fs.from_user_id AS INTEGER) = CAST(t.user_id AS INTEGER)) as shared_out,
+                (SELECT COALESCE(SUM(CASE WHEN fs.status = 'Active' THEN CAST(fs.amount AS NUMERIC) ELSE 0 END), 0)
+                 FROM fund_sharing fs WHERE CAST(fs.to_user_id AS INTEGER) = CAST(t.user_id AS INTEGER)) as shared_in
          FROM targets t
-         WHERE t.id = ?`,
+         WHERE CAST(t.id AS INTEGER) = CAST(? AS INTEGER)`,
         [progressEntry.target_id]
       );
+
+      console.log('Updated target after approval:', {
+        target_id: progressEntry.target_id,
+        total_progress: updatedTarget?.total_progress,
+        shared_in: updatedTarget?.shared_in,
+        shared_out: updatedTarget?.shared_out,
+        target_amount: updatedTarget?.target_amount
+      });
+
+      // Also verify by directly querying target_progress
+      const directProgressCheck = await db.get(
+        `SELECT COALESCE(SUM(CAST(amount AS NUMERIC)), 0) as total 
+         FROM target_progress 
+         WHERE CAST(target_id AS INTEGER) = CAST(? AS INTEGER)
+           AND (status = 'Approved' OR status IS NULL)`,
+        [progressEntry.target_id]
+      );
+      console.log('Direct progress check after approval:', directProgressCheck);
 
       let netAmount = 0;
       let progressPercentage = 0;
       let remainingAmount = 0;
       
       if (updatedTarget) {
-        const totalProgress = parseFloat(updatedTarget.total_progress || 0);
-        const sharedIn = parseFloat(updatedTarget.shared_in || 0);
-        const sharedOut = parseFloat(updatedTarget.shared_out || 0);
-        const targetAmount = parseFloat(updatedTarget.target_amount || 0);
+        const totalProgress = parseFloat(updatedTarget.total_progress || 0) || 0;
+        const sharedIn = parseFloat(updatedTarget.shared_in || 0) || 0;
+        const sharedOut = parseFloat(updatedTarget.shared_out || 0) || 0;
+        const targetAmount = parseFloat(updatedTarget.target_amount || 0) || 0;
         
         netAmount = totalProgress + sharedIn - sharedOut;
         progressPercentage = targetAmount > 0 ? (netAmount / targetAmount) * 100 : 0;
         remainingAmount = Math.max(0, targetAmount - netAmount);
+
+        console.log('Calculated values after approval:', {
+          total_progress: totalProgress,
+          shared_in: sharedIn,
+          shared_out: sharedOut,
+          net_amount: netAmount,
+          progress_percentage: progressPercentage,
+          remaining_amount: remainingAmount,
+          target_amount: targetAmount
+        });
       }
 
       // Emit real-time updates with updated values
       if (global.io) {
-        // Small delay to ensure database commit
+        // Emit immediately
+        global.io.emit('target_progress_updated', {
+          target_id: progressEntry.target_id,
+          user_id: progressEntry.user_id,
+          amount: parseFloat(progressEntry.amount || 0),
+          progress_id: parseInt(req.params.id),
+          action: 'progress_approved',
+          status: 'Approved',
+          total_progress: updatedTarget?.total_progress || 0,
+          net_amount: netAmount,
+          progress_percentage: progressPercentage.toFixed(2),
+          remaining_amount: remainingAmount
+        });
+
+        global.io.emit('target_updated', {
+          id: progressEntry.target_id,
+          updated_by: req.user.name || 'Admin',
+          reason: 'target_progress_approved',
+          progress_added: true,
+          net_amount: netAmount,
+          progress_percentage: progressPercentage.toFixed(2),
+          remaining_amount: remainingAmount,
+          total_progress: updatedTarget?.total_progress || 0
+        });
+
+        // Also emit again after delay to ensure all clients get the update
         setTimeout(() => {
           global.io.emit('target_progress_updated', {
             target_id: progressEntry.target_id,
             user_id: progressEntry.user_id,
-            amount: progressEntry.amount,
-            progress_id: req.params.id,
+            amount: parseFloat(progressEntry.amount || 0),
+            progress_id: parseInt(req.params.id),
             action: 'progress_approved',
             status: 'Approved',
             total_progress: updatedTarget?.total_progress || 0,
@@ -1408,7 +1477,7 @@ router.put('/progress/:id/approve', authenticateToken, requireRole('Admin'), [
             progress_percentage: progressPercentage.toFixed(2),
             remaining_amount: remainingAmount
           });
-        }, 200);
+        }, 500);
       }
 
       await logAction(req.user.id, 'approve_target_progress', 'target_progress', req.params.id, { status }, req);
@@ -1421,12 +1490,25 @@ router.put('/progress/:id/approve', authenticateToken, requireRole('Admin'), [
           net_amount: netAmount,
           progress_percentage: progressPercentage.toFixed(2),
           remaining_amount: remainingAmount,
-          total_progress: updatedTarget?.total_progress || 0
+          total_progress: updatedTarget?.total_progress || 0,
+          shared_in: updatedTarget?.shared_in || 0,
+          shared_out: updatedTarget?.shared_out || 0
         }
       });
     } else {
       // If rejected, just log and return
       await logAction(req.user.id, 'approve_target_progress', 'target_progress', req.params.id, { status }, req);
+      
+      // Emit update event even for rejection
+      if (global.io) {
+        global.io.emit('target_progress_updated', {
+          target_id: progressEntry.target_id,
+          user_id: progressEntry.user_id,
+          progress_id: req.params.id,
+          action: 'progress_rejected',
+          status: 'Rejected'
+        });
+      }
       
       res.json({ 
         message: `Target progress entry ${status.toLowerCase()} successfully`,

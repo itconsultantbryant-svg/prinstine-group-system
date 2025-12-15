@@ -434,7 +434,20 @@ const Targets = () => {
     } catch (err) {
       console.error('Error approving progress:', err);
       console.error('Error response:', err.response?.data);
-      alert(err.response?.data?.error || 'Failed to approve progress entry');
+      console.error('Error status:', err.response?.status);
+      
+      // Handle validation errors
+      let errorMessage = 'Failed to approve progress entry';
+      if (err.response?.data?.error) {
+        errorMessage = err.response.data.error;
+      } else if (err.response?.data?.errors && Array.isArray(err.response.data.errors)) {
+        errorMessage = err.response.data.errors.map(e => e.msg || e).join(', ');
+      } else if (err.response?.data?.message) {
+        errorMessage = err.response.data.message;
+      }
+      
+      alert(errorMessage);
+      setError(errorMessage);
     }
   };
 

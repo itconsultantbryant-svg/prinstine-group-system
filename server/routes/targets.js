@@ -1298,10 +1298,19 @@ router.put('/progress/:id/approve', authenticateToken, requireRole('Admin'), [
   try {
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
-      return res.status(400).json({ errors: errors.array() });
+      console.error('Validation errors when approving progress:', errors.array());
+      const errorMessage = errors.array().map(e => e.msg).join(', ');
+      return res.status(400).json({ 
+        error: errorMessage || 'Validation failed',
+        errors: errors.array() 
+      });
     }
 
     const { status } = req.body;
+    
+    if (!status) {
+      return res.status(400).json({ error: 'Status is required' });
+    }
     
     // Get the target progress entry
     const progressEntry = await db.get(
@@ -1313,11 +1322,18 @@ router.put('/progress/:id/approve', authenticateToken, requireRole('Admin'), [
     );
 
     if (!progressEntry) {
+      console.error(`Target progress entry ${req.params.id} not found`);
       return res.status(404).json({ error: 'Target progress entry not found' });
     }
 
-    if (progressEntry.status === 'Approved') {
-      return res.status(400).json({ error: 'This progress entry has already been approved' });
+    console.log(`Updating progress entry ${req.params.id} from status "${progressEntry.status}" to "${status}"`);
+    
+    // Allow status changes: Approved -> Rejected, Rejected -> Approved, Pending/null -> Approved/Rejected
+    // Only prevent if trying to set the same status it already has
+    if (progressEntry.status === status) {
+      return res.status(400).json({ 
+        error: `This progress entry is already ${status.toLowerCase()}` 
+      });
     }
 
     // Update the progress entry status

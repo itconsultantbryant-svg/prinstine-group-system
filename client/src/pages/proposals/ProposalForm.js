@@ -230,7 +230,7 @@ const ProposalForm = ({ proposal, onClose }) => {
                   onChange={handleFileChange}
                   required={!proposal}
                 />
-                <small className="text-muted">Allowed formats: PDF, Word, Excel, Text (Max 50MB)</small>
+                <small className="text-muted">Allowed formats: PDF, Word, Excel, PowerPoint, Text (Max 50MB)</small>
                 {proposal && proposal.document_name && (
                   <div className="mt-2">
                     <small>Current document: {proposal.document_name}</small>

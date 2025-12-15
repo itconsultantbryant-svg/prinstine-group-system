@@ -74,7 +74,7 @@ const Targets = () => {
   });
 
   useEffect(() => {
-    fetchTargets();
+    fetchTargets(true);
     fetchSharingHistory();
     fetchUsers();
 
@@ -83,13 +83,13 @@ const Targets = () => {
     if (socket) {
       const handleTargetCreated = () => {
         console.log('Target created event received, refreshing...');
-        fetchTargets();
+        fetchTargets(true);
         fetchSharingHistory();
       };
 
       const handleTargetUpdated = () => {
         console.log('Target updated event received, refreshing...');
-        fetchTargets();
+        fetchTargets(true);
         fetchSharingHistory();
       };
 
@@ -98,7 +98,7 @@ const Targets = () => {
         console.log('Refreshing targets and sharing history...');
         // Add a small delay to ensure backend has committed the transaction
         setTimeout(() => {
-          fetchTargets();
+          fetchTargets(true);
           fetchSharingHistory();
         }, 300);
       };
@@ -116,8 +116,8 @@ const Targets = () => {
         });
         console.log('Refreshing targets and sharing history...');
         
-        // Force immediate refresh
-        fetchTargets();
+        // Force immediate refresh with cache-busting
+        fetchTargets(true);
         fetchSharingHistory();
         
         // If viewing progress for this target, refresh it
@@ -125,10 +125,26 @@ const Targets = () => {
           fetchTargetProgress(selectedTarget.id);
         }
         
+        // Update local state immediately if we have the calculated values from the event
+        if (data.net_amount !== undefined && data.target_id) {
+          setTargets(prevTargets => prevTargets.map(target => {
+            if (target.id === data.target_id) {
+              return {
+                ...target,
+                net_amount: parseFloat(data.net_amount || 0),
+                progress_percentage: parseFloat(data.progress_percentage || 0).toFixed(2),
+                remaining_amount: parseFloat(data.remaining_amount || 0),
+                total_progress: parseFloat(data.total_progress || target.total_progress || 0)
+              };
+            }
+            return target;
+          }));
+        }
+        
         // Also refresh again after delays to ensure database commit and accurate calculations
         setTimeout(() => {
           console.log('Second refresh after progress update (500ms delay)...');
-          fetchTargets();
+          fetchTargets(true);
           fetchSharingHistory();
           if (data.target_id && selectedTarget && selectedTarget.id === data.target_id) {
             fetchTargetProgress(selectedTarget.id);
@@ -137,7 +153,7 @@ const Targets = () => {
         
         setTimeout(() => {
           console.log('Third refresh after progress update (1500ms delay - ensuring database commit)...');
-          fetchTargets();
+          fetchTargets(true);
           fetchSharingHistory();
           if (data.target_id && selectedTarget && selectedTarget.id === data.target_id) {
             fetchTargetProgress(selectedTarget.id);
@@ -147,14 +163,14 @@ const Targets = () => {
         // Fourth refresh for final verification
         setTimeout(() => {
           console.log('Fourth refresh after progress update (3000ms delay - final verification)...');
-          fetchTargets();
+          fetchTargets(true);
         }, 3000);
       };
 
       const handleTargetDeleted = () => {
         console.log('Target deleted event received, refreshing...');
         setTimeout(() => {
-          fetchTargets();
+          fetchTargets(true);
           fetchSharingHistory();
         }, 300);
       };
@@ -162,7 +178,7 @@ const Targets = () => {
       const handleFundReversed = (data) => {
         console.log('Fund reversed event received:', data);
         setTimeout(() => {
-          fetchTargets();
+          fetchTargets(true);
           fetchSharingHistory();
         }, 300);
       };
@@ -172,23 +188,23 @@ const Targets = () => {
         // If this affects a target, refresh the targets list immediately and again after delay
         if (data.user_id || data.amount) {
           console.log('Refreshing targets after progress report approval...');
-          // Immediate refresh
-          fetchTargets();
+          // Immediate refresh with cache-busting
+          fetchTargets(true);
           fetchSharingHistory();
           // Also refresh again after delays to ensure database commit and accurate calculations
           setTimeout(() => {
             console.log('Second refresh after progress report approval (500ms delay)...');
-            fetchTargets();
+            fetchTargets(true);
             fetchSharingHistory();
           }, 500);
           setTimeout(() => {
             console.log('Third refresh after progress report approval (1500ms delay - ensuring database commit)...');
-            fetchTargets();
+            fetchTargets(true);
             fetchSharingHistory();
           }, 1500);
           setTimeout(() => {
             console.log('Fourth refresh after progress report approval (3000ms delay - final verification)...');
-            fetchTargets();
+            fetchTargets(true);
           }, 3000);
         }
       };
@@ -201,13 +217,13 @@ const Targets = () => {
           fetchTargetProgress(selectedTarget.id);
         }
         // Always refresh targets list to show updated counts
-        fetchTargets();
+        fetchTargets(true);
       };
 
       const handleProgressReportCreated = (data) => {
         console.log('Progress report created event received:', data);
         // Refresh targets to show new pending progress entries
-        fetchTargets();
+        fetchTargets(true);
         // If viewing progress history, refresh it
         if (selectedTarget) {
           fetchTargetProgress(selectedTarget.id);
@@ -238,12 +254,17 @@ const Targets = () => {
     }
   }, [user]);
 
-  const fetchTargets = async () => {
+  const fetchTargets = async (forceRefresh = false) => {
     try {
-      setLoading(true);
+      if (forceRefresh || !loading) {
+        setLoading(true);
+      }
       setError('');
-      console.log('Fetching targets...');
-      const response = await api.get('/targets');
+      console.log('Fetching targets...', { forceRefresh, timestamp: new Date().toISOString() });
+      
+      // Add cache-busting parameter to ensure fresh data
+      const timestamp = Date.now();
+      const response = await api.get(`/targets?t=${timestamp}`);
       console.log('Targets API response status:', response.status);
       console.log('Targets API response data:', response.data);
       
@@ -254,7 +275,7 @@ const Targets = () => {
       
       if (targetsArray.length > 0) {
         const sample = targetsArray[0];
-        console.log('Sample target:', {
+        console.log('Sample target (from API):', {
           id: sample.id,
           user_name: sample.user_name,
           target_amount: sample.target_amount,
@@ -266,9 +287,38 @@ const Targets = () => {
           remaining_amount: sample.remaining_amount,
           status: sample.status
         });
+        
+        // Verify calculation matches what we expect
+        const expectedNetAmount = (parseFloat(sample.total_progress || 0)) + 
+                                  (parseFloat(sample.shared_in || 0)) - 
+                                  (parseFloat(sample.shared_out || 0));
+        const expectedProgress = sample.target_amount > 0 
+          ? (expectedNetAmount / sample.target_amount) * 100 
+          : 0;
+        
+        console.log('Calculation verification:', {
+          expected_net_amount: expectedNetAmount,
+          actual_net_amount: sample.net_amount,
+          match: Math.abs(expectedNetAmount - parseFloat(sample.net_amount || 0)) < 0.01,
+          expected_progress: expectedProgress.toFixed(2),
+          actual_progress: sample.progress_percentage,
+          progress_match: Math.abs(expectedProgress - parseFloat(sample.progress_percentage || 0)) < 0.01
+        });
       }
       
-      setTargets(targetsArray);
+      // Always update state with new object references (to trigger re-render)
+      // Create deep copies to ensure React detects changes
+      const updatedTargets = targetsArray.map(target => ({
+        ...target,
+        net_amount: parseFloat(target.net_amount || 0),
+        total_progress: parseFloat(target.total_progress || 0),
+        shared_in: parseFloat(target.shared_in || 0),
+        shared_out: parseFloat(target.shared_out || 0),
+        target_amount: parseFloat(target.target_amount || 0),
+        progress_percentage: parseFloat(target.progress_percentage || 0),
+        remaining_amount: parseFloat(target.remaining_amount || 0)
+      }));
+      setTargets(updatedTargets);
     } catch (err) {
       console.error('Error fetching targets:', err);
       console.error('Error response status:', err.response?.status);
@@ -329,19 +379,35 @@ const Targets = () => {
           });
         }
         
+        // Update local state immediately if response includes target data
+        if (response.data?.target) {
+          setTargets(prevTargets => prevTargets.map(target => {
+            if (target.id === response.data.target.id) {
+              return {
+                ...target,
+                net_amount: parseFloat(response.data.target.net_amount || 0),
+                progress_percentage: parseFloat(response.data.target.progress_percentage || 0).toFixed(2),
+                remaining_amount: parseFloat(response.data.target.remaining_amount || 0),
+                total_progress: parseFloat(response.data.target.total_progress || target.total_progress || 0)
+              };
+            }
+            return target;
+          }));
+        }
+        
         // Refresh the progress list immediately
         if (selectedTarget) {
           fetchTargetProgress(selectedTarget.id);
         }
         
-        // Refresh targets to update net amounts immediately
-        fetchTargets();
+        // Refresh targets to update net amounts immediately with cache-busting
+        fetchTargets(true);
         fetchSharingHistory();
         
         // Also refresh again after delays to ensure database commit
         setTimeout(() => {
           console.log('First refresh after progress approval (500ms delay)...');
-          fetchTargets();
+          fetchTargets(true);
           fetchSharingHistory();
           if (selectedTarget) {
             fetchTargetProgress(selectedTarget.id);
@@ -350,7 +416,7 @@ const Targets = () => {
         
         setTimeout(() => {
           console.log('Second refresh after progress approval (1500ms delay)...');
-          fetchTargets();
+          fetchTargets(true);
           fetchSharingHistory();
           if (selectedTarget) {
             fetchTargetProgress(selectedTarget.id);
@@ -359,7 +425,7 @@ const Targets = () => {
         
         setTimeout(() => {
           console.log('Third refresh after progress approval (3000ms delay - final verification)...');
-          fetchTargets();
+          fetchTargets(true);
         }, 3000);
         
         // Show success message
@@ -412,7 +478,7 @@ const Targets = () => {
       
       // Refresh all data to ensure consistency
       await Promise.all([
-        fetchTargets(),
+        fetchTargets(true),
         fetchSharingHistory()
       ]);
       
@@ -445,7 +511,7 @@ const Targets = () => {
       setSelectedTarget(null);
       // Refresh all data immediately
       await Promise.all([
-        fetchTargets(),
+        fetchTargets(true),
         fetchSharingHistory()
       ]);
       
@@ -474,7 +540,7 @@ const Targets = () => {
       
       // Refresh after a delay to ensure backend has processed
       setTimeout(() => {
-        fetchTargets();
+        fetchTargets(true);
         fetchSharingHistory();
       }, 300);
     } catch (error) {
@@ -530,7 +596,7 @@ const Targets = () => {
       setAvailableAmount(0);
       // Refresh all data immediately
       await Promise.all([
-        fetchTargets(),
+        fetchTargets(true),
         fetchSharingHistory()
       ]);
       
@@ -572,7 +638,7 @@ const Targets = () => {
       });
       // Refresh all data immediately
       await Promise.all([
-        fetchTargets(),
+        fetchTargets(true),
         fetchSharingHistory()
       ]);
       
@@ -596,7 +662,7 @@ const Targets = () => {
       await api.post(`/targets/reverse-sharing/${sharingId}`, {
         reversal_reason: 'Reversed by admin'
       });
-      fetchTargets();
+      fetchTargets(true);
       fetchSharingHistory();
     } catch (err) {
       setError(err.response?.data?.error || 'Failed to reverse sharing');
@@ -680,14 +746,25 @@ const Targets = () => {
             <h3 className="mb-0">Targets Management</h3>
             <p className="text-muted mb-0">Track and manage employee targets and progress</p>
           </div>
-          {user?.role === 'Admin' && (
+          <div className="d-flex gap-2">
             <button
-              className="btn btn-primary"
-              onClick={() => setShowCreateModal(true)}
+              className="btn btn-outline-secondary"
+              onClick={() => fetchTargets(true)}
+              title="Refresh targets"
+              disabled={loading}
             >
-              <i className="bi bi-plus-circle me-2"></i>Create Target
+              <i className={`bi bi-arrow-clockwise ${loading ? 'spinner-border spinner-border-sm' : ''}`}></i>
+              {loading ? ' Refreshing...' : ' Refresh'}
             </button>
-          )}
+            {user?.role === 'Admin' && (
+              <button
+                className="btn btn-primary"
+                onClick={() => setShowCreateModal(true)}
+              >
+                <i className="bi bi-plus-circle me-2"></i>Create Target
+              </button>
+            )}
+          </div>
         </div>
       </div>
 
@@ -775,6 +852,12 @@ const Targets = () => {
                             maximumFractionDigits: 2
                           })}
                         </strong>
+                        <br />
+                        <small className="text-muted">
+                          Progress: ${parseFloat(target.total_progress || 0).toFixed(2)} | 
+                          In: ${parseFloat(target.shared_in || 0).toFixed(2)} | 
+                          Out: ${parseFloat(target.shared_out || 0).toFixed(2)}
+                        </small>
                       </td>
                       <td>
                         <div className="d-flex align-items-center">

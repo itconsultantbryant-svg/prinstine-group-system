@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import api from '../../config/api';
+import { normalizeUrl } from '../../utils/apiUrl';
 
 const PublicVerification = () => {
   const [formData, setFormData] = useState({

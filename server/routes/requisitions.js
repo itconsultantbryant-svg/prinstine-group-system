@@ -857,6 +857,18 @@ router.put('/:id/dept-head-review', authenticateToken, requireRole('DepartmentHe
 
     const updated = await db.get('SELECT * FROM requisitions WHERE id = ?', [req.params.id]);
 
+    // Emit real-time update
+    if (global.io) {
+      global.io.emit('requisition_status_updated', {
+        requisition: updated,
+        reviewer_id: req.user.id,
+        reviewer_name: req.user.name || 'Finance Department Head',
+        action: 'dept_head_review',
+        status: nextStatus
+      });
+      console.log('Emitted requisition_status_updated event for dept head review');
+    }
+
     // Send real-time notifications
     try {
       const creator = await db.get('SELECT id, name FROM users WHERE id = ?', [requisition.user_id]);

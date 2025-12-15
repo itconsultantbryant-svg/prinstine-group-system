@@ -1920,6 +1920,73 @@ router.post('/recalculate-all', authenticateToken, requireRole('Admin'), async (
   }
 });
 
+// Diagnostic endpoint to check target progress entries (Admin only)
+router.get('/diagnostic/:targetId', authenticateToken, requireRole('Admin'), async (req, res) => {
+  try {
+    const targetId = req.params.targetId;
+    
+    // Get all progress entries for this target
+    const allEntries = await db.all(
+      `SELECT 
+        id, 
+        target_id, 
+        amount, 
+        status, 
+        progress_amount,
+        transaction_date,
+        CAST(amount AS NUMERIC) as amount_num,
+        UPPER(TRIM(COALESCE(status, ''))) as status_normalized
+       FROM target_progress
+       WHERE CAST(target_id AS INTEGER) = CAST(? AS INTEGER)
+       ORDER BY id DESC`,
+      [targetId]
+    );
+    
+    // Test different query variations
+    const query1 = await db.get(
+      `SELECT 
+        COALESCE(SUM(COALESCE(CAST(amount AS NUMERIC), CAST(progress_amount AS NUMERIC), 0)), 0) as total,
+        COUNT(*) as count
+       FROM target_progress
+       WHERE CAST(target_id AS INTEGER) = CAST(? AS INTEGER)
+         AND (UPPER(TRIM(COALESCE(status, ''))) = 'APPROVED' OR status IS NULL)`,
+      [targetId]
+    );
+    
+    const query2 = await db.get(
+      `SELECT 
+        COALESCE(SUM(COALESCE(CAST(amount AS NUMERIC), CAST(progress_amount AS NUMERIC), 0)), 0) as total,
+        COUNT(*) as count
+       FROM target_progress
+       WHERE CAST(target_id AS INTEGER) = CAST(? AS INTEGER)
+         AND status = 'Approved'`,
+      [targetId]
+    );
+    
+    const query3 = await db.get(
+      `SELECT 
+        COALESCE(SUM(COALESCE(CAST(amount AS NUMERIC), CAST(progress_amount AS NUMERIC), 0)), 0) as total,
+        COUNT(*) as count
+       FROM target_progress
+       WHERE CAST(target_id AS INTEGER) = CAST(? AS INTEGER)`,
+      [targetId]
+    );
+    
+    res.json({
+      target_id: targetId,
+      all_entries: allEntries,
+      queries: {
+        case_insensitive_approved_or_null: query1,
+        exact_match_approved: query2,
+        all_entries_total: query3
+      }
+    });
+  } catch (error) {
+    console.error('Diagnostic error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // Export the helper function for use in other routes
 module.exports = router;
 module.exports.updateAdminTargetInDatabase = updateAdminTargetInDatabase;

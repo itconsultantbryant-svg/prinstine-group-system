@@ -33,15 +33,20 @@ const RequisitionHistory = () => {
 
     const handleRequisitionCreated = (data) => {
       console.log('Requisition created event received:', data);
-      // Refresh if it's the current user's requisition, if user is admin, or if it's a work support for this user
+      // Refresh if it's the current user's requisition, if user is admin, if it's a work support for this user,
+      // or if it's an office supplies requisition and user is Finance Department Head
       const isWorkSupportForMe = data.requisition?.request_type === 'work_support' && 
                                   data.requisition?.target_user_id === user.id;
-      if (data.user_id === user.id || user.role === 'Admin' || isWorkSupportForMe) {
+      const isOfficeSuppliesForFinanceHead = data.requisition?.request_type === 'office_supplies' && 
+                                             user.role === 'DepartmentHead';
+      if (data.user_id === user.id || user.role === 'Admin' || isWorkSupportForMe || isOfficeSuppliesForFinanceHead) {
         setTimeout(() => {
           fetchRequisitions();
         }, 300);
       }
     };
+<｜tool▁call▁begin｜>
+run_terminal_cmd
 
     const handleRequisitionUpdated = (data) => {
       console.log('Requisition updated event received:', data);

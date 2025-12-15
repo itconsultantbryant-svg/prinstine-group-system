@@ -145,7 +145,29 @@ router.post('/', authenticateToken, upload.single('file'), async (req, res) => {
       req.user.id, uploaded_by_name
     ]);
 
-    const newDocument = await db.get('SELECT * FROM archived_documents WHERE id = ?', [result.lastID]);
+    // Get document with user info for real-time update
+    const newDocument = await db.get(`
+      SELECT 
+        ad.*,
+        u.name as user_name,
+        u.email as user_email,
+        uploader.name as uploader_name
+      FROM archived_documents ad
+      LEFT JOIN users u ON ad.user_id = u.id
+      LEFT JOIN users uploader ON ad.uploaded_by = uploader.id
+      WHERE ad.id = ?
+    `, [result.lastID]);
+    
+    // Emit real-time update for admin users
+    if (global.io) {
+      global.io.emit('document_uploaded', {
+        document_id: newDocument.id,
+        user_id: newDocument.user_id,
+        file_name: newDocument.file_name,
+        source_type: newDocument.source_type,
+        uploaded_by: newDocument.uploaded_by
+      });
+    }
     
     res.status(201).json({ 
       message: 'Document uploaded successfully',
@@ -180,6 +202,14 @@ router.delete('/:id', authenticateToken, async (req, res) => {
 
     await db.run('DELETE FROM archived_documents WHERE id = ?', [req.params.id]);
     
+    // Emit real-time update for admin users
+    if (global.io) {
+      global.io.emit('document_deleted', {
+        document_id: req.params.id,
+        user_id: document.user_id
+      });
+    }
+    
     res.json({ message: 'Document deleted successfully' });
   } catch (error) {
     console.error('Delete document error:', error);
@@ -196,7 +226,7 @@ async function archiveDocumentFromActivity(userId, filePath, originalFileName, s
     const user = await db.get('SELECT name FROM users WHERE id = ?', [uploadedBy]);
     const uploaded_by_name = user?.name || 'System';
 
-    await db.run(`
+    const result = await db.run(`
       INSERT INTO archived_documents (
         user_id, file_name, original_file_name, file_path, file_type, file_size,
         source_type, source_id, description, uploaded_by, uploaded_by_name
@@ -214,6 +244,17 @@ async function archiveDocumentFromActivity(userId, filePath, originalFileName, s
       uploadedBy,
       uploaded_by_name
     ]);
+
+    // Emit real-time update when document is archived automatically
+    if (global.io && result.lastID) {
+      global.io.emit('document_uploaded', {
+        document_id: result.lastID,
+        user_id: userId,
+        file_name: originalFileName,
+        source_type: sourceType,
+        uploaded_by: uploadedBy
+      });
+    }
   } catch (error) {
     console.error('Error archiving document from activity:', error);
     // Don't throw - this is a background operation

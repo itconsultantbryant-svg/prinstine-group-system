@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import api from '../../config/api';
 import { useAuth } from '../../hooks/useAuth';
+import { getSocket } from '../../config/socket';
 import { exportToPDF, exportToExcel, exportToWord, printContent } from '../../utils/exportUtils';
 
 const ArchivedDocuments = () => {
@@ -23,6 +24,36 @@ const ArchivedDocuments = () => {
 
   useEffect(() => {
     fetchDocuments();
+  }, []);
+
+  // Listen for real-time document updates
+  useEffect(() => {
+    const socket = getSocket();
+    if (socket) {
+      const handleDocumentUploaded = async (data) => {
+        console.log('Document uploaded event received:', data);
+        // For admin, refresh the entire list to see new document
+        // For regular users, only refresh if it's their document
+        if (user.role === 'Admin' || data.user_id === user.id) {
+          // Refresh documents list to get the full document details
+          fetchDocuments();
+        }
+      };
+
+      const handleDocumentDeleted = (data) => {
+        console.log('Document deleted event received:', data);
+        // Remove document from local state
+        setDocuments(prev => prev.filter(doc => doc.id !== data.document_id));
+      };
+
+      socket.on('document_uploaded', handleDocumentUploaded);
+      socket.on('document_deleted', handleDocumentDeleted);
+
+      return () => {
+        socket.off('document_uploaded', handleDocumentUploaded);
+        socket.off('document_deleted', handleDocumentDeleted);
+      };
+    }
   }, []);
 
   const fetchDocuments = async () => {
@@ -98,9 +129,51 @@ const ArchivedDocuments = () => {
     }
   };
 
-  const handleDownload = (document) => {
-    const url = `http://localhost:3006${document.file_path}`;
+  // Helper function to normalize document URL
+  const normalizeDocumentUrl = (filePath) => {
+    if (!filePath) return '';
+    // If already a full URL, return as is
+    if (filePath.startsWith('http://') || filePath.startsWith('https://')) {
+      return filePath;
+    }
+    // If relative URL, prepend base URL
+    const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:3006/api';
+    const baseUrl = API_BASE_URL.replace('/api', '');
+    // Ensure URL starts with /
+    const relativeUrl = filePath.startsWith('/') ? filePath : `/${filePath}`;
+    return `${baseUrl}${relativeUrl}`;
+  };
+
+  const handleView = (document) => {
+    const url = normalizeDocumentUrl(document.file_path);
     window.open(url, '_blank');
+  };
+
+  const handleDownload = (document) => {
+    const url = normalizeDocumentUrl(document.file_path);
+    // Create a temporary anchor element to trigger download
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = document.file_name || document.original_file_name || 'document';
+    link.target = '_blank';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  const handlePrint = (document) => {
+    const url = normalizeDocumentUrl(document.file_path);
+    // Open document in new window and print
+    const printWindow = window.open(url, '_blank');
+    if (printWindow) {
+      printWindow.onload = () => {
+        setTimeout(() => {
+          printWindow.print();
+        }, 500);
+      };
+    } else {
+      alert('Please allow popups to print this document');
+    }
   };
 
   const getFileIcon = (fileType) => {
@@ -264,6 +337,13 @@ const ArchivedDocuments = () => {
                       <td>
                         <div className="btn-group" role="group">
                           <button
+                            className="btn btn-sm btn-outline-info"
+                            onClick={() => handleView(doc)}
+                            title="View"
+                          >
+                            <i className="bi bi-eye"></i>
+                          </button>
+                          <button
                             className="btn btn-sm btn-outline-primary"
                             onClick={() => handleDownload(doc)}
                             title="Download"
@@ -272,15 +352,7 @@ const ArchivedDocuments = () => {
                           </button>
                           <button
                             className="btn btn-sm btn-outline-secondary"
-                            onClick={() => {
-                              const content = `
-Document: ${doc.file_name}
-Source: ${doc.source_type || 'Manual'}
-Description: ${doc.description || 'N/A'}
-Uploaded: ${new Date(doc.created_at).toLocaleString()}
-                              `.trim();
-                              printContent(doc.file_name, content);
-                            }}
+                            onClick={() => handlePrint(doc)}
                             title="Print"
                           >
                             <i className="bi bi-printer"></i>

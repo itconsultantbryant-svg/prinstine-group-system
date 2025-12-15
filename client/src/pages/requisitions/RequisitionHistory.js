@@ -647,20 +647,6 @@ ${req.admin_notes ? `Admin Notes: ${req.admin_notes}` : ''}
                       >
                         <i className="bi bi-printer me-1"></i>Print
                       </button>
-                          if (printWindow) {
-                            printWindow.onload = () => {
-                              setTimeout(() => {
-                                printWindow.print();
-                              }, 500);
-                            };
-                          } else {
-                            alert('Please allow popups to print this document');
-                          }
-                        }}
-                        title="Print"
-                      >
-                        <i className="bi bi-printer me-1"></i>Print
-                      </button>
                     </div>
                   </div>
                 )}

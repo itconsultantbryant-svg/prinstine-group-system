@@ -240,14 +240,24 @@ const Targets = () => {
       const response = await api.put(`/targets/progress/${progressId}/approve`, { status });
       
       if (response.data) {
-        // Refresh the progress list
+        // Refresh the progress list immediately
         if (selectedTarget) {
           fetchTargetProgress(selectedTarget.id);
         }
         
-        // Refresh targets to update net amounts
+        // Refresh targets to update net amounts immediately
         fetchTargets();
         fetchSharingHistory();
+        
+        // Also refresh again after a delay to ensure database commit
+        setTimeout(() => {
+          console.log('Refreshing targets after progress approval (ensuring database commit)...');
+          fetchTargets();
+          fetchSharingHistory();
+          if (selectedTarget) {
+            fetchTargetProgress(selectedTarget.id);
+          }
+        }, 1000);
         
         // Show success message
         alert(`Progress entry ${status.toLowerCase()} successfully`);

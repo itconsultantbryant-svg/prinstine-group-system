@@ -191,10 +191,12 @@ router.get('/', authenticateToken, async (req, res) => {
     }
 
     // Build safe subqueries that won't fail if tables don't exist
+    // Only count approved progress entries (or NULL status for backward compatibility)
     const totalProgressSubquery = targetProgressExists
       ? `(SELECT COALESCE(SUM(CAST(tp.amount AS NUMERIC)), 0) 
           FROM target_progress tp 
-          WHERE CAST(tp.target_id AS INTEGER) = CAST(t.id AS INTEGER))`
+          WHERE CAST(tp.target_id AS INTEGER) = CAST(t.id AS INTEGER)
+            AND (tp.status = 'Approved' OR tp.status IS NULL))`
       : 'CAST(0 AS NUMERIC)';
     
     const sharedOutSubquery = fundSharingExists 

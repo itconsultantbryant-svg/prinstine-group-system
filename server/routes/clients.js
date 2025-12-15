@@ -352,11 +352,13 @@ router.put('/:id', authenticateToken, requireRole('Admin', 'Staff'), async (req,
 
     await logAction(req.user.id, 'update_client', 'clients', clientId, updates, req);
 
-    // Get updated client for real-time update
+    // Get updated client for real-time update with creator info
     const updatedClient = await db.get(
-      `SELECT c.*, u.name, u.email, u.phone, u.profile_image
+      `SELECT c.*, u.name, u.email, u.phone, u.profile_image,
+              creator.name as created_by_name, creator.email as created_by_email
        FROM clients c
        LEFT JOIN users u ON c.user_id = u.id
+       LEFT JOIN users creator ON c.created_by = creator.id
        WHERE c.id = ?`,
       [clientId]
     );

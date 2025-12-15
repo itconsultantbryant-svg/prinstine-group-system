@@ -97,6 +97,8 @@ async function updateAdminTargetInDatabase(periodStart = null) {
         const totalTarget = parseFloat(staffData.total_target || 0);
         
         const adminNetAmount = totalProgress + totalSharedIn - totalSharedOut;
+        const adminProgressPercentage = totalTarget > 0 ? (adminNetAmount / totalTarget) * 100 : 0;
+        const adminRemainingAmount = Math.max(0, totalTarget - adminNetAmount);
         
         await db.run(
           `UPDATE targets 
@@ -117,6 +119,8 @@ async function updateAdminTargetInDatabase(periodStart = null) {
           total_shared_in: totalSharedIn,
           total_shared_out: totalSharedOut,
           net_amount: adminNetAmount,
+          progress_percentage: adminProgressPercentage.toFixed(2),
+          remaining_amount: adminRemainingAmount,
           period: period
         });
         
@@ -126,13 +130,18 @@ async function updateAdminTargetInDatabase(periodStart = null) {
             id: adminTarget.id,
             updated_by: 'System',
             reason: 'admin_target_aggregated',
-            period: period
+            period: period,
+            net_amount: adminNetAmount,
+            progress_percentage: adminProgressPercentage.toFixed(2),
+            remaining_amount: adminRemainingAmount
           });
           global.io.emit('target_progress_updated', {
             target_id: adminTarget.id,
             action: 'admin_target_recalculated',
             total_progress: totalProgress,
-            net_amount: adminNetAmount
+            net_amount: adminNetAmount,
+            progress_percentage: adminProgressPercentage.toFixed(2),
+            remaining_amount: adminRemainingAmount
           });
         }
       }

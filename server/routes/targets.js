@@ -1454,22 +1454,45 @@ router.put('/progress/:id/approve', authenticateToken, requireRole('Admin'), [
       // Wait again for admin target update to complete
       await new Promise(resolve => setTimeout(resolve, 200));
 
-      // Get updated target to calculate new values - use explicit CAST for PostgreSQL compatibility
-      // Use case-insensitive comparison for status
-      const updatedTarget = await db.get(
-        `SELECT t.*,
-                (SELECT COALESCE(SUM(COALESCE(CAST(tp.amount AS NUMERIC), CAST(tp.progress_amount AS NUMERIC), 0)), 0) 
-                 FROM target_progress tp 
-                 WHERE CAST(tp.target_id AS INTEGER) = CAST(t.id AS INTEGER)
-                   AND (UPPER(TRIM(COALESCE(tp.status, ''))) = 'APPROVED' OR tp.status IS NULL)) as total_progress,
-                (SELECT COALESCE(SUM(CASE WHEN fs.status = 'Active' THEN CAST(fs.amount AS NUMERIC) ELSE 0 END), 0)
-                 FROM fund_sharing fs WHERE CAST(fs.from_user_id AS INTEGER) = CAST(t.user_id AS INTEGER)) as shared_out,
-                (SELECT COALESCE(SUM(CASE WHEN fs.status = 'Active' THEN CAST(fs.amount AS NUMERIC) ELSE 0 END), 0)
-                 FROM fund_sharing fs WHERE CAST(fs.to_user_id AS INTEGER) = CAST(t.user_id AS INTEGER)) as shared_in
+      // Get updated target - use simpler query and manual calculation for reliability
+      let updatedTarget = await db.get(
+        `SELECT t.*
          FROM targets t
-         WHERE CAST(t.id AS INTEGER) = CAST(? AS INTEGER)`,
+         WHERE t.id = ?`,
         [progressEntry.target_id]
       );
+      
+      if (!updatedTarget) {
+        console.error('Target not found after approval:', progressEntry.target_id);
+        return res.status(404).json({ error: 'Target not found' });
+      }
+      
+      // Manually calculate total_progress from approved entries
+      const progressResult = await db.get(
+        `SELECT COALESCE(SUM(COALESCE(CAST(amount AS NUMERIC), CAST(progress_amount AS NUMERIC), 0)), 0) as total
+         FROM target_progress
+         WHERE target_id = ?
+           AND (status = 'Approved' OR status IS NULL OR status = '')`,
+        [progressEntry.target_id]
+      );
+      updatedTarget.total_progress = parseFloat(progressResult?.total || 0) || 0;
+      
+      // Manually calculate shared_in and shared_out
+      const sharedOutResult = await db.get(
+        `SELECT COALESCE(SUM(CASE WHEN status = 'Active' THEN CAST(amount AS NUMERIC) ELSE 0 END), 0) as total
+         FROM fund_sharing
+         WHERE from_user_id = ?`,
+        [progressEntry.target_user_id]
+      );
+      updatedTarget.shared_out = parseFloat(sharedOutResult?.total || 0) || 0;
+      
+      const sharedInResult = await db.get(
+        `SELECT COALESCE(SUM(CASE WHEN status = 'Active' THEN CAST(amount AS NUMERIC) ELSE 0 END), 0) as total
+         FROM fund_sharing
+         WHERE to_user_id = ?`,
+        [progressEntry.target_user_id]
+      );
+      updatedTarget.shared_in = parseFloat(sharedInResult?.total || 0) || 0;
 
       console.log('Updated target after approval:', {
         target_id: progressEntry.target_id,

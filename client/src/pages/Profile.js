@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../hooks/useAuth';
 import api from '../config/api';
+import { getSocket } from '../config/socket';
 
 const Profile = () => {
   const { user, updateUser } = useAuth();
@@ -38,6 +39,36 @@ const Profile = () => {
     }
   }, [user]);
 
+  // Listen for real-time profile updates
+  useEffect(() => {
+    const socket = getSocket();
+    if (socket) {
+      const handleProfileUpdate = (data) => {
+        if (data.user_id === user?.id) {
+          console.log('Profile updated via socket:', data);
+          // Update local form data
+          if (data.profile_image !== undefined) {
+            setFormData(prev => ({ ...prev, profile_image: data.profile_image }));
+          }
+          // Update user context
+          if (user) {
+            updateUser({
+              ...user,
+              profile_image: data.profile_image || user.profile_image,
+              name: data.name || user.name
+            });
+          }
+        }
+      };
+
+      socket.on('profile_updated', handleProfileUpdate);
+
+      return () => {
+        socket.off('profile_updated', handleProfileUpdate);
+      };
+    }
+  }, [user, updateUser]);
+
   const handleChange = (e) => {
     setFormData({
       ...formData,
@@ -69,7 +100,10 @@ const Profile = () => {
       });
 
       const imageUrl = response.data.imageUrl;
-      const fullImageUrl = imageUrl.startsWith('http') ? imageUrl : `http://localhost:3002${imageUrl}`;
+      // Use API base URL for relative paths
+      const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:3006/api';
+      const baseUrl = API_BASE_URL.replace('/api', ''); // Remove /api to get base URL
+      const fullImageUrl = imageUrl.startsWith('http') ? imageUrl : `${baseUrl}${imageUrl}`;
       setFormData(prev => ({ ...prev, profile_image: fullImageUrl }));
       setMessage('Image uploaded successfully');
     } catch (err) {
@@ -338,6 +372,60 @@ const Profile = () => {
                 </div>
               ) : (
                 <form onSubmit={handleSubmit}>
+                  {/* Profile Image Upload Section */}
+                  <div className="row mb-4">
+                    <div className="col-12">
+                      <label className="form-label">Profile Image</label>
+                      <div className="d-flex align-items-center gap-4">
+                        <div className="position-relative">
+                          {formData.profile_image ? (
+                            <img 
+                              src={formData.profile_image} 
+                              alt="Profile preview" 
+                              className="rounded-circle border border-2"
+                              style={{ width: '120px', height: '120px', objectFit: 'cover' }}
+                              onError={(e) => {
+                                e.target.style.display = 'none';
+                                e.target.nextSibling.style.display = 'flex';
+                              }}
+                            />
+                          ) : null}
+                          <div 
+                            className="bg-secondary rounded-circle d-inline-flex align-items-center justify-content-center border border-2"
+                            style={{ 
+                              width: '120px', 
+                              height: '120px',
+                              display: formData.profile_image ? 'none' : 'flex'
+                            }}
+                          >
+                            <i className="bi bi-person" style={{ fontSize: '3rem', color: 'white' }}></i>
+                          </div>
+                        </div>
+                        <div className="flex-grow-1">
+                          <input
+                            type="file"
+                            className="form-control"
+                            accept="image/jpeg,image/jpg,image/png,image/gif,image/webp"
+                            onChange={handleImageUpload}
+                            disabled={uploadingImage}
+                          />
+                          <small className="form-text text-muted">
+                            {uploadingImage ? 'Uploading...' : 'Upload a profile image (max 5MB, jpeg/png/gif/webp)'}
+                          </small>
+                          {formData.profile_image && (
+                            <button
+                              type="button"
+                              className="btn btn-sm btn-outline-danger mt-2"
+                              onClick={() => setFormData(prev => ({ ...prev, profile_image: '' }))}
+                            >
+                              <i className="bi bi-trash me-1"></i>Remove Image
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                  
                   <div className="row mb-3">
                     <div className="col-md-6">
                       <label className="form-label">Full Name *</label>

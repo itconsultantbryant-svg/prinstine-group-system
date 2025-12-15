@@ -212,7 +212,16 @@ router.put('/profile', authenticateToken, async (req, res) => {
       [userId]
     );
 
-    await logAction(userId, 'update_profile', 'users', userId, { name, phone }, req);
+    await logAction(userId, 'update_profile', 'users', userId, { name, phone, profile_image }, req);
+
+    // Emit real-time update for profile image change
+    if (global.io && profile_image !== undefined) {
+      global.io.emit('profile_updated', {
+        user_id: userId,
+        profile_image: updatedUser.profile_image,
+        name: updatedUser.name
+      });
+    }
 
     res.json({
       message: 'Profile updated successfully',

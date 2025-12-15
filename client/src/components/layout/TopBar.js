@@ -6,7 +6,7 @@ import { initSocket, disconnectSocket } from '../../config/socket';
 import './TopBar.css';
 
 const TopBar = () => {
-  const { user, logout } = useAuth();
+  const { user, logout, updateUser } = useAuth();
   const navigate = useNavigate();
   const [unreadCount, setUnreadCount] = useState(0);
   const [notifications, setNotifications] = useState([]);
@@ -24,6 +24,27 @@ const TopBar = () => {
       // Request notification permission
       if ('Notification' in window && Notification.permission === 'default') {
         Notification.requestPermission();
+      }
+
+      // Listen for real-time profile updates
+      if (socket) {
+        const handleProfileUpdate = (data) => {
+          if (data.user_id === user.id) {
+            console.log('Profile updated via socket:', data);
+            // Refresh user data to get updated profile image
+            api.get('/auth/me')
+              .then(response => {
+                if (response.data?.user) {
+                  const updatedUserData = response.data.user;
+                  // Update user context
+                  updateUser(updatedUserData);
+                }
+              })
+              .catch(err => console.error('Error fetching updated profile:', err));
+          }
+        };
+
+        socket.on('profile_updated', handleProfileUpdate);
       }
 
       // Listen for real-time notifications via WebSocket
@@ -110,6 +131,9 @@ const TopBar = () => {
 
         return () => {
           socket.off('notification', handleNotification);
+          if (socket) {
+            socket.off('profile_updated', handleProfileUpdate);
+          }
           clearInterval(interval);
         };
       }
@@ -118,7 +142,7 @@ const TopBar = () => {
     return () => {
       disconnectSocket();
     };
-  }, [user]);
+  }, [user, updateUser]);
 
   const fetchUnreadCount = async () => {
     try {

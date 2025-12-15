@@ -200,6 +200,36 @@ export const AuthProvider = ({ children }) => {
     localStorage.setItem('user', JSON.stringify(userData));
   };
 
+  // Listen for real-time profile updates via Socket.IO
+  useEffect(() => {
+    if (user) {
+      const socket = initSocket(user.id);
+      if (socket) {
+        const handleProfileUpdate = (data) => {
+          if (data.user_id === user.id) {
+            console.log('Profile updated via socket in AuthContext:', data);
+            // Fetch updated user data
+            api.get('/auth/me')
+              .then(response => {
+                if (response.data?.user) {
+                  const updatedUser = response.data.user;
+                  setUser(updatedUser);
+                  localStorage.setItem('user', JSON.stringify(updatedUser));
+                }
+              })
+              .catch(err => console.error('Error fetching updated profile:', err));
+          }
+        };
+
+        socket.on('profile_updated', handleProfileUpdate);
+
+        return () => {
+          socket.off('profile_updated', handleProfileUpdate);
+        };
+      }
+    }
+  }, [user]);
+
   return (
     <AuthContext.Provider value={{ user, login, logout, updateUser, loading }}>
       {children}

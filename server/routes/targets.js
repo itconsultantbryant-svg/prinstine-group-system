@@ -257,9 +257,47 @@ router.get('/', authenticateToken, async (req, res) => {
       for (let i = 0; i < targets.length; i++) {
         const target = targets[i];
         
-        // Get approved progress entries manually
+        // Get ALL progress entries first for debugging
+        const allEntries = await db.all(
+          `SELECT id, amount, status, progress_amount, 
+           CAST(amount AS NUMERIC) as amount_num,
+           CAST(progress_amount AS NUMERIC) as progress_amount_num
+           FROM target_progress
+           WHERE target_id = ?`,
+          [target.id]
+        );
+        
+        console.log(`\n=== Target ${target.id} Debug ===`);
+        console.log(`All progress entries (${allEntries.length}):`, JSON.stringify(allEntries, null, 2));
+        
+        // Try different status filters to see which one matches
+        const testQueries = [
+          { name: 'status = Approved', query: `status = 'Approved'` },
+          { name: 'status IS NULL', query: `status IS NULL` },
+          { name: 'status = Approved OR NULL', query: `(status = 'Approved' OR status IS NULL)` },
+          { name: 'status = Approved OR NULL OR empty', query: `(status = 'Approved' OR status IS NULL OR status = '')` },
+          { name: 'UPPER TRIM status', query: `UPPER(TRIM(COALESCE(status, ''))) = 'APPROVED'` }
+        ];
+        
+        for (const test of testQueries) {
+          try {
+            const testResult = await db.get(
+              `SELECT COALESCE(SUM(COALESCE(CAST(amount AS NUMERIC), CAST(progress_amount AS NUMERIC), 0)), 0) as total,
+                      COUNT(*) as count
+               FROM target_progress
+               WHERE target_id = ? AND ${test.query}`,
+              [target.id]
+            );
+            console.log(`Test "${test.name}": total=${testResult?.total}, count=${testResult?.count}`);
+          } catch (err) {
+            console.log(`Test "${test.name}" failed:`, err.message);
+          }
+        }
+        
+        // Use the simplest query that should work
         const progressResult = await db.get(
-          `SELECT COALESCE(SUM(COALESCE(CAST(amount AS NUMERIC), CAST(progress_amount AS NUMERIC), 0)), 0) as total
+          `SELECT COALESCE(SUM(COALESCE(CAST(amount AS NUMERIC), CAST(progress_amount AS NUMERIC), 0)), 0) as total,
+                  COUNT(*) as count
            FROM target_progress
            WHERE target_id = ?
              AND (status = 'Approved' OR status IS NULL OR status = '')`,
@@ -268,13 +306,11 @@ router.get('/', authenticateToken, async (req, res) => {
         
         const manualTotalProgress = parseFloat(progressResult?.total || 0) || 0;
         
-        // Override the subquery result with manual calculation
-        if (Math.abs(manualTotalProgress - parseFloat(target.total_progress || 0)) > 0.01) {
-          console.log(`Target ${target.id}: Subquery returned ${target.total_progress}, manual calculation: ${manualTotalProgress} - USING MANUAL`);
-          targets[i].total_progress = manualTotalProgress;
-        } else {
-          console.log(`Target ${target.id}: Subquery and manual match: ${target.total_progress}`);
-        }
+        console.log(`Target ${target.id} FINAL: Manual total_progress = ${manualTotalProgress}, count = ${progressResult?.count}`);
+        console.log(`Target ${target.id}: Subquery had ${target.total_progress}, now using manual: ${manualTotalProgress}`);
+        
+        // ALWAYS override with manual calculation to ensure accuracy
+        targets[i].total_progress = manualTotalProgress;
       }
     }
     

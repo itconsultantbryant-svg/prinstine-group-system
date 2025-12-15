@@ -114,9 +114,14 @@ run_terminal_cmd
   const handleView = async (requisitionId) => {
     try {
       const response = await api.get(`/requisitions/${requisitionId}`);
-      setViewingRequisition(response.data.requisition);
+      if (response.data && response.data.requisition) {
+        setViewingRequisition(response.data.requisition);
+      } else {
+        alert('Requisition not found or you do not have permission to view it');
+      }
     } catch (error) {
       console.error('Error fetching requisition:', error);
+      alert(error.response?.data?.error || 'Failed to load requisition details. You may not have permission to view this requisition.');
     }
   };
 

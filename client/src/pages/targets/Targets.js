@@ -320,23 +320,41 @@ const Targets = () => {
       }));
       setTargets(updatedTargets);
     } catch (err) {
-      // Only log/show error if it's not a 404 or network error
+      // Production-ready error handling
+      const isNetworkError = err.code === 'ERR_NETWORK' || 
+                            err.code === 'ERR_INTERNET_DISCONNECTED' || 
+                            err.code === 'ERR_CONNECTION_CLOSED' ||
+                            err.message?.includes('Network Error') ||
+                            err.message?.includes('timeout');
+      
       if (err.response?.status === 404) {
         console.warn('Targets endpoint not found (404) - this may be a temporary issue');
-        setTargets([]);
-      } else if (err.code === 'ERR_NETWORK' || err.code === 'ERR_INTERNET_DISCONNECTED' || err.message === 'Network Error') {
-        // Silently handle network errors - they'll be retried
-        console.warn('Network error fetching targets - will retry on next request');
+        // Don't clear existing data on 404, just log
+        if (targets.length === 0) {
+          setTargets([]);
+        }
+      } else if (isNetworkError) {
+        // Silently handle network errors - they'll be retried via real-time updates
+        console.warn('Network error fetching targets - will retry on next request or via real-time updates');
+        // Don't set error state for network issues - keep existing data
+        // Real-time socket events will update when connection is restored
       } else {
-      console.error('Error fetching targets:', err);
-      console.error('Error response status:', err.response?.status);
-      console.error('Error response data:', err.response?.data);
-      const errorMessage = err.response?.data?.error || err.response?.data?.details || 'Failed to load targets';
-      setError(errorMessage);
-      setTargets([]);
+        // Only show error for actual application errors
+        console.error('Error fetching targets:', err);
+        const errorMessage = err.response?.data?.error || err.response?.data?.details || err.message || 'Failed to load targets';
+        // Only set error if we don't have any targets (first load failure)
+        if (targets.length === 0) {
+          setError(errorMessage);
+          setTargets([]);
+        } else {
+          // If we have existing data, just log the error and continue
+          console.warn('Error fetching targets but keeping existing data:', errorMessage);
+        }
       }
     } finally {
-      setLoading(false);
+      if (forceRefresh || loading) {
+        setLoading(false);
+      }
     }
   };
 

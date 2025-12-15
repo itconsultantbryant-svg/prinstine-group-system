@@ -242,9 +242,9 @@ router.get('/', authenticateToken, async (req, res) => {
     // Use the column aliases in ORDER BY
     query += ' ORDER BY (COALESCE(total_progress, 0) + COALESCE(shared_in, 0) - COALESCE(shared_out, 0)) DESC, t.created_at DESC';
 
-    console.log('Executing targets query:', query.substring(0, 300) + '...');
+    console.log('Executing targets query (first 500 chars):', query.substring(0, 500));
     console.log('Query params:', params);
-    console.log('Tables exist - targets:', !!tableExists, 'fund_sharing:', !!fundSharingExists, 'target_progress:', !!targetProgressExists);
+    console.log('Tables exist - targets:', !!tableExists, 'target_progress:', !!targetProgressExists, 'fund_sharing:', !!fundSharingExists, 'target_progress:', !!targetProgressExists);
     
     const targets = await db.all(query, params);
     console.log(`Fetched ${targets.length} targets from database`);

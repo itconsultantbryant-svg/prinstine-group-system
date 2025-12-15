@@ -25,13 +25,39 @@ const upload = multer({
   storage, 
   limits: { fileSize: 100 * 1024 * 1024 }, // 100MB limit
   fileFilter: (req, file, cb) => {
-    // Allow all common document types
-    const allowedTypes = ['.pdf', '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx', '.txt', '.jpg', '.jpeg', '.png', '.gif', '.zip', '.rar'];
+    // Allow all common document types including PowerPoint
+    const allowedExtensions = ['.pdf', '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx', '.txt', '.jpg', '.jpeg', '.png', '.gif', '.zip', '.rar'];
     const ext = path.extname(file.originalname).toLowerCase();
-    if (allowedTypes.includes(ext)) {
+    const extMatch = allowedExtensions.includes(ext);
+    
+    // Also check MIME types for PowerPoint and other Office documents (browsers may send different MIME types)
+    const allowedMimeTypes = [
+      'application/pdf',
+      'application/msword',
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      'application/vnd.ms-excel',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'application/vnd.ms-powerpoint',
+      'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+      'text/plain',
+      'image/jpeg',
+      'image/jpg',
+      'image/png',
+      'image/gif',
+      'application/zip',
+      'application/x-rar-compressed',
+      'application/octet-stream' // Some browsers send this for Office documents
+    ];
+    
+    const mimeMatch = allowedMimeTypes.some(mime => 
+      file.mimetype === mime || file.mimetype.includes(mime.split('/')[1])
+    );
+    
+    // Accept if extension matches OR mimetype matches (more flexible)
+    if (extMatch || mimeMatch) {
       cb(null, true);
     } else {
-      cb(new Error('Invalid file type. Allowed types: PDF, Word, Excel, PowerPoint, Images, Archives'));
+      cb(new Error('Invalid file type. Allowed types: PDF, Word, Excel, PowerPoint, Images, Archives (Max 100MB)'));
     }
   }
 });

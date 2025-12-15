@@ -44,7 +44,6 @@ const TopBar = () => {
           }
         };
 
-        socket.on('profile_updated', handleProfileUpdate);
         const handleNotification = (notification) => {
           // Parse notification if it's a string
           let parsedNotification = notification;
@@ -117,6 +116,7 @@ const TopBar = () => {
           }
         };
 
+        socket.on('profile_updated', handleProfileUpdate);
         socket.on('notification', handleNotification);
 
         // Poll for notifications every 30 seconds as backup
@@ -126,10 +126,8 @@ const TopBar = () => {
         }, 30000);
 
         return () => {
+          socket.off('profile_updated', handleProfileUpdate);
           socket.off('notification', handleNotification);
-          if (socket) {
-            socket.off('profile_updated', handleProfileUpdate);
-          }
           clearInterval(interval);
         };
       }

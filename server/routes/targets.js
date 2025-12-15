@@ -1832,6 +1832,18 @@ router.post('/recalculate-all', authenticateToken, requireRole('Admin'), async (
         entries_checked: allEntries.length
       });
       
+      // Show status breakdown
+      if (allEntries.length > 0) {
+        const statusBreakdown = await db.all(
+          `SELECT status, COUNT(*) as count, SUM(CAST(amount AS NUMERIC)) as total_amount
+           FROM target_progress 
+           WHERE CAST(target_id AS INTEGER) = CAST(? AS INTEGER)
+           GROUP BY status`,
+          [target.id]
+        );
+        console.log(`Target ${target.id} - Status breakdown:`, statusBreakdown);
+      }
+      
       const totalProgress = parseFloat(totalProgressResult?.total || 0) || 0;
       
       // Recalculate shared_in and shared_out

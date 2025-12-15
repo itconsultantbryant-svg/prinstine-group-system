@@ -1307,12 +1307,40 @@ router.put('/progress/:id/approve', authenticateToken, requireRole('Admin'), [
     }
 
     // Update the progress entry status
-    await db.run(
-      `UPDATE target_progress 
-       SET status = ?, updated_at = CURRENT_TIMESTAMP
-       WHERE id = ?`,
-      [status, req.params.id]
-    );
+    // Check if updated_at column exists, if not, just update status
+    const USE_POSTGRESQL = !!process.env.DATABASE_URL;
+    let hasUpdatedAt = false;
+    
+    try {
+      if (USE_POSTGRESQL) {
+        const updatedAtCheck = await db.get(
+          "SELECT column_name FROM information_schema.columns WHERE table_name = 'target_progress' AND column_name = 'updated_at'"
+        );
+        hasUpdatedAt = !!updatedAtCheck;
+      } else {
+        const tableInfo = await db.all("PRAGMA table_info(target_progress)");
+        hasUpdatedAt = tableInfo.some(col => col.name === 'updated_at');
+      }
+    } catch (colCheckError) {
+      console.error('Error checking updated_at column:', colCheckError);
+      // Continue without updated_at
+    }
+    
+    if (hasUpdatedAt) {
+      await db.run(
+        `UPDATE target_progress 
+         SET status = ?, updated_at = CURRENT_TIMESTAMP
+         WHERE id = ?`,
+        [status, req.params.id]
+      );
+    } else {
+      await db.run(
+        `UPDATE target_progress 
+         SET status = ?
+         WHERE id = ?`,
+        [status, req.params.id]
+      );
+    }
 
     // If approved, update the target and admin target in real-time
     if (status === 'Approved') {
@@ -1348,7 +1376,17 @@ router.put('/progress/:id/approve', authenticateToken, requireRole('Admin'), [
     });
   } catch (error) {
     console.error('Approve target progress error:', error);
-    res.status(500).json({ error: 'Failed to approve target progress entry' });
+    console.error('Error stack:', error.stack);
+    console.error('Error details:', {
+      message: error.message,
+      code: error.code,
+      params: req.params,
+      body: req.body
+    });
+    res.status(500).json({ 
+      error: 'Failed to approve target progress entry',
+      details: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
   }
 });
 

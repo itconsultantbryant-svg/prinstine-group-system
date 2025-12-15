@@ -146,32 +146,51 @@ const ArchivedDocuments = () => {
     return `${baseUrl}${relativeUrl}`;
   };
 
-  const handleView = (document) => {
-    const url = normalizeDocumentUrl(document.file_path);
+  const handleView = (doc) => {
+    const url = normalizeDocumentUrl(doc.file_path);
     window.open(url, '_blank');
   };
 
-  const handleDownload = (document) => {
-    const url = normalizeDocumentUrl(document.file_path);
-    // Create a temporary anchor element to trigger download
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = document.file_name || document.original_file_name || 'document';
-    link.target = '_blank';
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+  const handleDownload = async (doc) => {
+    try {
+      const url = normalizeDocumentUrl(doc.file_path);
+      
+      // Use authenticated API endpoint for download
+      const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:3006/api';
+      const downloadUrl = `${API_BASE_URL}/upload/download?path=${encodeURIComponent(doc.file_path)}`;
+      
+      const response = await api.get(downloadUrl, {
+        responseType: 'blob'
+      });
+      
+      // Create blob URL and trigger download
+      const blobUrl = window.URL.createObjectURL(new Blob([response.data]));
+      const link = document.createElement('a');
+      link.href = blobUrl;
+      link.download = doc.file_name || doc.original_file_name || 'document';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(blobUrl);
+    } catch (error) {
+      console.error('Download error:', error);
+      alert('Failed to download document. Please try again.');
+    }
   };
 
-  const handlePrint = (document) => {
-    const url = normalizeDocumentUrl(document.file_path);
+  const handlePrint = (doc) => {
+    const url = normalizeDocumentUrl(doc.file_path);
+    // Use authenticated API endpoint for viewing/printing
+    const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:3006/api';
+    const viewUrl = `${API_BASE_URL}/upload/view?path=${encodeURIComponent(doc.file_path)}`;
+    
     // Open document in new window and print
-    const printWindow = window.open(url, '_blank');
+    const printWindow = window.open(viewUrl, '_blank');
     if (printWindow) {
       printWindow.onload = () => {
         setTimeout(() => {
           printWindow.print();
-        }, 500);
+        }, 1000);
       };
     } else {
       alert('Please allow popups to print this document');

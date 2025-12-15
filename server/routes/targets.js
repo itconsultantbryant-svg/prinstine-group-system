@@ -67,7 +67,7 @@ async function updateAdminTargetInDatabase(periodStart = null) {
           COALESCE(SUM(target_amount), 0) as total_target,
           COALESCE(SUM(
             ${targetProgressExists 
-              ? `(SELECT COALESCE(SUM(COALESCE(CAST(tp.amount AS NUMERIC), CAST(tp.progress_amount AS NUMERIC), 0)), 0) FROM target_progress tp WHERE CAST(tp.target_id AS INTEGER) = CAST(t.id AS INTEGER) AND (tp.status = 'Approved' OR tp.status IS NULL))`
+              ? `(SELECT COALESCE(SUM(COALESCE(CAST(tp.amount AS NUMERIC), CAST(tp.progress_amount AS NUMERIC), 0)), 0) FROM target_progress tp WHERE CAST(tp.target_id AS INTEGER) = CAST(t.id AS INTEGER) AND (UPPER(TRIM(COALESCE(tp.status, ''))) = 'APPROVED' OR tp.status IS NULL))`
               : 'CAST(0 AS NUMERIC)'}
           ), 0) as total_progress,
           COALESCE(SUM(
@@ -196,7 +196,7 @@ router.get('/', authenticateToken, async (req, res) => {
       ? `(SELECT COALESCE(SUM(COALESCE(CAST(tp.amount AS NUMERIC), CAST(tp.progress_amount AS NUMERIC), 0)), 0) 
           FROM target_progress tp 
           WHERE CAST(tp.target_id AS INTEGER) = CAST(t.id AS INTEGER)
-            AND (tp.status = 'Approved' OR tp.status IS NULL))`
+            AND (UPPER(TRIM(COALESCE(tp.status, ''))) = 'APPROVED' OR tp.status IS NULL))`
       : 'CAST(0 AS NUMERIC)';
     
     // Note: Only Approved progress entries are counted in net_amount calculation
@@ -461,7 +461,7 @@ router.get('/:id', authenticateToken, async (req, res) => {
              (SELECT COALESCE(SUM(COALESCE(tp.amount, tp.progress_amount, 0)), 0) 
               FROM target_progress tp 
               WHERE tp.target_id = t.id
-                AND (tp.status = 'Approved' OR tp.status IS NULL)) as total_progress,
+                AND (UPPER(TRIM(COALESCE(tp.status, ''))) = 'APPROVED' OR tp.status IS NULL)) as total_progress,
              (SELECT COALESCE(SUM(CASE WHEN fs.status = 'Active' THEN fs.amount ELSE 0 END), 0)
               FROM fund_sharing fs
               WHERE fs.from_user_id = t.user_id) as shared_out,
@@ -587,7 +587,7 @@ router.post('/', authenticateToken, requireRole('Admin'), [
               `SELECT 
                 COALESCE(SUM(target_amount), 0) as total_target,
                 COALESCE(SUM(
-                  (SELECT COALESCE(SUM(COALESCE(tp.amount, tp.progress_amount, 0)), 0) FROM target_progress tp WHERE tp.target_id = t.id AND (tp.status = 'Approved' OR tp.status IS NULL))
+                  (SELECT COALESCE(SUM(COALESCE(tp.amount, tp.progress_amount, 0)), 0) FROM target_progress tp WHERE tp.target_id = t.id AND (UPPER(TRIM(COALESCE(tp.status, ''))) = 'APPROVED' OR tp.status IS NULL))
                 ), 0) as total_progress,
                 COALESCE(SUM(
                   (SELECT COALESCE(SUM(CASE WHEN fs.status = 'Active' THEN fs.amount ELSE 0 END), 0)
@@ -694,7 +694,7 @@ router.post('/', authenticateToken, requireRole('Admin'), [
              (SELECT COALESCE(SUM(COALESCE(tp.amount, tp.progress_amount, 0)), 0) 
               FROM target_progress tp 
               WHERE tp.target_id = t.id
-                AND (tp.status = 'Approved' OR tp.status IS NULL)) as total_progress,
+                AND (UPPER(TRIM(COALESCE(tp.status, ''))) = 'APPROVED' OR tp.status IS NULL)) as total_progress,
              (SELECT COALESCE(SUM(CASE WHEN fs.status = 'Active' THEN fs.amount ELSE 0 END), 0)
               FROM fund_sharing fs
               WHERE fs.from_user_id = t.user_id) as shared_out,
@@ -846,7 +846,7 @@ router.put('/:id', authenticateToken, requireRole('Admin'), [
              (SELECT COALESCE(SUM(COALESCE(tp.amount, tp.progress_amount, 0)), 0) 
               FROM target_progress tp 
               WHERE tp.target_id = t.id
-                AND (tp.status = 'Approved' OR tp.status IS NULL)) as total_progress,
+                AND (UPPER(TRIM(COALESCE(tp.status, ''))) = 'APPROVED' OR tp.status IS NULL)) as total_progress,
              (SELECT COALESCE(SUM(CASE WHEN fs.status = 'Active' THEN fs.amount ELSE 0 END), 0)
               FROM fund_sharing fs
               WHERE fs.from_user_id = t.user_id) as shared_out,
@@ -1396,12 +1396,13 @@ router.put('/progress/:id/approve', authenticateToken, requireRole('Admin'), [
       await new Promise(resolve => setTimeout(resolve, 200));
 
       // Get updated target to calculate new values - use explicit CAST for PostgreSQL compatibility
+      // Use case-insensitive comparison for status
       const updatedTarget = await db.get(
         `SELECT t.*,
                 (SELECT COALESCE(SUM(COALESCE(CAST(tp.amount AS NUMERIC), CAST(tp.progress_amount AS NUMERIC), 0)), 0) 
                  FROM target_progress tp 
                  WHERE CAST(tp.target_id AS INTEGER) = CAST(t.id AS INTEGER)
-                   AND (tp.status = 'Approved' OR tp.status IS NULL)) as total_progress,
+                   AND (UPPER(TRIM(COALESCE(tp.status, ''))) = 'APPROVED' OR tp.status IS NULL)) as total_progress,
                 (SELECT COALESCE(SUM(CASE WHEN fs.status = 'Active' THEN CAST(fs.amount AS NUMERIC) ELSE 0 END), 0)
                  FROM fund_sharing fs WHERE CAST(fs.from_user_id AS INTEGER) = CAST(t.user_id AS INTEGER)) as shared_out,
                 (SELECT COALESCE(SUM(CASE WHEN fs.status = 'Active' THEN CAST(fs.amount AS NUMERIC) ELSE 0 END), 0)
@@ -1420,14 +1421,38 @@ router.put('/progress/:id/approve', authenticateToken, requireRole('Admin'), [
       });
 
       // Also verify by directly querying target_progress
-      const directProgressCheck = await db.get(
-        `SELECT COALESCE(SUM(CAST(amount AS NUMERIC)), 0) as total 
+      // First, let's see ALL entries for this target
+      const allProgressEntries = await db.all(
+        `SELECT id, amount, status, CAST(amount AS NUMERIC) as amount_num
          FROM target_progress 
-         WHERE CAST(target_id AS INTEGER) = CAST(? AS INTEGER)
-           AND (status = 'Approved' OR status IS NULL)`,
+         WHERE CAST(target_id AS INTEGER) = CAST(? AS INTEGER)`,
         [progressEntry.target_id]
       );
-      console.log('Direct progress check after approval:', directProgressCheck);
+      console.log('All progress entries for target', progressEntry.target_id, ':', allProgressEntries);
+      
+      // Then get the approved ones
+      const directProgressCheck = await db.get(
+        `SELECT 
+          COALESCE(SUM(COALESCE(CAST(amount AS NUMERIC), CAST(progress_amount AS NUMERIC), 0)), 0) as total,
+          COUNT(*) as count
+         FROM target_progress 
+         WHERE CAST(target_id AS INTEGER) = CAST(? AS INTEGER)
+           AND (UPPER(TRIM(status)) = 'APPROVED' OR status IS NULL)`,
+        [progressEntry.target_id]
+      );
+      console.log('Direct progress check after approval (approved entries):', directProgressCheck);
+      
+      // Also check with case-insensitive comparison
+      const directProgressCheckCaseInsensitive = await db.get(
+        `SELECT 
+          COALESCE(SUM(COALESCE(CAST(amount AS NUMERIC), CAST(progress_amount AS NUMERIC), 0)), 0) as total,
+          COUNT(*) as count
+         FROM target_progress 
+         WHERE CAST(target_id AS INTEGER) = CAST(? AS INTEGER)
+           AND (UPPER(TRIM(COALESCE(status, ''))) = 'APPROVED' OR status IS NULL)`,
+        [progressEntry.target_id]
+      );
+      console.log('Direct progress check (case-insensitive):', directProgressCheckCaseInsensitive);
 
       let netAmount = 0;
       let progressPercentage = 0;
@@ -1673,7 +1698,7 @@ router.delete('/:id', authenticateToken, requireRole('Admin'), async (req, res) 
               `SELECT 
                 COALESCE(SUM(target_amount), 0) as total_target,
                 COALESCE(SUM(
-                  (SELECT COALESCE(SUM(COALESCE(tp.amount, tp.progress_amount, 0)), 0) FROM target_progress tp WHERE tp.target_id = t.id AND (tp.status = 'Approved' OR tp.status IS NULL))
+                  (SELECT COALESCE(SUM(COALESCE(tp.amount, tp.progress_amount, 0)), 0) FROM target_progress tp WHERE tp.target_id = t.id AND (UPPER(TRIM(COALESCE(tp.status, ''))) = 'APPROVED' OR tp.status IS NULL))
                 ), 0) as total_progress,
                 COALESCE(SUM(
                   (SELECT COALESCE(SUM(CASE WHEN fs.status = 'Active' THEN fs.amount ELSE 0 END), 0)
@@ -1775,12 +1800,13 @@ router.post('/recalculate-all', authenticateToken, requireRole('Admin'), async (
     
     for (const target of allTargets) {
       // Recalculate total_progress using the same query as GET /targets
+      // Use case-insensitive comparison for status
       const totalProgressResult = targetProgressExists
         ? await db.get(
             `SELECT COALESCE(SUM(COALESCE(CAST(amount AS NUMERIC), CAST(progress_amount AS NUMERIC), 0)), 0) as total
              FROM target_progress
              WHERE CAST(target_id AS INTEGER) = CAST(? AS INTEGER)
-               AND (status = 'Approved' OR status IS NULL)`,
+               AND (UPPER(TRIM(COALESCE(status, ''))) = 'APPROVED' OR status IS NULL)`,
             [target.id]
           )
         : { total: 0 };

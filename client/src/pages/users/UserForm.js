@@ -60,7 +60,10 @@ const UserForm = ({ user, onClose }) => {
       });
 
       const imageUrl = response.data.imageUrl;
-      const fullImageUrl = imageUrl.startsWith('http') ? imageUrl : `http://localhost:3002${imageUrl}`;
+      // Use API base URL for relative paths
+      const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:3006/api';
+      const baseUrl = API_BASE_URL.replace('/api', ''); // Remove /api to get base URL
+      const fullImageUrl = imageUrl.startsWith('http') ? imageUrl : `${baseUrl}${imageUrl}`;
       setFormData(prev => ({ ...prev, profile_image: fullImageUrl }));
     } catch (err) {
       setError('Failed to upload image: ' + (err.response?.data?.error || err.message));

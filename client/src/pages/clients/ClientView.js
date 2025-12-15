@@ -1,10 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import api from '../../config/api';
+import { getSocket } from '../../config/socket';
+import { useAuth } from '../../hooks/useAuth';
 
 const ClientView = () => {
   const { id } = useParams();
   const navigate = useNavigate();
+  const { user } = useAuth();
   const [client, setClient] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -12,6 +15,40 @@ const ClientView = () => {
   useEffect(() => {
     fetchClient();
   }, [id]);
+
+  // Set up real-time socket connection for client updates
+  useEffect(() => {
+    if (!user || !client) return;
+
+    const socket = getSocket();
+    if (!socket) return;
+
+    const handleClientUpdated = (updatedClient) => {
+      // Only update if this is the client we're viewing
+      if (updatedClient.id === parseInt(id) || updatedClient.client_id === client.client_id) {
+        console.log('Client updated event received in ClientView:', updatedClient);
+        // Refresh client data
+        fetchClient();
+      }
+    };
+
+    const handleClientDeleted = (deletedClient) => {
+      // If the client being viewed was deleted, navigate back
+      if (deletedClient.id === parseInt(id) || deletedClient.client_id === client.client_id) {
+        console.log('Client deleted event received in ClientView');
+        setError('This client has been deleted');
+        setTimeout(() => navigate('/clients'), 2000);
+      }
+    };
+
+    socket.on('client_updated', handleClientUpdated);
+    socket.on('client_deleted', handleClientDeleted);
+
+    return () => {
+      socket.off('client_updated', handleClientUpdated);
+      socket.off('client_deleted', handleClientDeleted);
+    };
+  }, [user, client, id, navigate]);
 
   const fetchClient = async () => {
     try {

@@ -91,18 +91,10 @@ export const handleDownloadDocument = async (filePath, filename = null) => {
     }
     
     // response.data is already a Blob when responseType is 'blob'
-    // Get content type from response headers or infer from file extension
-    let contentType = response.headers['content-type'] || 'application/octet-stream';
-    const ext = filename.split('.').pop().toLowerCase();
+    // Get content type from response headers (server sets this correctly)
+    const contentType = response.headers['content-type'] || response.headers['Content-Type'] || 'application/octet-stream';
     
-    // Ensure correct content type for PowerPoint files
-    if (ext === 'ppt') {
-      contentType = 'application/vnd.ms-powerpoint';
-    } else if (ext === 'pptx') {
-      contentType = 'application/vnd.openxmlformats-officedocument.presentationml.presentation';
-    }
-    
-    // Create blob with proper type
+    // Ensure blob has correct type (in case headers weren't set properly)
     const blob = response.data instanceof Blob 
       ? new Blob([response.data], { type: contentType })
       : new Blob([response.data], { type: contentType });
@@ -125,7 +117,24 @@ export const handleDownloadDocument = async (filePath, filename = null) => {
   } catch (error) {
     console.error('Download error:', error);
     console.error('Error details:', error.response?.data || error.message);
-    const errorMessage = error.response?.data?.error || error.message || 'Failed to download document';
+    console.error('Error response:', error.response);
+    
+    // Try to extract error message from blob response if available
+    let errorMessage = 'Failed to download document';
+    if (error.response?.data instanceof Blob) {
+      try {
+        const text = await error.response.data.text();
+        const json = JSON.parse(text);
+        errorMessage = json.error || errorMessage;
+      } catch (e) {
+        // If parsing fails, use default message
+      }
+    } else if (error.response?.data?.error) {
+      errorMessage = error.response.data.error;
+    } else if (error.message) {
+      errorMessage = error.message;
+    }
+    
     alert(`Failed to download document: ${errorMessage}`);
   }
 };

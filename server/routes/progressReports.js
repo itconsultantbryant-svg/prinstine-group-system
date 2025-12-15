@@ -800,6 +800,10 @@ router.put('/:id/approve', authenticateToken, requireRole('Admin'), [
               date: report.date
             });
             
+            // When progress report is approved, target_progress should also be 'Approved'
+            // Otherwise, set to 'Pending' for admin approval
+            const progressStatus = status === 'Approved' ? 'Approved' : 'Pending';
+            
             const progressResult = await db.run(
               `INSERT INTO target_progress (target_id, user_id, progress_report_id, amount, category, status, transaction_date)
                VALUES (?, ?, ?, ?, ?, ?, ?)`,
@@ -809,7 +813,7 @@ router.put('/:id/approve', authenticateToken, requireRole('Admin'), [
                 req.params.id,
                 amountFloat,
                 report.category || null,
-                report.status || null,
+                progressStatus,
                 report.date || null
               ]
             );

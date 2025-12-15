@@ -1223,6 +1223,7 @@ const Targets = () => {
                         <th>Category</th>
                         <th>Status</th>
                         <th>Source</th>
+                        {user?.role === 'Admin' && <th>Actions</th>}
                       </tr>
                     </thead>
                     <tbody>
@@ -1236,8 +1237,48 @@ const Targets = () => {
                             })}
                           </td>
                           <td>{progress.category}</td>
-                          <td>{progress.status}</td>
+                          <td>
+                            <span className={`badge bg-${
+                              progress.status === 'Approved' ? 'success' :
+                              progress.status === 'Pending' ? 'warning' :
+                              progress.status === 'Rejected' ? 'danger' : 'secondary'
+                            }`}>
+                              {progress.status || 'Pending'}
+                            </span>
+                          </td>
                           <td>{progress.source_user_name || progress.progress_report_name || 'Manual Entry'}</td>
+                          {user?.role === 'Admin' && (
+                            <td>
+                              {progress.status === 'Pending' && (
+                                <div className="btn-group" role="group">
+                                  <button
+                                    className="btn btn-sm btn-success"
+                                    onClick={() => handleApproveProgress(progress.id, 'Approved')}
+                                    title="Approve"
+                                  >
+                                    <i className="bi bi-check-circle"></i> Approve
+                                  </button>
+                                  <button
+                                    className="btn btn-sm btn-danger"
+                                    onClick={() => handleApproveProgress(progress.id, 'Rejected')}
+                                    title="Reject"
+                                  >
+                                    <i className="bi bi-x-circle"></i> Reject
+                                  </button>
+                                </div>
+                              )}
+                              {progress.status === 'Approved' && (
+                                <span className="text-success">
+                                  <i className="bi bi-check-circle"></i> Approved
+                                </span>
+                              )}
+                              {progress.status === 'Rejected' && (
+                                <span className="text-danger">
+                                  <i className="bi bi-x-circle"></i> Rejected
+                                </span>
+                              )}
+                            </td>
+                          )}
                         </tr>
                       ))}
                     </tbody>

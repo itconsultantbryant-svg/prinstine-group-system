@@ -1274,6 +1274,81 @@ router.get('/:id/progress', authenticateToken, async (req, res) => {
   }
 });
 
+// Approve target progress entry (Admin only)
+router.put('/progress/:id/approve', authenticateToken, requireRole('Admin'), [
+  body('status').isIn(['Approved', 'Rejected']).withMessage('Status must be Approved or Rejected')
+], async (req, res) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({ errors: errors.array() });
+    }
+
+    const { status } = req.body;
+    
+    // Get the target progress entry
+    const progressEntry = await db.get(
+      `SELECT tp.*, t.user_id as target_user_id, t.period_start
+       FROM target_progress tp
+       LEFT JOIN targets t ON tp.target_id = t.id
+       WHERE tp.id = ?`,
+      [req.params.id]
+    );
+
+    if (!progressEntry) {
+      return res.status(404).json({ error: 'Target progress entry not found' });
+    }
+
+    if (progressEntry.status === 'Approved') {
+      return res.status(400).json({ error: 'This progress entry has already been approved' });
+    }
+
+    // Update the progress entry status
+    await db.run(
+      `UPDATE target_progress 
+       SET status = ?, updated_at = CURRENT_TIMESTAMP
+       WHERE id = ?`,
+      [status, req.params.id]
+    );
+
+    // If approved, update the target and admin target in real-time
+    if (status === 'Approved') {
+      // Update admin target in database
+      if (progressEntry.period_start) {
+        await updateAdminTargetInDatabase(progressEntry.period_start);
+      }
+
+      // Emit real-time updates
+      if (global.io) {
+        global.io.emit('target_progress_updated', {
+          target_id: progressEntry.target_id,
+          user_id: progressEntry.user_id,
+          amount: progressEntry.amount,
+          progress_id: req.params.id,
+          action: 'progress_approved',
+          status: 'Approved'
+        });
+
+        global.io.emit('target_updated', {
+          id: progressEntry.target_id,
+          updated_by: req.user.name || 'Admin',
+          reason: 'target_progress_approved'
+        });
+      }
+    }
+
+    await logAction(req.user.id, 'approve_target_progress', 'target_progress', req.params.id, { status }, req);
+
+    res.json({ 
+      message: `Target progress entry ${status.toLowerCase()} successfully`,
+      progress_id: req.params.id
+    });
+  } catch (error) {
+    console.error('Approve target progress error:', error);
+    res.status(500).json({ error: 'Failed to approve target progress entry' });
+  }
+});
+
 // Auto-update target progress from progress reports
 // This should be called when a progress report is created/updated
 router.post('/update-progress', authenticateToken, async (req, res) => {

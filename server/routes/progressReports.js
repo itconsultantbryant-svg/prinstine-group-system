@@ -456,9 +456,69 @@ router.post('/', authenticateToken, requireRole('Admin', 'DepartmentHead', 'Staf
 
     await logAction(req.user.id, 'create_progress_report', 'progress_reports', result.lastID, { name, category, status }, req);
 
-    // DO NOT auto-update target progress on creation - wait for admin approval
-    // Target progress will be updated only when admin approves the report
-    // This ensures that pending reports don't affect targets until approved
+    // Create a pending target_progress entry when progress report is created (if it has an amount)
+    // This allows admin to see and approve it in the targets management area
+    if (amount && parseFloat(amount) > 0) {
+      try {
+        // Find active target for the creator
+        const target = await db.get(
+          'SELECT * FROM targets WHERE user_id = ? AND status = ?',
+          [req.user.id, 'Active']
+        );
+
+        if (target) {
+          // Check if progress already exists for this report
+          const existingProgress = await db.get(
+            'SELECT id FROM target_progress WHERE progress_report_id = ?',
+            [result.lastID]
+          );
+
+          if (!existingProgress) {
+            // Create pending target_progress entry
+            const targetIdInt = parseInt(target.id);
+            const userIdInt = parseInt(req.user.id);
+            const amountFloat = parseFloat(amount);
+            
+            await db.run(
+              `INSERT INTO target_progress (target_id, user_id, progress_report_id, amount, category, status, transaction_date)
+               VALUES (?, ?, ?, ?, ?, ?, ?)`,
+              [
+                targetIdInt,
+                userIdInt,
+                result.lastID,
+                amountFloat,
+                category || null,
+                'Pending', // Set to 'Pending' for admin approval
+                date || null
+              ]
+            );
+            
+            console.log('Created pending target_progress entry for new progress report:', {
+              progress_report_id: result.lastID,
+              target_id: targetIdInt,
+              amount: amountFloat
+            });
+
+            // Emit socket event to notify about new pending progress
+            if (global.io) {
+              global.io.emit('target_progress_created', {
+                progress_report_id: result.lastID,
+                target_id: targetIdInt,
+                user_id: userIdInt,
+                amount: amountFloat,
+                status: 'Pending',
+                action: 'progress_report_created'
+              });
+            }
+          }
+        } else {
+          console.log('No active target found for user:', req.user.id, '- skipping target_progress creation');
+        }
+      } catch (targetProgressError) {
+        // Log error but don't fail the progress report creation
+        console.error('Error creating target_progress entry for new progress report:', targetProgressError);
+      }
+    }
 
     // Emit real-time update for progress report
     if (global.io) {

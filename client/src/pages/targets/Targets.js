@@ -150,13 +150,36 @@ const Targets = () => {
         }
       };
 
+      const handleTargetProgressCreated = (data) => {
+        console.log('Target progress created event received:', data);
+        // Refresh targets and progress history when new pending progress is created
+        if (data.target_id && selectedTarget && selectedTarget.id === data.target_id) {
+          // If viewing progress for this target, refresh it
+          fetchTargetProgress(selectedTarget.id);
+        }
+        // Always refresh targets list to show updated counts
+        fetchTargets();
+      };
+
+      const handleProgressReportCreated = (data) => {
+        console.log('Progress report created event received:', data);
+        // Refresh targets to show new pending progress entries
+        fetchTargets();
+        // If viewing progress history, refresh it
+        if (selectedTarget) {
+          fetchTargetProgress(selectedTarget.id);
+        }
+      };
+
       socket.on('target_created', handleTargetCreated);
       socket.on('target_updated', handleTargetUpdated);
       socket.on('fund_shared', handleFundShared);
       socket.on('fund_reversed', handleFundReversed);
       socket.on('target_progress_updated', handleTargetProgressUpdated);
+      socket.on('target_progress_created', handleTargetProgressCreated);
       socket.on('target_deleted', handleTargetDeleted);
       socket.on('progress_report_approved', handleProgressReportApproved);
+      socket.on('progress_report_created', handleProgressReportCreated);
 
       return () => {
         socket.off('target_created', handleTargetCreated);
@@ -164,8 +187,10 @@ const Targets = () => {
         socket.off('fund_shared', handleFundShared);
         socket.off('fund_reversed', handleFundReversed);
         socket.off('target_progress_updated', handleTargetProgressUpdated);
+        socket.off('target_progress_created', handleTargetProgressCreated);
         socket.off('target_deleted', handleTargetDeleted);
         socket.off('progress_report_approved', handleProgressReportApproved);
+        socket.off('progress_report_created', handleProgressReportCreated);
       };
     }
   }, [user]);

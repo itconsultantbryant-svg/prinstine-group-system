@@ -683,11 +683,12 @@ router.put('/:id', authenticateToken, requireRole('Admin', 'DepartmentHead', 'St
             }
             
             // Verify the total progress for this target (only Approved entries, same as GET /targets)
+            // Use case-insensitive comparison
             const totalProgressCheck = await db.get(
               `SELECT COALESCE(SUM(COALESCE(CAST(amount AS NUMERIC), CAST(progress_amount AS NUMERIC), 0)), 0) as total 
                FROM target_progress 
                WHERE CAST(target_id AS INTEGER) = CAST(? AS INTEGER)
-                 AND (status = 'Approved' OR status IS NULL)`,
+                 AND (UPPER(TRIM(COALESCE(status, ''))) = 'APPROVED' OR status IS NULL)`,
               [target.id]
             );
             console.log('Total progress for target', target.id, 'after update (Approved entries only):', totalProgressCheck);
@@ -1006,14 +1007,16 @@ router.put('/:id/approve', authenticateToken, requireRole('Admin'), [
             }
           } else {
             // Update existing progress record - when progress report is approved, set status to Approved
+            // Normalize status: capitalize first letter, lowercase rest
+            const normalizedStatus = status === 'Approved' ? 'Approved' : 'Rejected';
             await db.run(
               `UPDATE target_progress 
                SET amount = ?, category = ?, status = ?, transaction_date = ?, updated_at = CURRENT_TIMESTAMP
                WHERE progress_report_id = ?`,
               [
-                parseFloat(report.amount),
+                parseFloat(report.amount || 0),
                 report.category,
-                status === 'Approved' ? 'Approved' : report.status, // Use 'Approved' status when report is approved
+                normalizedStatus, // Use normalized 'Approved' or 'Rejected' status
                 report.date,
                 req.params.id
               ]

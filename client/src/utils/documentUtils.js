@@ -84,26 +84,49 @@ export const handleDownloadDocument = async (filePath, filename = null) => {
       responseType: 'blob'
     });
     
-    // Create blob URL and trigger download
-    const blobUrl = window.URL.createObjectURL(new Blob([response.data]));
-    const link = document.createElement('a');
-    link.href = blobUrl;
-    
-    // Use provided filename or extract from path
+    // Extract filename from path if not provided
     if (!filename) {
-      // Extract filename from path
       const pathParts = filePath.split('/');
       filename = pathParts[pathParts.length - 1] || 'document';
     }
     
+    // response.data is already a Blob when responseType is 'blob'
+    // Get content type from response headers or infer from file extension
+    let contentType = response.headers['content-type'] || 'application/octet-stream';
+    const ext = filename.split('.').pop().toLowerCase();
+    
+    // Ensure correct content type for PowerPoint files
+    if (ext === 'ppt') {
+      contentType = 'application/vnd.ms-powerpoint';
+    } else if (ext === 'pptx') {
+      contentType = 'application/vnd.openxmlformats-officedocument.presentationml.presentation';
+    }
+    
+    // Create blob with proper type
+    const blob = response.data instanceof Blob 
+      ? new Blob([response.data], { type: contentType })
+      : new Blob([response.data], { type: contentType });
+    
+    // Create blob URL and trigger download
+    const blobUrl = window.URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = blobUrl;
     link.download = filename;
+    link.style.display = 'none';
+    
     document.body.appendChild(link);
     link.click();
-    document.body.removeChild(link);
-    window.URL.revokeObjectURL(blobUrl);
+    
+    // Clean up after a short delay to ensure download starts
+    setTimeout(() => {
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(blobUrl);
+    }, 100);
   } catch (error) {
     console.error('Download error:', error);
-    alert('Failed to download document. Please try again.');
+    console.error('Error details:', error.response?.data || error.message);
+    const errorMessage = error.response?.data?.error || error.message || 'Failed to download document';
+    alert(`Failed to download document: ${errorMessage}`);
   }
 };
 

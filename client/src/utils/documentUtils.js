@@ -94,10 +94,16 @@ export const handleDownloadDocument = async (filePath, filename = null) => {
     // Get content type from response headers (server sets this correctly)
     const contentType = response.headers['content-type'] || response.headers['Content-Type'] || 'application/octet-stream';
     
-    // Ensure blob has correct type (in case headers weren't set properly)
-    const blob = response.data instanceof Blob 
-      ? new Blob([response.data], { type: contentType })
-      : new Blob([response.data], { type: contentType });
+    // Use the blob directly - axios already creates it with the correct type from response headers
+    // If we need to ensure the type, we can read it and recreate, but typically the server headers are correct
+    let blob = response.data;
+    
+    // If blob type doesn't match content type from headers, recreate with correct type
+    if (blob instanceof Blob && blob.type !== contentType && contentType !== 'application/octet-stream') {
+      // Read the blob data and recreate with correct type
+      const arrayBuffer = await blob.arrayBuffer();
+      blob = new Blob([arrayBuffer], { type: contentType });
+    }
     
     // Create blob URL and trigger download
     const blobUrl = window.URL.createObjectURL(blob);

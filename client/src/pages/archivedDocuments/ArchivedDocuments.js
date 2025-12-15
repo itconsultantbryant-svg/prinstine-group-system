@@ -3,6 +3,7 @@ import api from '../../config/api';
 import { useAuth } from '../../hooks/useAuth';
 import { getSocket } from '../../config/socket';
 import { exportToPDF, exportToExcel, exportToWord, printContent } from '../../utils/exportUtils';
+import { handleViewDocument, handleDownloadDocument, handlePrintDocument } from '../../utils/documentUtils';
 
 const ArchivedDocuments = () => {
   const { user } = useAuth();
@@ -131,70 +132,16 @@ const ArchivedDocuments = () => {
     }
   };
 
-  // Helper function to normalize document URL
-  const normalizeDocumentUrl = (filePath) => {
-    if (!filePath) return '';
-    // If already a full URL, return as is
-    if (filePath.startsWith('http://') || filePath.startsWith('https://')) {
-      return filePath;
-    }
-    // If relative URL, prepend base URL
-    const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:3006/api';
-    const baseUrl = API_BASE_URL.replace('/api', '');
-    // Ensure URL starts with /
-    const relativeUrl = filePath.startsWith('/') ? filePath : `/${filePath}`;
-    return `${baseUrl}${relativeUrl}`;
-  };
-
   const handleView = (doc) => {
-    const url = normalizeDocumentUrl(doc.file_path);
-    window.open(url, '_blank');
+    handleViewDocument(doc.file_path);
   };
 
   const handleDownload = async (doc) => {
-    try {
-      const url = normalizeDocumentUrl(doc.file_path);
-      
-      // Use authenticated API endpoint for download
-      const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:3006/api';
-      const downloadUrl = `${API_BASE_URL}/upload/download?path=${encodeURIComponent(doc.file_path)}`;
-      
-      const response = await api.get(downloadUrl, {
-        responseType: 'blob'
-      });
-      
-      // Create blob URL and trigger download
-      const blobUrl = window.URL.createObjectURL(new Blob([response.data]));
-      const link = document.createElement('a');
-      link.href = blobUrl;
-      link.download = doc.file_name || doc.original_file_name || 'document';
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      window.URL.revokeObjectURL(blobUrl);
-    } catch (error) {
-      console.error('Download error:', error);
-      alert('Failed to download document. Please try again.');
-    }
+    await handleDownloadDocument(doc.file_path, doc.file_name || doc.original_file_name);
   };
 
   const handlePrint = (doc) => {
-    const url = normalizeDocumentUrl(doc.file_path);
-    // Use authenticated API endpoint for viewing/printing
-    const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:3006/api';
-    const viewUrl = `${API_BASE_URL}/upload/view?path=${encodeURIComponent(doc.file_path)}`;
-    
-    // Open document in new window and print
-    const printWindow = window.open(viewUrl, '_blank');
-    if (printWindow) {
-      printWindow.onload = () => {
-        setTimeout(() => {
-          printWindow.print();
-        }, 1000);
-      };
-    } else {
-      alert('Please allow popups to print this document');
-    }
+    handlePrintDocument(doc.file_path);
   };
 
   const getFileIcon = (fileType) => {

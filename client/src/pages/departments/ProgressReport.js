@@ -466,20 +466,20 @@ const ProgressReport = ({ onClose }) => {
                             {user?.role === 'Admin' && (
                               <>
                                 {report.status === 'Pending' && (
-                                  <>
-                                    <button
-                                      className="btn btn-sm btn-success"
-                                      onClick={() => handleApproveReport(report.id, 'Approved')}
-                                      title="Approve"
-                                    >
-                                      <i className="bi bi-check-circle"></i>
-                                    </button>
-                                    <button
-                                      className="btn btn-sm btn-danger"
-                                      onClick={() => handleApproveReport(report.id, 'Rejected')}
-                                      title="Reject"
-                                    >
-                                      <i className="bi bi-x-circle"></i>
+                              <>
+                                <button
+                                  className="btn btn-sm btn-success"
+                                  onClick={() => handleApproveReport(report.id, 'Approved')}
+                                  title="Approve"
+                                >
+                                  <i className="bi bi-check-circle"></i>
+                                </button>
+                                <button
+                                  className="btn btn-sm btn-danger"
+                                  onClick={() => handleApproveReport(report.id, 'Rejected')}
+                                  title="Reject"
+                                >
+                                  <i className="bi bi-x-circle"></i>
                                     </button>
                                   </>
                                 )}

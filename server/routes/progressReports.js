@@ -706,7 +706,7 @@ router.put('/:id', authenticateToken, requireRole('Admin', 'DepartmentHead', 'St
             } catch (adminUpdateError) {
               console.error('Error updating admin target after progress report edit (non-fatal):', adminUpdateError);
             }
-
+            
             // Emit real-time update for target progress - emit to all users
             if (global.io) {
               global.io.emit('target_progress_updated', {

@@ -335,7 +335,7 @@ router.get('/', authenticateToken, async (req, res) => {
            FROM target_progress 
            WHERE target_id = ?`,
           [firstTarget.id]
-        );
+          );
         console.log(`All progress entries for target ${firstTarget.id}:`, JSON.stringify(progressCheck, null, 2));
         
         const approvedCheck = await db.get(
@@ -759,26 +759,26 @@ router.post('/', authenticateToken, requireRole('Admin'), [
     let createdTarget;
     try {
       createdTarget = await db.get(`
-        SELECT t.*, 
-               COALESCE(u.name, 'Unknown User') as user_name, 
-               COALESCE(u.email, '') as user_email,
-               COALESCE(u.role, '') as user_role,
-               COALESCE(creator.name, 'System') as created_by_name,
+      SELECT t.*, 
+             COALESCE(u.name, 'Unknown User') as user_name, 
+             COALESCE(u.email, '') as user_email,
+             COALESCE(u.role, '') as user_role,
+             COALESCE(creator.name, 'System') as created_by_name,
                (SELECT COALESCE(SUM(COALESCE(CAST(tp.amount AS NUMERIC), CAST(tp.progress_amount AS NUMERIC), 0)), 0) 
-                FROM target_progress tp 
-                WHERE tp.target_id = t.id
+              FROM target_progress tp 
+              WHERE tp.target_id = t.id
                   AND (tp.status = 'Approved' OR tp.status IS NULL OR tp.status = '')) as total_progress,
                (SELECT COALESCE(SUM(CASE WHEN fs.status = 'Active' THEN CAST(fs.amount AS NUMERIC) ELSE 0 END), 0)
-                FROM fund_sharing fs
-                WHERE fs.from_user_id = t.user_id) as shared_out,
+              FROM fund_sharing fs
+              WHERE fs.from_user_id = t.user_id) as shared_out,
                (SELECT COALESCE(SUM(CASE WHEN fs.status = 'Active' THEN CAST(fs.amount AS NUMERIC) ELSE 0 END), 0)
-                FROM fund_sharing fs
-                WHERE fs.to_user_id = t.user_id) as shared_in
-        FROM targets t
-        LEFT JOIN users u ON t.user_id = u.id
-        LEFT JOIN users creator ON t.created_by = creator.id
-        WHERE t.id = ?
-      `, [targetId]);
+              FROM fund_sharing fs
+              WHERE fs.to_user_id = t.user_id) as shared_in
+      FROM targets t
+      LEFT JOIN users u ON t.user_id = u.id
+      LEFT JOIN users creator ON t.created_by = creator.id
+      WHERE t.id = ?
+    `, [targetId]);
     } catch (queryError) {
       console.error('Error fetching created target with subqueries:', queryError);
       // Fallback to simpler query without subqueries

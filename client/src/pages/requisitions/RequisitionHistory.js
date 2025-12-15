@@ -655,7 +655,7 @@ ${req.admin_notes ? `Admin Notes: ${req.admin_notes}` : ''}
                           document.body.removeChild(link);
                         }}
                         title="Download"
-                      >
+                    >
                         <i className="bi bi-download me-1"></i>Download
                       </button>
                       <button

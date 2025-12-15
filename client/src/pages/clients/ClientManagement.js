@@ -52,7 +52,7 @@ const ClientManagement = () => {
       const response = await api.get('/clients');
       console.log('Clients API response:', response.data);
       if (response.data && response.data.clients) {
-        setClients(response.data.clients);
+      setClients(response.data.clients);
       } else {
         console.warn('Unexpected response format:', response.data);
         setClients([]);

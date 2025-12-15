@@ -435,8 +435,8 @@ ${proposal.admin_notes ? `Admin Notes: ${proposal.admin_notes}\n` : ''}
                             document.body.removeChild(link);
                           }}
                           title="Download"
-                        >
-                          <i className="bi bi-download me-1"></i>Download
+                      >
+                        <i className="bi bi-download me-1"></i>Download
                         </button>
                         <button
                           className="btn btn-sm btn-outline-secondary"

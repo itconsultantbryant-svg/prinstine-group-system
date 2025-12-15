@@ -716,14 +716,14 @@ const Communications = () => {
                                     <i className="bi bi-paperclip me-2"></i>
                                     {att.filename} ({formatFileSize(att.size)})
                                   </span>
-                            <div className="btn-group btn-group-sm">
-                              <button
+                                  <div className="btn-group btn-group-sm">
+                                    <button
                                 className="btn btn-outline-info btn-sm"
                                 onClick={() => handleAttachmentAction(att, 'view')}
-                                title="View"
-                              >
-                                <i className="bi bi-eye"></i>
-                              </button>
+                                      title="View"
+                                    >
+                                      <i className="bi bi-eye"></i>
+                                    </button>
                               <button
                                 className="btn btn-outline-primary btn-sm"
                                 onClick={() => handleAttachmentAction(att, 'download')}
@@ -731,14 +731,14 @@ const Communications = () => {
                               >
                                 <i className="bi bi-download"></i>
                               </button>
-                              <button
-                                className="btn btn-outline-secondary btn-sm"
+                                    <button
+                                      className="btn btn-outline-secondary btn-sm"
                                 onClick={() => handleAttachmentAction(att, 'print')}
-                                title="Print"
-                              >
-                                <i className="bi bi-printer"></i>
-                              </button>
-                            </div>
+                                      title="Print"
+                                    >
+                                      <i className="bi bi-printer"></i>
+                                    </button>
+                                  </div>
                                 </div>
                               ))}
                             </div>

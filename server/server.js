@@ -2193,11 +2193,11 @@ app.use((req, res) => {
   // Only handle API routes here - client routes should be handled above
   if (req.path.startsWith('/api/')) {
     console.error('404 - API Route not found:', req.method, req.path);
-    res.status(404).json({ 
-      error: 'Route not found',
-      path: req.path,
-      method: req.method
-    });
+  res.status(404).json({ 
+    error: 'Route not found',
+    path: req.path,
+    method: req.method
+  });
   } else {
     // For non-API routes, if we get here, serve index.html (fallback)
     if (fs.existsSync(buildPath)) {

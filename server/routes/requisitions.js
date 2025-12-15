@@ -484,7 +484,7 @@ router.post('/', authenticateToken, upload.single('document'), async (req, res) 
       // All requisitions (except work_support) now go directly to Admin - no department head approval
       if (['office_supplies', 'sick_leave', 'temporary_leave', 'annual_leave'].includes(request_type)) {
         // All non-work_support requisitions: Notify Admin directly (no department head approval)
-        await sendNotificationToRole('Admin', {
+          await sendNotificationToRole('Admin', {
           title: 'New Requisition for Approval',
           message: `${userName} has submitted a ${request_type.replace('_', ' ')} requisition that requires your approval`,
           link: `/requisitions/${result.lastID}`,
@@ -511,7 +511,7 @@ router.post('/', authenticateToken, upload.single('document'), async (req, res) 
           type: 'info',
           senderId: req.user.id
         });
-    }
+      }
     } catch (notifError) {
       console.error('Error sending notifications:', notifError);
     }

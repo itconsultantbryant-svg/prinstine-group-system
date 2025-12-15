@@ -394,9 +394,9 @@ const Notifications = () => {
                               className="text-decoration-none flex-grow-1"
                               style={{ cursor: 'pointer' }}
                               onClick={() => handleAttachmentAction(att, 'view')}
-                            >
-                              <i className="bi bi-paperclip me-2"></i>
-                              {att.filename} ({formatFileSize(att.size)})
+                          >
+                            <i className="bi bi-paperclip me-2"></i>
+                            {att.filename} ({formatFileSize(att.size)})
                             </span>
                             <div className="btn-group btn-group-sm">
                               <button
@@ -454,9 +454,9 @@ const Notifications = () => {
                                     className="text-decoration-none flex-grow-1"
                                     style={{ cursor: 'pointer' }}
                                     onClick={() => handleAttachmentAction(att, 'view')}
-                                  >
-                                    <i className="bi bi-paperclip me-2"></i>
-                                    {att.filename} ({formatFileSize(att.size)})
+                                >
+                                  <i className="bi bi-paperclip me-2"></i>
+                                  {att.filename} ({formatFileSize(att.size)})
                                   </span>
                                   <div className="btn-group btn-group-sm">
                                     <button

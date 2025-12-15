@@ -257,7 +257,7 @@ const Targets = () => {
   const fetchTargets = async (forceRefresh = false) => {
     try {
       if (forceRefresh || !loading) {
-        setLoading(true);
+      setLoading(true);
       }
       setError('');
       console.log('Fetching targets...', { forceRefresh, timestamp: new Date().toISOString() });
@@ -328,12 +328,12 @@ const Targets = () => {
         // Silently handle network errors - they'll be retried
         console.warn('Network error fetching targets - will retry on next request');
       } else {
-        console.error('Error fetching targets:', err);
-        console.error('Error response status:', err.response?.status);
-        console.error('Error response data:', err.response?.data);
-        const errorMessage = err.response?.data?.error || err.response?.data?.details || 'Failed to load targets';
-        setError(errorMessage);
-        setTargets([]);
+      console.error('Error fetching targets:', err);
+      console.error('Error response status:', err.response?.status);
+      console.error('Error response data:', err.response?.data);
+      const errorMessage = err.response?.data?.error || err.response?.data?.details || 'Failed to load targets';
+      setError(errorMessage);
+      setTargets([]);
       }
     } finally {
       setLoading(false);
@@ -805,7 +805,7 @@ const Targets = () => {
               <i className={`bi bi-arrow-clockwise ${loading ? 'spinner-border spinner-border-sm' : ''}`}></i>
               {loading ? ' Refreshing...' : ' Refresh'}
             </button>
-            {user?.role === 'Admin' && (
+          {user?.role === 'Admin' && (
               <>
                 <button
                   className="btn btn-outline-primary"
@@ -815,14 +815,14 @@ const Targets = () => {
                 >
                   <i className="bi bi-calculator me-2"></i>Recalculate All
                 </button>
-                <button
-                  className="btn btn-primary"
-                  onClick={() => setShowCreateModal(true)}
-                >
-                  <i className="bi bi-plus-circle me-2"></i>Create Target
-                </button>
+            <button
+              className="btn btn-primary"
+              onClick={() => setShowCreateModal(true)}
+            >
+              <i className="bi bi-plus-circle me-2"></i>Create Target
+            </button>
               </>
-            )}
+          )}
           </div>
         </div>
       </div>

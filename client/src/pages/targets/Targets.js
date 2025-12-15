@@ -669,6 +669,33 @@ const Targets = () => {
     }
   };
 
+  const handleRecalculateAll = async () => {
+    if (!window.confirm('Recalculate all targets? This will ensure all approved progress entries are included in calculations.')) {
+      return;
+    }
+
+    try {
+      setLoading(true);
+      setError('');
+      console.log('Recalculating all targets...');
+      
+      const response = await api.post('/targets/recalculate-all');
+      console.log('Recalculation response:', response.data);
+      
+      // Refresh targets after recalculation
+      await fetchTargets(true);
+      await fetchSharingHistory();
+      
+      alert(`Successfully recalculated ${response.data.recalculated || 0} targets. All approved progress entries are now included.`);
+    } catch (err) {
+      console.error('Error recalculating targets:', err);
+      setError(err.response?.data?.error || 'Failed to recalculate targets');
+      alert('Failed to recalculate targets. Please check console for details.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const getProgressColor = (percentage) => {
     if (percentage >= 100) return 'success';
     if (percentage >= 75) return 'info';
@@ -757,12 +784,22 @@ const Targets = () => {
               {loading ? ' Refreshing...' : ' Refresh'}
             </button>
             {user?.role === 'Admin' && (
-              <button
-                className="btn btn-primary"
-                onClick={() => setShowCreateModal(true)}
-              >
-                <i className="bi bi-plus-circle me-2"></i>Create Target
-              </button>
+              <>
+                <button
+                  className="btn btn-outline-primary"
+                  onClick={handleRecalculateAll}
+                  title="Recalculate all targets from approved progress entries"
+                  disabled={loading}
+                >
+                  <i className="bi bi-calculator me-2"></i>Recalculate All
+                </button>
+                <button
+                  className="btn btn-primary"
+                  onClick={() => setShowCreateModal(true)}
+                >
+                  <i className="bi bi-plus-circle me-2"></i>Create Target
+                </button>
+              </>
             )}
           </div>
         </div>

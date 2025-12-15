@@ -1720,6 +1720,143 @@ router.delete('/:id', authenticateToken, requireRole('Admin'), async (req, res) 
   }
 });
 
+// Recalculate all targets (Admin only) - ensures all approved progress entries are included
+router.post('/recalculate-all', authenticateToken, requireRole('Admin'), async (req, res) => {
+  try {
+    console.log('Recalculating all targets...');
+    
+    // Check if target_progress and fund_sharing tables exist
+    const USE_POSTGRESQL = !!process.env.DATABASE_URL;
+    let targetProgressExists = false;
+    let fundSharingExists = false;
+    
+    if (USE_POSTGRESQL) {
+      const tpCheck = await db.get(
+        "SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'target_progress'"
+      );
+      targetProgressExists = !!tpCheck;
+      
+      const fsCheck = await db.get(
+        "SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'fund_sharing'"
+      );
+      fundSharingExists = !!fsCheck;
+    } else {
+      const tpCheck = await db.get("SELECT name FROM sqlite_master WHERE type='table' AND name='target_progress'");
+      targetProgressExists = !!tpCheck;
+      
+      const fsCheck = await db.get("SELECT name FROM sqlite_master WHERE type='table' AND name='fund_sharing'");
+      fundSharingExists = !!fsCheck;
+    }
+    
+    // Get all active targets
+    const allTargets = await db.all(
+      'SELECT id, user_id, period_start FROM targets WHERE status = ?',
+      ['Active']
+    );
+    
+    let recalculated = 0;
+    const results = [];
+    
+    for (const target of allTargets) {
+      // Recalculate total_progress using the same query as GET /targets
+      const totalProgressResult = targetProgressExists
+        ? await db.get(
+            `SELECT COALESCE(SUM(COALESCE(CAST(amount AS NUMERIC), CAST(progress_amount AS NUMERIC), 0)), 0) as total
+             FROM target_progress
+             WHERE CAST(target_id AS INTEGER) = CAST(? AS INTEGER)
+               AND (status = 'Approved' OR status IS NULL)`,
+            [target.id]
+          )
+        : { total: 0 };
+      
+      const totalProgress = parseFloat(totalProgressResult?.total || 0) || 0;
+      
+      // Recalculate shared_in and shared_out
+      const sharedOutResult = fundSharingExists
+        ? await db.get(
+            `SELECT COALESCE(SUM(CASE WHEN status = 'Active' THEN CAST(amount AS NUMERIC) ELSE 0 END), 0) as total
+             FROM fund_sharing
+             WHERE CAST(from_user_id AS INTEGER) = CAST(? AS INTEGER)`,
+            [target.user_id]
+          )
+        : { total: 0 };
+      
+      const sharedOut = parseFloat(sharedOutResult?.total || 0) || 0;
+      
+      const sharedInResult = fundSharingExists
+        ? await db.get(
+            `SELECT COALESCE(SUM(CASE WHEN status = 'Active' THEN CAST(amount AS NUMERIC) ELSE 0 END), 0) as total
+             FROM fund_sharing
+             WHERE CAST(to_user_id AS INTEGER) = CAST(? AS INTEGER)`,
+            [target.user_id]
+          )
+        : { total: 0 };
+      
+      const sharedIn = parseFloat(sharedInResult?.total || 0) || 0;
+      
+      // Get target_amount
+      const targetInfo = await db.get('SELECT target_amount FROM targets WHERE id = ?', [target.id]);
+      const targetAmount = parseFloat(targetInfo?.target_amount || 0) || 0;
+      
+      // Calculate net amount
+      const netAmount = totalProgress + sharedIn - sharedOut;
+      
+      // Calculate progress percentage
+      const progressPercentage = targetAmount > 0 ? (netAmount / targetAmount) * 100 : 0;
+      
+      // Calculate remaining amount
+      const remainingAmount = Math.max(0, targetAmount - netAmount);
+      
+      results.push({
+        target_id: target.id,
+        user_id: target.user_id,
+        total_progress: totalProgress,
+        shared_in: sharedIn,
+        shared_out: sharedOut,
+        net_amount: netAmount,
+        progress_percentage: progressPercentage.toFixed(2),
+        remaining_amount: remainingAmount
+      });
+      
+      recalculated++;
+      
+      console.log(`Recalculated target ${target.id}:`, {
+        total_progress: totalProgress,
+        shared_in: sharedIn,
+        shared_out: sharedOut,
+        net_amount: netAmount
+      });
+    }
+    
+    // Update admin targets
+    await updateAdminTargetInDatabase();
+    
+    // Emit real-time update to refresh all clients
+    if (global.io) {
+      global.io.emit('target_updated', {
+        updated_by: req.user.name || 'Admin',
+        reason: 'all_targets_recalculated',
+        recalculated_count: recalculated
+      });
+      global.io.emit('target_progress_updated', {
+        action: 'recalculate_all',
+        recalculated_count: recalculated
+      });
+    }
+    
+    await logAction(req.user.id, 'recalculate_all_targets', 'targets', null, { recalculated }, req);
+    
+    res.json({
+      message: `Successfully recalculated ${recalculated} targets`,
+      recalculated,
+      results
+    });
+  } catch (error) {
+    console.error('Recalculate all targets error:', error);
+    res.status(500).json({ error: 'Failed to recalculate targets: ' + error.message });
+  }
+});
+
 // Export the helper function for use in other routes
 module.exports = router;
 module.exports.updateAdminTargetInDatabase = updateAdminTargetInDatabase;

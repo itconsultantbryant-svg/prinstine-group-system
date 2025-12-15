@@ -1351,31 +1351,88 @@ router.put('/progress/:id/approve', authenticateToken, requireRole('Admin'), [
         await updateAdminTargetInDatabase(progressEntry.period_start);
       }
 
-      // Emit real-time updates
-      if (global.io) {
-        global.io.emit('target_progress_updated', {
-          target_id: progressEntry.target_id,
-          user_id: progressEntry.user_id,
-          amount: progressEntry.amount,
-          progress_id: req.params.id,
-          action: 'progress_approved',
-          status: 'Approved'
-        });
+      // Get updated target to calculate new values
+      const updatedTarget = await db.get(
+        `SELECT t.*,
+                (SELECT COALESCE(SUM(tp.amount), 0) 
+                 FROM target_progress tp 
+                 WHERE tp.target_id = t.id
+                   AND (tp.status = 'Approved' OR tp.status IS NULL)) as total_progress,
+                (SELECT COALESCE(SUM(CASE WHEN fs.status = 'Active' THEN fs.amount ELSE 0 END), 0)
+                 FROM fund_sharing fs WHERE fs.from_user_id = t.user_id) as shared_out,
+                (SELECT COALESCE(SUM(CASE WHEN fs.status = 'Active' THEN fs.amount ELSE 0 END), 0)
+                 FROM fund_sharing fs WHERE fs.to_user_id = t.user_id) as shared_in
+         FROM targets t
+         WHERE t.id = ?`,
+        [progressEntry.target_id]
+      );
 
-        global.io.emit('target_updated', {
-          id: progressEntry.target_id,
-          updated_by: req.user.name || 'Admin',
-          reason: 'target_progress_approved'
-        });
+      let netAmount = 0;
+      let progressPercentage = 0;
+      let remainingAmount = 0;
+      
+      if (updatedTarget) {
+        const totalProgress = parseFloat(updatedTarget.total_progress || 0);
+        const sharedIn = parseFloat(updatedTarget.shared_in || 0);
+        const sharedOut = parseFloat(updatedTarget.shared_out || 0);
+        const targetAmount = parseFloat(updatedTarget.target_amount || 0);
+        
+        netAmount = totalProgress + sharedIn - sharedOut;
+        progressPercentage = targetAmount > 0 ? (netAmount / targetAmount) * 100 : 0;
+        remainingAmount = Math.max(0, targetAmount - netAmount);
       }
+
+      // Emit real-time updates with updated values
+      if (global.io) {
+        // Small delay to ensure database commit
+        setTimeout(() => {
+          global.io.emit('target_progress_updated', {
+            target_id: progressEntry.target_id,
+            user_id: progressEntry.user_id,
+            amount: progressEntry.amount,
+            progress_id: req.params.id,
+            action: 'progress_approved',
+            status: 'Approved',
+            total_progress: updatedTarget?.total_progress || 0,
+            net_amount: netAmount,
+            progress_percentage: progressPercentage.toFixed(2),
+            remaining_amount: remainingAmount
+          });
+
+          global.io.emit('target_updated', {
+            id: progressEntry.target_id,
+            updated_by: req.user.name || 'Admin',
+            reason: 'target_progress_approved',
+            progress_added: true,
+            net_amount: netAmount,
+            progress_percentage: progressPercentage.toFixed(2),
+            remaining_amount: remainingAmount
+          });
+        }, 200);
+      }
+
+      await logAction(req.user.id, 'approve_target_progress', 'target_progress', req.params.id, { status }, req);
+
+      res.json({ 
+        message: `Target progress entry ${status.toLowerCase()} successfully`,
+        progress_id: req.params.id,
+        target: {
+          id: progressEntry.target_id,
+          net_amount: netAmount,
+          progress_percentage: progressPercentage.toFixed(2),
+          remaining_amount: remainingAmount,
+          total_progress: updatedTarget?.total_progress || 0
+        }
+      });
+    } else {
+      // If rejected, just log and return
+      await logAction(req.user.id, 'approve_target_progress', 'target_progress', req.params.id, { status }, req);
+      
+      res.json({ 
+        message: `Target progress entry ${status.toLowerCase()} successfully`,
+        progress_id: req.params.id
+      });
     }
-
-    await logAction(req.user.id, 'approve_target_progress', 'target_progress', req.params.id, { status }, req);
-
-    res.json({ 
-      message: `Target progress entry ${status.toLowerCase()} successfully`,
-      progress_id: req.params.id
-    });
   } catch (error) {
     console.error('Approve target progress error:', error);
     console.error('Error stack:', error.stack);

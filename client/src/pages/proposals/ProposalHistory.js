@@ -3,6 +3,7 @@ import api from '../../config/api';
 import { useAuth } from '../../hooks/useAuth';
 import ProposalForm from './ProposalForm';
 import { exportToPDF, exportToWord, printContent } from '../../utils/exportUtils';
+import { handleViewDocument, handleDownloadDocument, handlePrintDocument } from '../../utils/documentUtils';
 
 const ProposalHistory = () => {
   const { user } = useAuth();
@@ -285,7 +286,7 @@ ${proposal.admin_notes ? `Admin Notes: ${proposal.admin_notes}\n` : ''}
                         {proposal.document_name || 'N/A'}
                         {proposal.document_path && (
                           <a
-                            href={`http://localhost:3006${proposal.document_path}`}
+                            href={proposal.document_path.startsWith('http') ? proposal.document_path : `${window.location.origin}${proposal.document_path}`}
                             target="_blank"
                             rel="noopener noreferrer"
                             className="ms-2"
@@ -408,8 +409,8 @@ ${proposal.admin_notes ? `Admin Notes: ${proposal.admin_notes}\n` : ''}
                         <button
                           className="btn btn-sm btn-outline-info"
                           onClick={() => {
-                            const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:3006/api';
-                            const baseUrl = API_BASE_URL.replace('/api', '');
+                            const { getBaseUrl } = require('../../utils/apiUrl');
+                            const baseUrl = getBaseUrl();
                             const url = viewingProposal.document_path.startsWith('http') 
                               ? viewingProposal.document_path 
                               : `${baseUrl}${viewingProposal.document_path}`;
@@ -422,8 +423,8 @@ ${proposal.admin_notes ? `Admin Notes: ${proposal.admin_notes}\n` : ''}
                         <button
                           className="btn btn-sm btn-outline-primary"
                           onClick={() => {
-                            const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:3006/api';
-                            const baseUrl = API_BASE_URL.replace('/api', '');
+                            const { getBaseUrl } = require('../../utils/apiUrl');
+                            const baseUrl = getBaseUrl();
                             const url = viewingProposal.document_path.startsWith('http') 
                               ? viewingProposal.document_path 
                               : `${baseUrl}${viewingProposal.document_path}`;
@@ -441,8 +442,8 @@ ${proposal.admin_notes ? `Admin Notes: ${proposal.admin_notes}\n` : ''}
                         <button
                           className="btn btn-sm btn-outline-secondary"
                           onClick={() => {
-                            const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:3006/api';
-                            const baseUrl = API_BASE_URL.replace('/api', '');
+                            const { getBaseUrl } = require('../../utils/apiUrl');
+                            const baseUrl = getBaseUrl();
                             const url = viewingProposal.document_path.startsWith('http') 
                               ? viewingProposal.document_path 
                               : `${baseUrl}${viewingProposal.document_path}`;

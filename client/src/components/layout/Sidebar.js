@@ -54,9 +54,13 @@ const Sidebar = () => {
   const fetchUnreadCount = async () => {
     try {
       const response = await api.get('/notifications/unread-count');
-      setUnreadCount(response.data.count);
+      setUnreadCount(response.data.count || 0);
     } catch (error) {
-      console.error('Error fetching unread count:', error);
+      // Only log if it's not a network error (connection issues are expected during offline periods)
+      if (error.code !== 'ERR_NETWORK' && error.code !== 'ERR_INTERNET_DISCONNECTED' && error.message !== 'Network Error') {
+        console.error('Error fetching unread count:', error);
+      }
+      // Silently fail for network errors - they'll be retried on next connection
     }
   };
 

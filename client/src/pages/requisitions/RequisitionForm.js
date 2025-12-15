@@ -390,7 +390,7 @@ const RequisitionForm = ({ requisition, onClose }) => {
                   type="file"
                   className="form-control"
                   onChange={handleFileChange}
-                  accept=".pdf,.doc,.docx,.xls,.xlsx,.txt,.jpg,.jpeg,.png"
+                  accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.jpg,.jpeg,.png"
                 />
                 <small className="text-muted">Allowed: PDF, Word, Excel, PowerPoint, Text, Images (Max 50MB)</small>
               </div>

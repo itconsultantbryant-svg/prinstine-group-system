@@ -49,9 +49,13 @@ const upload = multer({
       'application/octet-stream' // Some browsers send this for Office documents
     ];
     
-    const mimeMatch = allowedMimeTypes.some(mime => 
-      file.mimetype === mime || file.mimetype.includes(mime.split('/')[1])
-    );
+    // Check if mimetype matches any allowed type (exact match or starts with image/ for images)
+    const mimeMatch = allowedMimeTypes.some(mime => {
+      if (file.mimetype === mime) return true;
+      // Allow image/* types
+      if (mime.startsWith('image/') && file.mimetype.startsWith('image/')) return true;
+      return false;
+    });
     
     // Accept if extension matches OR mimetype matches (more flexible)
     if (extMatch || mimeMatch) {

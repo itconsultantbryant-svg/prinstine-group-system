@@ -1175,12 +1175,40 @@ router.post('/share-fund', authenticateToken, [
       });
       console.log('Emitted fund_shared event to all users');
       
-      // Also emit target update events for both sender and recipient targets
-      global.io.emit('target_progress_updated', {
-        target_id: senderTarget.id,
-        user_id: from_user_id,
-        action: 'fund_shared_out'
-      });
+      // Also emit target update events for both sender and recipient targets with calculated values
+      // Fetch sender target with calculations
+      const senderTargetFull = await db.get(`
+        SELECT t.*,
+               (SELECT COALESCE(SUM(COALESCE(CAST(tp.amount AS NUMERIC), CAST(tp.progress_amount AS NUMERIC), 0)), 0) 
+                FROM target_progress tp 
+                WHERE tp.target_id = t.id AND (tp.status = 'Approved' OR tp.status IS NULL OR tp.status = '')) as total_progress,
+               (SELECT COALESCE(SUM(CASE WHEN fs.status = 'Active' THEN CAST(fs.amount AS NUMERIC) ELSE 0 END), 0)
+                FROM fund_sharing fs WHERE fs.from_user_id = t.user_id) as shared_out,
+               (SELECT COALESCE(SUM(CASE WHEN fs.status = 'Active' THEN CAST(fs.amount AS NUMERIC) ELSE 0 END), 0)
+                FROM fund_sharing fs WHERE fs.to_user_id = t.user_id) as shared_in
+        FROM targets t
+        WHERE t.id = ?
+      `, [senderTarget.id]);
+      
+      if (senderTargetFull) {
+        const senderTotalProgress = parseFloat(senderTargetFull.total_progress || 0) || 0;
+        const senderSharedIn = parseFloat(senderTargetFull.shared_in || 0) || 0;
+        const senderSharedOut = parseFloat(senderTargetFull.shared_out || 0) || 0;
+        const senderTargetAmount = parseFloat(senderTargetFull.target_amount || 0) || 0;
+        const senderNetAmount = senderTotalProgress + senderSharedIn - senderSharedOut;
+        const senderProgressPercentage = senderTargetAmount > 0 ? (senderNetAmount / senderTargetAmount) * 100 : 0;
+        const senderRemainingAmount = Math.max(0, senderTargetAmount - senderNetAmount);
+        
+        global.io.emit('target_progress_updated', {
+          target_id: senderTarget.id,
+          user_id: from_user_id,
+          action: 'fund_shared_out',
+          total_progress: senderTotalProgress,
+          net_amount: senderNetAmount,
+          progress_percentage: senderProgressPercentage.toFixed(2),
+          remaining_amount: senderRemainingAmount
+        });
+      }
       
       // Check if recipient has an active target
       const recipientTarget = await db.get(
@@ -1189,11 +1217,38 @@ router.post('/share-fund', authenticateToken, [
       );
       
       if (recipientTarget) {
-        global.io.emit('target_progress_updated', {
-          target_id: recipientTarget.id,
-          user_id: to_user_id,
-          action: 'fund_shared_in'
-        });
+        const recipientTargetFull = await db.get(`
+          SELECT t.*,
+                 (SELECT COALESCE(SUM(COALESCE(CAST(tp.amount AS NUMERIC), CAST(tp.progress_amount AS NUMERIC), 0)), 0) 
+                  FROM target_progress tp 
+                  WHERE tp.target_id = t.id AND (tp.status = 'Approved' OR tp.status IS NULL OR tp.status = '')) as total_progress,
+                 (SELECT COALESCE(SUM(CASE WHEN fs.status = 'Active' THEN CAST(fs.amount AS NUMERIC) ELSE 0 END), 0)
+                  FROM fund_sharing fs WHERE fs.from_user_id = t.user_id) as shared_out,
+                 (SELECT COALESCE(SUM(CASE WHEN fs.status = 'Active' THEN CAST(fs.amount AS NUMERIC) ELSE 0 END), 0)
+                  FROM fund_sharing fs WHERE fs.to_user_id = t.user_id) as shared_in
+          FROM targets t
+          WHERE t.id = ?
+        `, [recipientTarget.id]);
+        
+        if (recipientTargetFull) {
+          const recipientTotalProgress = parseFloat(recipientTargetFull.total_progress || 0) || 0;
+          const recipientSharedIn = parseFloat(recipientTargetFull.shared_in || 0) || 0;
+          const recipientSharedOut = parseFloat(recipientTargetFull.shared_out || 0) || 0;
+          const recipientTargetAmount = parseFloat(recipientTargetFull.target_amount || 0) || 0;
+          const recipientNetAmount = recipientTotalProgress + recipientSharedIn - recipientSharedOut;
+          const recipientProgressPercentage = recipientTargetAmount > 0 ? (recipientNetAmount / recipientTargetAmount) * 100 : 0;
+          const recipientRemainingAmount = Math.max(0, recipientTargetAmount - recipientNetAmount);
+          
+          global.io.emit('target_progress_updated', {
+            target_id: recipientTarget.id,
+            user_id: to_user_id,
+            action: 'fund_shared_in',
+            total_progress: recipientTotalProgress,
+            net_amount: recipientNetAmount,
+            progress_percentage: recipientProgressPercentage.toFixed(2),
+            remaining_amount: recipientRemainingAmount
+          });
+        }
       }
       
       console.log('Emitted target_progress_updated events for fund sharing');
@@ -1268,15 +1323,79 @@ router.post('/reverse-sharing/:id', authenticateToken, requireRole('Admin'), [
         reversed_by: req.user.name
       });
       
-      // Emit target progress updates for both users
-      global.io.emit('target_progress_updated', {
-        target_id: null, // Will be fetched by frontend
-        user_id: sharing.from_user_id
-      });
-      global.io.emit('target_progress_updated', {
-        target_id: null,
-        user_id: sharing.to_user_id
-      });
+      // Emit target progress updates for both users with calculated values
+      const fromTarget = await db.get('SELECT id FROM targets WHERE user_id = ? AND status = ?', [sharing.from_user_id, 'Active']);
+      const toTarget = await db.get('SELECT id FROM targets WHERE user_id = ? AND status = ?', [sharing.to_user_id, 'Active']);
+      
+      if (fromTarget) {
+        const fromTargetFull = await db.get(`
+          SELECT t.*,
+                 (SELECT COALESCE(SUM(COALESCE(CAST(tp.amount AS NUMERIC), CAST(tp.progress_amount AS NUMERIC), 0)), 0) 
+                  FROM target_progress tp 
+                  WHERE tp.target_id = t.id AND (tp.status = 'Approved' OR tp.status IS NULL OR tp.status = '')) as total_progress,
+                 (SELECT COALESCE(SUM(CASE WHEN fs.status = 'Active' THEN CAST(fs.amount AS NUMERIC) ELSE 0 END), 0)
+                  FROM fund_sharing fs WHERE fs.from_user_id = t.user_id) as shared_out,
+                 (SELECT COALESCE(SUM(CASE WHEN fs.status = 'Active' THEN CAST(fs.amount AS NUMERIC) ELSE 0 END), 0)
+                  FROM fund_sharing fs WHERE fs.to_user_id = t.user_id) as shared_in
+          FROM targets t
+          WHERE t.id = ?
+        `, [fromTarget.id]);
+        
+        if (fromTargetFull) {
+          const fromTotalProgress = parseFloat(fromTargetFull.total_progress || 0) || 0;
+          const fromSharedIn = parseFloat(fromTargetFull.shared_in || 0) || 0;
+          const fromSharedOut = parseFloat(fromTargetFull.shared_out || 0) || 0;
+          const fromTargetAmount = parseFloat(fromTargetFull.target_amount || 0) || 0;
+          const fromNetAmount = fromTotalProgress + fromSharedIn - fromSharedOut;
+          const fromProgressPercentage = fromTargetAmount > 0 ? (fromNetAmount / fromTargetAmount) * 100 : 0;
+          const fromRemainingAmount = Math.max(0, fromTargetAmount - fromNetAmount);
+          
+          global.io.emit('target_progress_updated', {
+            target_id: fromTarget.id,
+            user_id: sharing.from_user_id,
+            action: 'fund_reversed',
+            total_progress: fromTotalProgress,
+            net_amount: fromNetAmount,
+            progress_percentage: fromProgressPercentage.toFixed(2),
+            remaining_amount: fromRemainingAmount
+          });
+        }
+      }
+      
+      if (toTarget) {
+        const toTargetFull = await db.get(`
+          SELECT t.*,
+                 (SELECT COALESCE(SUM(COALESCE(CAST(tp.amount AS NUMERIC), CAST(tp.progress_amount AS NUMERIC), 0)), 0) 
+                  FROM target_progress tp 
+                  WHERE tp.target_id = t.id AND (tp.status = 'Approved' OR tp.status IS NULL OR tp.status = '')) as total_progress,
+                 (SELECT COALESCE(SUM(CASE WHEN fs.status = 'Active' THEN CAST(fs.amount AS NUMERIC) ELSE 0 END), 0)
+                  FROM fund_sharing fs WHERE fs.from_user_id = t.user_id) as shared_out,
+                 (SELECT COALESCE(SUM(CASE WHEN fs.status = 'Active' THEN CAST(fs.amount AS NUMERIC) ELSE 0 END), 0)
+                  FROM fund_sharing fs WHERE fs.to_user_id = t.user_id) as shared_in
+          FROM targets t
+          WHERE t.id = ?
+        `, [toTarget.id]);
+        
+        if (toTargetFull) {
+          const toTotalProgress = parseFloat(toTargetFull.total_progress || 0) || 0;
+          const toSharedIn = parseFloat(toTargetFull.shared_in || 0) || 0;
+          const toSharedOut = parseFloat(toTargetFull.shared_out || 0) || 0;
+          const toTargetAmount = parseFloat(toTargetFull.target_amount || 0) || 0;
+          const toNetAmount = toTotalProgress + toSharedIn - toSharedOut;
+          const toProgressPercentage = toTargetAmount > 0 ? (toNetAmount / toTargetAmount) * 100 : 0;
+          const toRemainingAmount = Math.max(0, toTargetAmount - toNetAmount);
+          
+          global.io.emit('target_progress_updated', {
+            target_id: toTarget.id,
+            user_id: sharing.to_user_id,
+            action: 'fund_reversed',
+            total_progress: toTotalProgress,
+            net_amount: toNetAmount,
+            progress_percentage: toProgressPercentage.toFixed(2),
+            remaining_amount: toRemainingAmount
+          });
+        }
+      }
     }
 
     res.json({ message: 'Fund sharing reversed successfully' });
@@ -1671,15 +1790,42 @@ router.put('/progress/:id/approve', authenticateToken, requireRole('Admin'), [
       // If rejected, just log and return
       await logAction(req.user.id, 'approve_target_progress', 'target_progress', req.params.id, { status }, req);
       
-      // Emit update event even for rejection
+      // Emit update event even for rejection - fetch updated target with calculations
       if (global.io) {
-        global.io.emit('target_progress_updated', {
-          target_id: progressEntry.target_id,
-          user_id: progressEntry.user_id,
-          progress_id: req.params.id,
-          action: 'progress_rejected',
-          status: 'Rejected'
-        });
+        const rejectedTarget = await db.get(`
+          SELECT t.*,
+                 (SELECT COALESCE(SUM(COALESCE(CAST(tp.amount AS NUMERIC), CAST(tp.progress_amount AS NUMERIC), 0)), 0) 
+                  FROM target_progress tp 
+                  WHERE tp.target_id = t.id AND (tp.status = 'Approved' OR tp.status IS NULL OR tp.status = '')) as total_progress,
+                 (SELECT COALESCE(SUM(CASE WHEN fs.status = 'Active' THEN CAST(fs.amount AS NUMERIC) ELSE 0 END), 0)
+                  FROM fund_sharing fs WHERE fs.from_user_id = t.user_id) as shared_out,
+                 (SELECT COALESCE(SUM(CASE WHEN fs.status = 'Active' THEN CAST(fs.amount AS NUMERIC) ELSE 0 END), 0)
+                  FROM fund_sharing fs WHERE fs.to_user_id = t.user_id) as shared_in
+          FROM targets t
+          WHERE t.id = ?
+        `, [progressEntry.target_id]);
+        
+        if (rejectedTarget) {
+          const totalProgress = parseFloat(rejectedTarget.total_progress || 0) || 0;
+          const sharedIn = parseFloat(rejectedTarget.shared_in || 0) || 0;
+          const sharedOut = parseFloat(rejectedTarget.shared_out || 0) || 0;
+          const targetAmount = parseFloat(rejectedTarget.target_amount || 0) || 0;
+          const netAmount = totalProgress + sharedIn - sharedOut;
+          const progressPercentage = targetAmount > 0 ? (netAmount / targetAmount) * 100 : 0;
+          const remainingAmount = Math.max(0, targetAmount - netAmount);
+          
+          global.io.emit('target_progress_updated', {
+            target_id: progressEntry.target_id,
+            user_id: progressEntry.user_id,
+            progress_id: req.params.id,
+            action: 'progress_rejected',
+            status: 'Rejected',
+            total_progress: totalProgress,
+            net_amount: netAmount,
+            progress_percentage: progressPercentage.toFixed(2),
+            remaining_amount: remainingAmount
+          });
+        }
       }
       
       res.json({ 

@@ -199,6 +199,9 @@ router.get('/', authenticateToken, async (req, res) => {
             AND (tp.status = 'Approved' OR tp.status IS NULL))`
       : 'CAST(0 AS NUMERIC)';
     
+    // Note: Only Approved progress entries are counted in net_amount calculation
+    // Pending entries are not included until they are approved
+    
     const sharedOutSubquery = fundSharingExists 
       ? `(SELECT COALESCE(SUM(CASE WHEN fs.status = 'Active' THEN fs.amount ELSE 0 END), 0)
           FROM fund_sharing fs

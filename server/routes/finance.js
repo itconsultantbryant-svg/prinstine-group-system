@@ -205,7 +205,9 @@ router.post('/petty-cash/ledgers', authenticateToken, [
   body('month').isInt({ min: 1, max: 12 }).withMessage('Month must be 1-12'),
   body('year').isInt({ min: 2020, max: 2100 }).withMessage('Year must be valid'),
   body('starting_balance').isFloat({ min: 0 }).withMessage('Starting balance must be >= 0'),
-  body('petty_cash_custodian_id').isInt().withMessage('Petty cash custodian is required')
+  body('petty_cash_custodian_id').isInt().withMessage('Petty cash custodian is required'),
+  body('date_from').optional().isISO8601().withMessage('Valid date_from is required'),
+  body('date_to').optional().isISO8601().withMessage('Valid date_to is required')
 ], async (req, res) => {
   try {
     const errors = validationResult(req);
@@ -217,7 +219,7 @@ router.post('/petty-cash/ledgers', authenticateToken, [
       return res.status(403).json({ error: 'Only Finance staff can create ledgers' });
     }
 
-    const { month, year, starting_balance, petty_cash_custodian_id } = req.body;
+    const { month, year, starting_balance, petty_cash_custodian_id, date_from, date_to } = req.body;
 
     // Validate custodian exists (can be staff, dept head, or admin user)
     // For backward compatibility, try staff first, then user
@@ -288,11 +290,25 @@ router.post('/petty-cash/ledgers', authenticateToken, [
     // Handle constraint violation for approval_status
     let result;
     try {
+      // Build INSERT query dynamically to handle optional date_from and date_to
+      const insertColumns = ['month', 'year', 'starting_balance', 'petty_cash_custodian_id', 'created_by', 'approval_status', 'dept_head_status'];
+      const insertValues = [month, year, actualStartingBalance, petty_cash_custodian_id, req.user.id, initialStatus, deptHeadStatus];
+      
+      if (date_from) {
+        insertColumns.push('date_from');
+        insertValues.push(date_from);
+      }
+      if (date_to) {
+        insertColumns.push('date_to');
+        insertValues.push(date_to);
+      }
+      
+      const placeholders = insertColumns.map(() => '?').join(', ');
       result = await db.run(
         `INSERT INTO petty_cash_ledgers 
-         (month, year, starting_balance, petty_cash_custodian_id, created_by, approval_status, dept_head_status)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`,
-        [month, year, actualStartingBalance, petty_cash_custodian_id, req.user.id, initialStatus, deptHeadStatus]
+         (${insertColumns.join(', ')})
+         VALUES (${placeholders})`,
+        insertValues
       );
     } catch (insertError) {
       // If constraint violation, try to fix the constraint and retry
@@ -333,12 +349,25 @@ router.post('/petty-cash/ledgers', authenticateToken, [
             `);
             console.log('✓ Updated petty_cash_ledgers approval_status constraint to include workflow statuses');
             
-            // Retry the insert
+            // Retry the insert with same dynamic columns
+            const insertColumns2 = ['month', 'year', 'starting_balance', 'petty_cash_custodian_id', 'created_by', 'approval_status', 'dept_head_status'];
+            const insertValues2 = [month, year, actualStartingBalance, petty_cash_custodian_id, req.user.id, initialStatus, deptHeadStatus];
+            
+            if (date_from) {
+              insertColumns2.push('date_from');
+              insertValues2.push(date_from);
+            }
+            if (date_to) {
+              insertColumns2.push('date_to');
+              insertValues2.push(date_to);
+            }
+            
+            const placeholders2 = insertColumns2.map(() => '?').join(', ');
             result = await db.run(
               `INSERT INTO petty_cash_ledgers 
-               (month, year, starting_balance, petty_cash_custodian_id, created_by, approval_status, dept_head_status)
-               VALUES (?, ?, ?, ?, ?, ?, ?)`,
-              [month, year, actualStartingBalance, petty_cash_custodian_id, req.user.id, initialStatus, deptHeadStatus]
+               (${insertColumns2.join(', ')})
+               VALUES (${placeholders2})`,
+              insertValues2
             );
           } catch (constraintError) {
             console.error('Error updating constraint:', constraintError);

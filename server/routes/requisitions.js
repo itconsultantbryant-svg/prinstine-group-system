@@ -316,8 +316,8 @@ router.post('/', authenticateToken, upload.single('document'), async (req, res) 
     }
 
     // Simplified workflow:
-    // - work_support: auto Approved (no approval)
-    // - all other types: Pending_Admin (Admin-only approval)
+    // - work_support: auto Approved (no approval, goes directly to staff)
+    // - all other types: Pending_Admin (Admin-only approval, no department head approval)
     let initialStatus = request_type === 'work_support' ? 'Approved' : 'Pending_Admin';
 
     const document_path = req.file ? `/uploads/requisitions/${req.file.filename}` : null;
@@ -481,45 +481,11 @@ router.post('/', authenticateToken, upload.single('document'), async (req, res) 
       });
 
       // Handle notifications based on request type
-      if (request_type === 'office_supplies') {
-        // Office supplies: Notify Finance Department Head specifically
-        const financeDept = await db.get(
-          "SELECT manager_id, head_email, name FROM departments WHERE LOWER(name) LIKE '%finance%'"
-        );
-        
-        let financeHeadId = financeDept?.manager_id;
-        
-        if (!financeHeadId && financeDept?.head_email) {
-          const financeHead = await db.get(
-            'SELECT id FROM users WHERE LOWER(TRIM(email)) = ?',
-            [financeDept.head_email.toLowerCase().trim()]
-          );
-          if (financeHead) financeHeadId = financeHead.id;
-        }
-        
-        if (financeHeadId) {
-          await sendNotificationToUser(financeHeadId, {
-            title: 'New Office Supplies Requisition for Approval',
-            message: `${userName} has submitted an office supplies requisition that requires your approval`,
-            link: `/requisitions/${result.lastID}`,
-            type: 'info',
-            senderId: req.user.id
-          });
-          console.log(`Notified Finance Department Head (ID: ${financeHeadId}) about office supplies requisition`);
-        } else {
-          // If no finance head found, notify Admin as fallback
-          await sendNotificationToRole('Admin', {
-            title: 'New Office Supplies Requisition (No Finance Head)',
-            message: `${userName} has submitted an office supplies requisition but no Finance Department Head was found`,
-            link: `/requisitions/${result.lastID}`,
-            type: 'warning',
-            senderId: req.user.id
-          });
-        }
-      } else if (['sick_leave', 'temporary_leave', 'annual_leave'].includes(request_type)) {
-        // Leave types: Notify Admin directly
+      // All requisitions (except work_support) now go directly to Admin - no department head approval
+      if (['office_supplies', 'sick_leave', 'temporary_leave', 'annual_leave'].includes(request_type)) {
+        // All non-work_support requisitions: Notify Admin directly (no department head approval)
         await sendNotificationToRole('Admin', {
-          title: 'New Leave Requisition for Approval',
+          title: 'New Requisition for Approval',
           message: `${userName} has submitted a ${request_type.replace('_', ' ')} requisition that requires your approval`,
           link: `/requisitions/${result.lastID}`,
           type: 'info',
@@ -545,16 +511,7 @@ router.post('/', authenticateToken, upload.single('document'), async (req, res) 
           type: 'info',
           senderId: req.user.id
         });
-      } else {
-        // Other types: Notify Admin
-        await sendNotificationToRole('Admin', {
-          title: 'New Requisition',
-          message: `${userName} has submitted a ${request_type.replace('_', ' ')} requisition`,
-          link: `/requisitions/${result.lastID}`,
-          type: 'info',
-          senderId: req.user.id
-        });
-      }
+    }
     } catch (notifError) {
       console.error('Error sending notifications:', notifError);
     }
@@ -671,8 +628,8 @@ router.put('/:id', authenticateToken, upload.single('document'), async (req, res
       }
     }
 
-    // Determine status (reset to initial status if updating - all go to Dept Head first)
-    const newStatus = 'Pending_DeptHead';
+    // Determine status (reset to initial status if updating - all go to Admin directly, no dept head approval)
+    const newStatus = request_type === 'work_support' ? 'Approved' : 'Pending_Admin';
 
     // Handle document upload
     let document_path = requisition.document_path;

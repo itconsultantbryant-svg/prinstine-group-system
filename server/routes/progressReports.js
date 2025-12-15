@@ -590,6 +590,7 @@ router.put('/:id', authenticateToken, requireRole('Admin', 'DepartmentHead', 'St
     }
     
     // Non-admin users can only edit if report is still pending approval
+    // Admin can edit any progress report regardless of status
     if (req.user.role !== 'Admin' && report.status !== 'Pending') {
       return res.status(403).json({ error: 'Cannot edit progress report that has been approved or rejected' });
     }
@@ -647,19 +648,25 @@ router.put('/:id', authenticateToken, requireRole('Admin', 'DepartmentHead', 'St
             );
 
             if (existingProgress) {
+              // Keep existing status when updating - don't change approval status just because report is edited
+              const existingProgressData = await db.get(
+                'SELECT status FROM target_progress WHERE progress_report_id = ?',
+                [req.params.id]
+              );
+              
               await db.run(
                 `UPDATE target_progress 
-                 SET amount = ?, category = ?, status = ?, transaction_date = ?, updated_at = CURRENT_TIMESTAMP
+                 SET amount = ?, category = ?, transaction_date = ?, updated_at = CURRENT_TIMESTAMP
                  WHERE progress_report_id = ?`,
                 [
                   updatedReport.amount || 0,
                   updatedReport.category,
-                  updatedReport.status,
                   updatedReport.date,
                   req.params.id
                 ]
               );
             } else {
+              // Create new progress entry with Pending status (needs admin approval)
               await db.run(
                 `INSERT INTO target_progress (target_id, user_id, progress_report_id, amount, category, status, transaction_date)
                  VALUES (?, ?, ?, ?, ?, ?, ?)`,
@@ -669,19 +676,36 @@ router.put('/:id', authenticateToken, requireRole('Admin', 'DepartmentHead', 'St
                   req.params.id,
                   updatedReport.amount || 0,
                   updatedReport.category,
-                  updatedReport.status,
+                  'Pending', // New entries start as Pending
                   updatedReport.date
                 ]
               );
             }
             
-            // Verify the total progress for this target
+            // Verify the total progress for this target (only Approved entries, same as GET /targets)
             const totalProgressCheck = await db.get(
-              'SELECT COALESCE(SUM(amount), 0) as total FROM target_progress WHERE target_id = ?',
+              `SELECT COALESCE(SUM(COALESCE(CAST(amount AS NUMERIC), CAST(progress_amount AS NUMERIC), 0)), 0) as total 
+               FROM target_progress 
+               WHERE CAST(target_id AS INTEGER) = CAST(? AS INTEGER)
+                 AND (status = 'Approved' OR status IS NULL)`,
               [target.id]
             );
-            console.log('Total progress for target', target.id, 'after update:', totalProgressCheck);
+            console.log('Total progress for target', target.id, 'after update (Approved entries only):', totalProgressCheck);
             
+            // Update admin target in database when staff/dept head target progress changes
+            try {
+              const { updateAdminTargetInDatabase } = require('./targets');
+              if (typeof updateAdminTargetInDatabase === 'function') {
+                const targetInfo = await db.get('SELECT period_start FROM targets WHERE id = ?', [target.id]);
+                if (targetInfo && targetInfo.period_start) {
+                  await updateAdminTargetInDatabase(targetInfo.period_start);
+                  console.log('Admin target updated after progress report edit');
+                }
+              }
+            } catch (adminUpdateError) {
+              console.error('Error updating admin target after progress report edit (non-fatal):', adminUpdateError);
+            }
+
             // Emit real-time update for target progress - emit to all users
             if (global.io) {
               global.io.emit('target_progress_updated', {
@@ -689,9 +713,17 @@ router.put('/:id', authenticateToken, requireRole('Admin', 'DepartmentHead', 'St
                 user_id: updatedReport.created_by,
                 amount: updatedReport.amount || 0,
                 progress_report_id: req.params.id,
-                total_progress: totalProgressCheck?.total || 0
+                total_progress: totalProgressCheck?.total || 0,
+                action: 'progress_updated'
               });
-              console.log('Emitted target_progress_updated event to all users');
+              
+              // Also emit target_updated to force a full refresh
+              global.io.emit('target_updated', {
+                id: target.id,
+                updated_by: req.user.name || 'Admin',
+                reason: 'progress_report_updated'
+              });
+              console.log('Emitted target_progress_updated and target_updated events to all users');
             }
           }
         }
@@ -904,9 +936,12 @@ router.put('/:id/approve', authenticateToken, requireRole('Admin'), [
               progress_report_id: verifyProgress?.progress_report_id
             });
             
-            // Verify the total progress for this target using the same query as GET /targets
+            // Verify the total progress for this target using the same query as GET /targets (only Approved entries)
             const totalProgressCheck = await db.get(
-              'SELECT COALESCE(SUM(amount), 0) as total, COUNT(*) as count FROM target_progress WHERE target_id = ?',
+              `SELECT COALESCE(SUM(COALESCE(CAST(amount AS NUMERIC), CAST(progress_amount AS NUMERIC), 0)), 0) as total, COUNT(*) as count 
+               FROM target_progress 
+               WHERE CAST(target_id AS INTEGER) = CAST(? AS INTEGER)
+                 AND (status = 'Approved' OR status IS NULL)`,
               [targetIdInt]
             );
             console.log('Total progress for target', targetIdInt, ':', {
@@ -916,14 +951,15 @@ router.put('/:id/approve', authenticateToken, requireRole('Admin'), [
               match: (totalProgressCheck?.total || 0) >= amountFloat
             });
             
-            // Also verify using the exact subquery from GET /targets
+            // Also verify using the exact subquery from GET /targets (only Approved entries)
             const subqueryCheck = await db.get(
-              `SELECT COALESCE(SUM(tp.amount), 0) as total_progress
+              `SELECT COALESCE(SUM(COALESCE(CAST(tp.amount AS NUMERIC), CAST(tp.progress_amount AS NUMERIC), 0)), 0) as total_progress
                FROM target_progress tp 
-               WHERE tp.target_id = ?`,
+               WHERE CAST(tp.target_id AS INTEGER) = CAST(? AS INTEGER)
+                 AND (tp.status = 'Approved' OR tp.status IS NULL)`,
               [targetIdInt]
             );
-            console.log('Subquery check (same as GET /targets):', {
+            console.log('Subquery check (same as GET /targets - only Approved entries):', {
               total_progress: subqueryCheck?.total_progress || 0,
               matches_direct_query: (subqueryCheck?.total_progress || 0) === (totalProgressCheck?.total || 0)
             });
@@ -969,7 +1005,7 @@ router.put('/:id/approve', authenticateToken, requireRole('Admin'), [
               console.log('Emitted target_updated event for target:', targetIdInt);
             }
           } else {
-            // Update existing progress record
+            // Update existing progress record - when progress report is approved, set status to Approved
             await db.run(
               `UPDATE target_progress 
                SET amount = ?, category = ?, status = ?, transaction_date = ?, updated_at = CURRENT_TIMESTAMP
@@ -977,7 +1013,7 @@ router.put('/:id/approve', authenticateToken, requireRole('Admin'), [
               [
                 parseFloat(report.amount),
                 report.category,
-                report.status,
+                status === 'Approved' ? 'Approved' : report.status, // Use 'Approved' status when report is approved
                 report.date,
                 req.params.id
               ]
@@ -985,9 +1021,12 @@ router.put('/:id/approve', authenticateToken, requireRole('Admin'), [
             
             console.log('Target progress updated successfully for progress report:', req.params.id);
             
-            // Verify the updated progress
+            // Verify the updated progress (only Approved entries, same as GET /targets)
             const totalProgressCheck = await db.get(
-              'SELECT COALESCE(SUM(amount), 0) as total FROM target_progress WHERE target_id = ?',
+              `SELECT COALESCE(SUM(COALESCE(CAST(amount AS NUMERIC), CAST(progress_amount AS NUMERIC), 0)), 0) as total 
+               FROM target_progress 
+               WHERE CAST(target_id AS INTEGER) = CAST(? AS INTEGER)
+                 AND (status = 'Approved' OR status IS NULL)`,
               [target.id]
             );
             console.log('Total progress after update for target', target.id, ':', totalProgressCheck?.total || 0);

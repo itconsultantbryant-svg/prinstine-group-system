@@ -125,21 +125,30 @@ const Targets = () => {
           fetchTargetProgress(selectedTarget.id);
         }
         
-        // Also refresh again after delay to ensure database commit
+        // Also refresh again after delays to ensure database commit and accurate calculations
         setTimeout(() => {
-          console.log('Second refresh after progress update (ensuring database commit)...');
+          console.log('Second refresh after progress update (500ms delay)...');
           fetchTargets();
           fetchSharingHistory();
           if (data.target_id && selectedTarget && selectedTarget.id === data.target_id) {
             fetchTargetProgress(selectedTarget.id);
           }
-        }, 1000); // 1 second delay for database commit
+        }, 500);
         
-        // Third refresh for safety
         setTimeout(() => {
-          console.log('Third refresh after progress update (final verification)...');
+          console.log('Third refresh after progress update (1500ms delay - ensuring database commit)...');
           fetchTargets();
-        }, 2000);
+          fetchSharingHistory();
+          if (data.target_id && selectedTarget && selectedTarget.id === data.target_id) {
+            fetchTargetProgress(selectedTarget.id);
+          }
+        }, 1500);
+        
+        // Fourth refresh for final verification
+        setTimeout(() => {
+          console.log('Fourth refresh after progress update (3000ms delay - final verification)...');
+          fetchTargets();
+        }, 3000);
       };
 
       const handleTargetDeleted = () => {
@@ -161,17 +170,26 @@ const Targets = () => {
       const handleProgressReportApproved = (data) => {
         console.log('Progress report approved event received:', data);
         // If this affects a target, refresh the targets list immediately and again after delay
-        if (data.user_id) {
+        if (data.user_id || data.amount) {
           console.log('Refreshing targets after progress report approval...');
           // Immediate refresh
           fetchTargets();
           fetchSharingHistory();
-          // Also refresh again after delay to ensure database commit
+          // Also refresh again after delays to ensure database commit and accurate calculations
           setTimeout(() => {
-            console.log('Second refresh after progress report approval (ensuring database commit)...');
+            console.log('Second refresh after progress report approval (500ms delay)...');
             fetchTargets();
             fetchSharingHistory();
-          }, 1200); // 1.2 second delay for database commit
+          }, 500);
+          setTimeout(() => {
+            console.log('Third refresh after progress report approval (1500ms delay - ensuring database commit)...');
+            fetchTargets();
+            fetchSharingHistory();
+          }, 1500);
+          setTimeout(() => {
+            console.log('Fourth refresh after progress report approval (3000ms delay - final verification)...');
+            fetchTargets();
+          }, 3000);
         }
       };
 

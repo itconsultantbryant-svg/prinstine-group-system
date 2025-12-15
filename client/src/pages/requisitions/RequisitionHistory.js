@@ -144,19 +144,14 @@ const RequisitionHistory = () => {
     }
 
     try {
-      const endpoint = user.role === 'DepartmentHead' 
-        ? `/requisitions/${requisitionId}/dept-head-review`
-        : `/requisitions/${requisitionId}/admin-review`;
+      // All approvals now go through admin-review endpoint (no department head approval)
+      const endpoint = `/requisitions/${requisitionId}/admin-review`;
       
-      const status = action === 'Approved' 
-        ? (user.role === 'DepartmentHead' ? 'DeptHead_Approved' : 'Admin_Approved')
-        : (user.role === 'DepartmentHead' ? 'DeptHead_Rejected' : 'Admin_Rejected');
-      
-      const notesField = user.role === 'DepartmentHead' ? 'dept_head_notes' : 'admin_notes';
+      const status = action === 'Approved' ? 'Admin_Approved' : 'Admin_Rejected';
       
       await api.put(endpoint, {
         status,
-        [notesField]: approvalNotes || null
+        admin_notes: approvalNotes || null
       });
       
       alert(`Requisition ${action.toLowerCase()} successfully`);
@@ -179,9 +174,6 @@ const RequisitionHistory = () => {
 
   const getStatusBadge = (status) => {
     const badges = {
-      'Pending_DeptHead': { color: 'warning', text: 'Pending Dept Head' },
-      'DeptHead_Approved': { color: 'info', text: 'Dept Head Approved' },
-      'DeptHead_Rejected': { color: 'danger', text: 'Dept Head Rejected' },
       'Pending_Admin': { color: 'warning', text: 'Pending Admin' },
       'Admin_Approved': { color: 'success', text: 'Approved' },
       'Admin_Rejected': { color: 'danger', text: 'Rejected' },
@@ -203,14 +195,10 @@ const RequisitionHistory = () => {
   };
 
   const canApprove = (requisition) => {
+    // Only Admin can approve requisitions (no department head approval)
+    // Work support is auto-approved, so it doesn't need approval
     if (user.role === 'Admin') {
       return requisition.status === 'Pending_Admin';
-    }
-    if (user.role === 'DepartmentHead') {
-      // Finance Department Head can approve office supplies requisitions
-      // Other department heads cannot approve (leave requests go directly to Admin)
-      const isOfficeSupplies = requisition.request_type === 'office_supplies';
-      return isOfficeSupplies && requisition.status === 'Pending_DeptHead';
     }
     return false;
   };
@@ -303,12 +291,10 @@ ${req.admin_notes ? `Admin Notes: ${req.admin_notes}` : ''}
                 onChange={(e) => setFilter({ ...filter, status: e.target.value })}
               >
                 <option value="">All Statuses</option>
-                <option value="Pending_DeptHead">Pending Dept Head</option>
-                <option value="DeptHead_Approved">Dept Head Approved</option>
-                <option value="DeptHead_Rejected">Dept Head Rejected</option>
                 <option value="Pending_Admin">Pending Admin</option>
                 <option value="Admin_Approved">Approved</option>
                 <option value="Admin_Rejected">Rejected</option>
+                <option value="Approved">Approved (Work Support)</option>
               </select>
             </div>
             <div className="col-md-2">
@@ -440,7 +426,7 @@ ${req.admin_notes ? `Admin Notes: ${req.admin_notes}` : ''}
                                 </button>
                               </>
                             )}
-                            {req.user_id === user.id && req.status === 'Pending_DeptHead' && (
+                            {req.user_id === user.id && req.status === 'Pending_Admin' && (
                               <button
                                 className="btn btn-sm btn-outline-warning"
                                 onClick={() => handleEdit(req)}
@@ -585,34 +571,6 @@ ${req.admin_notes ? `Admin Notes: ${req.admin_notes}` : ''}
                           </div>
                         </div>
                       </div>
-
-                      {/* Department Head Review */}
-                      {viewingRequisition.dept_head_reviewed_at && (
-                        <div className={`timeline-item mb-2 p-2 border-start border-3 ${
-                          viewingRequisition.status === 'DeptHead_Approved' || viewingRequisition.status === 'Pending_Admin' || viewingRequisition.status === 'Admin_Approved' || viewingRequisition.status === 'Approved'
-                            ? 'border-success'
-                            : 'border-danger'
-                        }`}>
-                          <div className="d-flex justify-content-between">
-                            <div>
-                              <strong className={viewingRequisition.status === 'DeptHead_Rejected' ? 'text-danger' : 'text-success'}>
-                                {viewingRequisition.status === 'DeptHead_Rejected' ? 'Rejected' : 'Approved'} by Department Head
-                              </strong>
-                              <div className="text-muted small">
-                                {viewingRequisition.dept_head_reviewer_name || 'Department Head'}
-                                {viewingRequisition.dept_head_notes && (
-                                  <div className="mt-1 p-2 bg-light rounded">
-                                    {viewingRequisition.dept_head_notes}
-                                  </div>
-                                )}
-                              </div>
-                            </div>
-                            <div className="text-muted small">
-                              {new Date(viewingRequisition.dept_head_reviewed_at).toLocaleString()}
-                            </div>
-                          </div>
-                        </div>
-                      )}
 
                       {/* Admin Review */}
                       {viewingRequisition.admin_reviewed_at && (

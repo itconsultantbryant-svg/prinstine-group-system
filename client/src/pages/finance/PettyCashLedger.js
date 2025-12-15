@@ -17,7 +17,9 @@ const PettyCashLedger = () => {
     month: new Date().getMonth() + 1,
     year: new Date().getFullYear(),
     starting_balance: 0,
-    petty_cash_custodian_id: ''
+    petty_cash_custodian_id: '',
+    date_from: new Date().toISOString().split('T')[0],
+    date_to: new Date(new Date().getFullYear(), new Date().getMonth() + 1, 0).toISOString().split('T')[0]
   });
   const [transactionData, setTransactionData] = useState({
     transaction_date: new Date().toISOString().split('T')[0],
@@ -120,7 +122,9 @@ const PettyCashLedger = () => {
         month: new Date().getMonth() + 1,
         year: new Date().getFullYear(),
         starting_balance: 0,
-        petty_cash_custodian_id: ''
+        petty_cash_custodian_id: '',
+        date_from: new Date().toISOString().split('T')[0],
+        date_to: new Date(new Date().getFullYear(), new Date().getMonth() + 1, 0).toISOString().split('T')[0]
       });
       fetchLedgers();
     } catch (error) {
@@ -405,6 +409,30 @@ const PettyCashLedger = () => {
                         </option>
                       ))}
                     </select>
+                  </div>
+                  <div className="row">
+                    <div className="col-md-6 mb-3">
+                      <label className="form-label">Period From Date *</label>
+                      <input 
+                        type="date" 
+                        className="form-control" 
+                        value={formData.date_from}
+                        onChange={(e) => setFormData({...formData, date_from: e.target.value})}
+                        required
+                      />
+                      <small className="form-text text-muted">Start date for this ledger period</small>
+                    </div>
+                    <div className="col-md-6 mb-3">
+                      <label className="form-label">Period To Date *</label>
+                      <input 
+                        type="date" 
+                        className="form-control" 
+                        value={formData.date_to}
+                        onChange={(e) => setFormData({...formData, date_to: e.target.value})}
+                        required
+                      />
+                      <small className="form-text text-muted">End date for this ledger period</small>
+                    </div>
                   </div>
                 </div>
                 <div className="modal-footer">

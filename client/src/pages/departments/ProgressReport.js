@@ -154,6 +154,48 @@ const ProgressReport = ({ onClose }) => {
     });
   };
 
+  const [editingReport, setEditingReport] = useState(null);
+  const [editFormData, setEditFormData] = useState({
+    name: '',
+    date: '',
+    category: '',
+    status: '',
+    amount: ''
+  });
+
+  const handleEditReport = (report) => {
+    setEditingReport(report);
+    setEditFormData({
+      name: report.name || '',
+      date: report.date ? new Date(report.date).toISOString().split('T')[0] : '',
+      category: report.category || '',
+      status: report.status || '',
+      amount: report.amount || ''
+    });
+  };
+
+  const handleSaveEdit = async () => {
+    if (!editingReport) return;
+    
+    try {
+      setError('');
+      setLoading(true);
+      await api.put(`/progress-reports/${editingReport.id}`, editFormData);
+      
+      // Refresh reports after edit
+      await fetchReports();
+      setEditingReport(null);
+      
+      // Show success message
+      alert('Progress report updated successfully. Target progress has been updated in real-time.');
+    } catch (err) {
+      console.error('Error editing report:', err);
+      setError(err.response?.data?.error || 'Failed to update progress report');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleApproveReport = async (reportId, status) => {
     if (!window.confirm(`Are you sure you want to ${status.toLowerCase()} this progress report?`)) {
       return;
@@ -421,21 +463,32 @@ const ProgressReport = ({ onClose }) => {
                         </td>
                         <td>
                           <div className="btn-group" role="group">
-                            {user?.role === 'Admin' && report.status === 'Pending' && (
+                            {user?.role === 'Admin' && (
                               <>
+                                {report.status === 'Pending' && (
+                                  <>
+                                    <button
+                                      className="btn btn-sm btn-success"
+                                      onClick={() => handleApproveReport(report.id, 'Approved')}
+                                      title="Approve"
+                                    >
+                                      <i className="bi bi-check-circle"></i>
+                                    </button>
+                                    <button
+                                      className="btn btn-sm btn-danger"
+                                      onClick={() => handleApproveReport(report.id, 'Rejected')}
+                                      title="Reject"
+                                    >
+                                      <i className="bi bi-x-circle"></i>
+                                    </button>
+                                  </>
+                                )}
                                 <button
-                                  className="btn btn-sm btn-success"
-                                  onClick={() => handleApproveReport(report.id, 'Approved')}
-                                  title="Approve"
+                                  className="btn btn-sm btn-outline-primary"
+                                  onClick={() => handleEditReport(report)}
+                                  title="Edit"
                                 >
-                                  <i className="bi bi-check-circle"></i>
-                                </button>
-                                <button
-                                  className="btn btn-sm btn-danger"
-                                  onClick={() => handleApproveReport(report.id, 'Rejected')}
-                                  title="Reject"
-                                >
-                                  <i className="bi bi-x-circle"></i>
+                                  <i className="bi bi-pencil"></i>
                                 </button>
                               </>
                             )}
@@ -483,6 +536,92 @@ const ProgressReport = ({ onClose }) => {
           </div>
         </div>
       </div>
+
+      {/* Edit Progress Report Modal */}
+      {editingReport && (
+        <div className="modal show d-block" tabIndex="-1" style={{ backgroundColor: 'rgba(0,0,0,0.5)', zIndex: 1051 }}>
+          <div className="modal-dialog">
+            <div className="modal-content">
+              <div className="modal-header">
+                <h5 className="modal-title">Edit Progress Report</h5>
+                <button type="button" className="btn-close" onClick={() => setEditingReport(null)}></button>
+              </div>
+              <div className="modal-body">
+                <div className="mb-3">
+                  <label className="form-label">Name *</label>
+                  <input
+                    type="text"
+                    className="form-control"
+                    value={editFormData.name}
+                    onChange={(e) => setEditFormData({ ...editFormData, name: e.target.value })}
+                    required
+                  />
+                </div>
+                <div className="mb-3">
+                  <label className="form-label">Date *</label>
+                  <input
+                    type="date"
+                    className="form-control"
+                    value={editFormData.date}
+                    onChange={(e) => setEditFormData({ ...editFormData, date: e.target.value })}
+                    required
+                  />
+                </div>
+                <div className="mb-3">
+                  <label className="form-label">Category *</label>
+                  <select
+                    className="form-select"
+                    value={editFormData.category}
+                    onChange={(e) => setEditFormData({ ...editFormData, category: e.target.value })}
+                    required
+                  >
+                    <option value="">Select Category</option>
+                    <option value="Student">Student</option>
+                    <option value="Client for Consultancy">Client for Consultancy</option>
+                    <option value="Client for Audit">Client for Audit</option>
+                    <option value="Others">Others</option>
+                  </select>
+                </div>
+                <div className="mb-3">
+                  <label className="form-label">Status *</label>
+                  <select
+                    className="form-select"
+                    value={editFormData.status}
+                    onChange={(e) => setEditFormData({ ...editFormData, status: e.target.value })}
+                    required
+                  >
+                    <option value="">Select Status</option>
+                    <option value="Signed Contract">Signed Contract</option>
+                    <option value="Pipeline Client">Pipeline Client</option>
+                    <option value="Submitted">Submitted</option>
+                  </select>
+                </div>
+                <div className="mb-3">
+                  <label className="form-label">Amount Paid</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    className="form-control"
+                    value={editFormData.amount}
+                    onChange={(e) => setEditFormData({ ...editFormData, amount: e.target.value })}
+                    placeholder="0.00"
+                  />
+                  <small className="text-muted">Editing this amount will update the target progress in real-time.</small>
+                </div>
+              </div>
+              <div className="modal-footer">
+                <button type="button" className="btn btn-secondary" onClick={() => setEditingReport(null)}>
+                  Cancel
+                </button>
+                <button type="button" className="btn btn-primary" onClick={handleSaveEdit} disabled={loading}>
+                  {loading ? 'Saving...' : 'Save Changes'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

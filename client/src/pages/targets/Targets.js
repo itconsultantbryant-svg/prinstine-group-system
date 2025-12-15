@@ -320,12 +320,21 @@ const Targets = () => {
       }));
       setTargets(updatedTargets);
     } catch (err) {
-      console.error('Error fetching targets:', err);
-      console.error('Error response status:', err.response?.status);
-      console.error('Error response data:', err.response?.data);
-      const errorMessage = err.response?.data?.error || err.response?.data?.details || 'Failed to load targets';
-      setError(errorMessage);
-      setTargets([]);
+      // Only log/show error if it's not a 404 or network error
+      if (err.response?.status === 404) {
+        console.warn('Targets endpoint not found (404) - this may be a temporary issue');
+        setTargets([]);
+      } else if (err.code === 'ERR_NETWORK' || err.code === 'ERR_INTERNET_DISCONNECTED' || err.message === 'Network Error') {
+        // Silently handle network errors - they'll be retried
+        console.warn('Network error fetching targets - will retry on next request');
+      } else {
+        console.error('Error fetching targets:', err);
+        console.error('Error response status:', err.response?.status);
+        console.error('Error response data:', err.response?.data);
+        const errorMessage = err.response?.data?.error || err.response?.data?.details || 'Failed to load targets';
+        setError(errorMessage);
+        setTargets([]);
+      }
     } finally {
       setLoading(false);
     }

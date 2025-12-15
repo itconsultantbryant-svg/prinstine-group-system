@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useAuth } from '../hooks/useAuth';
 import api from '../config/api';
 import { getSocket } from '../config/socket';
+import { normalizeUrl } from '../utils/apiUrl';
 
 const Profile = () => {
   const { user, updateUser } = useAuth();

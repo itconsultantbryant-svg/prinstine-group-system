@@ -3,6 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import api from '../../config/api';
 import { getSocket } from '../../config/socket';
 import { useAuth } from '../../hooks/useAuth';
+import { normalizeUrl } from '../../utils/apiUrl';
 
 const ClientView = () => {
   const { id } = useParams();
@@ -113,7 +114,7 @@ const ClientView = () => {
             <div className="card-body text-center">
               {client.profile_image && client.profile_image.trim() !== '' ? (
                 <img 
-                  src={client.profile_image.startsWith('http') ? client.profile_image : `http://localhost:3002${client.profile_image}`}
+                  src={client.profile_image.startsWith('http') ? client.profile_image : normalizeUrl(client.profile_image)}
                   alt={client.name} 
                   className="img-fluid rounded-circle mb-3"
                   style={{ width: '150px', height: '150px', objectFit: 'cover' }}

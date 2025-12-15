@@ -1356,24 +1356,25 @@ router.put('/progress/:id/approve', authenticateToken, requireRole('Admin'), [
       // Continue without updated_at
     }
     
-    // Update the status
+    // Update the status - ensure it's stored as 'Approved' or 'Rejected' (capitalized)
+    const normalizedStatus = status.charAt(0).toUpperCase() + status.slice(1).toLowerCase();
     if (hasUpdatedAt) {
       await db.run(
         `UPDATE target_progress 
          SET status = ?, updated_at = CURRENT_TIMESTAMP
          WHERE id = ?`,
-        [status, req.params.id]
+        [normalizedStatus, req.params.id]
       );
     } else {
       await db.run(
         `UPDATE target_progress 
          SET status = ?
          WHERE id = ?`,
-        [status, req.params.id]
+        [normalizedStatus, req.params.id]
       );
     }
 
-    console.log(`Target progress entry ${req.params.id} status updated to: ${status}`);
+    console.log(`Target progress entry ${req.params.id} status updated to: ${normalizedStatus}`);
 
     // Verify the update was successful
     const verifyUpdate = await db.get(

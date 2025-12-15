@@ -226,7 +226,7 @@ const ProposalForm = ({ proposal, onClose }) => {
                 <input
                   type="file"
                   className="form-control"
-                  accept=".pdf,.doc,.docx,.xls,.xlsx,.txt"
+                  accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt"
                   onChange={handleFileChange}
                   required={!proposal}
                 />

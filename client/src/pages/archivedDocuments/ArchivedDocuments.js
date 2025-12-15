@@ -202,6 +202,7 @@ const ArchivedDocuments = () => {
     if (fileType.includes('pdf')) return 'bi-file-pdf';
     if (fileType.includes('doc')) return 'bi-file-word';
     if (fileType.includes('xls')) return 'bi-file-excel';
+    if (fileType.includes('ppt')) return 'bi-file-slides';
     if (fileType.includes('image') || fileType.includes('jpg') || fileType.includes('png')) return 'bi-file-image';
     return 'bi-file-earmark';
   };

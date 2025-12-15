@@ -28,13 +28,28 @@ const Profile = () => {
   const [passwordError, setPasswordError] = useState('');
   const [showPasswordForm, setShowPasswordForm] = useState(false);
 
+  // Helper function to normalize image URL
+  const normalizeImageUrl = (url) => {
+    if (!url) return '';
+    // If already a full URL, return as is
+    if (url.startsWith('http://') || url.startsWith('https://')) {
+      return url;
+    }
+    // If relative URL, prepend base URL
+    const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:3006/api';
+    const baseUrl = API_BASE_URL.replace('/api', '');
+    // Ensure URL starts with /
+    const relativeUrl = url.startsWith('/') ? url : `/${url}`;
+    return `${baseUrl}${relativeUrl}`;
+  };
+
   useEffect(() => {
     if (user) {
       setFormData({
         name: user.name || '',
         email: user.email || '',
         phone: user.phone || '',
-        profile_image: user.profile_image || ''
+        profile_image: normalizeImageUrl(user.profile_image || '')
       });
     }
   }, [user]);
@@ -104,7 +119,27 @@ const Profile = () => {
       const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:3006/api';
       const baseUrl = API_BASE_URL.replace('/api', ''); // Remove /api to get base URL
       const fullImageUrl = imageUrl.startsWith('http') ? imageUrl : `${baseUrl}${imageUrl}`;
+      
+      // Update form data with the new image URL
       setFormData(prev => ({ ...prev, profile_image: fullImageUrl }));
+      
+      // Immediately save to profile so it persists
+      try {
+        await api.put('/auth/profile', {
+          profile_image: fullImageUrl
+        });
+        // Update user context
+        if (user) {
+          updateUser({
+            ...user,
+            profile_image: fullImageUrl
+          });
+        }
+      } catch (saveError) {
+        console.error('Error saving profile image:', saveError);
+        // Don't show error - image is uploaded, just saving failed
+      }
+      
       setMessage('Image uploaded successfully');
     } catch (err) {
       setError('Failed to upload image: ' + (err.response?.data?.error || err.message));
@@ -258,13 +293,23 @@ const Profile = () => {
                 <div className="position-relative d-inline-block">
                   {formData.profile_image ? (
                     <img
+                      key={formData.profile_image} // Force re-render when URL changes
                       src={formData.profile_image}
-                      alt={formData.name}
+                      alt={formData.name || 'Profile'}
                       className="img-fluid rounded-circle"
-                      style={{ width: '150px', height: '150px', objectFit: 'cover', border: '4px solid #dee2e6' }}
+                      style={{ width: '150px', height: '150px', objectFit: 'cover', border: '4px solid #dee2e6', display: 'block' }}
                       onError={(e) => {
+                        console.error('Profile image failed to load:', formData.profile_image);
                         e.target.style.display = 'none';
-                        e.target.nextSibling.style.display = 'block';
+                        if (e.target.nextSibling) {
+                          e.target.nextSibling.style.display = 'flex';
+                        }
+                      }}
+                      onLoad={(e) => {
+                        // Hide placeholder when image loads successfully
+                        if (e.target.nextSibling) {
+                          e.target.nextSibling.style.display = 'none';
+                        }
                       }}
                     />
                   ) : null}
@@ -274,7 +319,10 @@ const Profile = () => {
                       width: '150px',
                       height: '150px',
                       display: formData.profile_image ? 'none' : 'flex',
-                      border: '4px solid #dee2e6'
+                      border: '4px solid #dee2e6',
+                      position: formData.profile_image ? 'absolute' : 'relative',
+                      top: formData.profile_image ? '0' : 'auto',
+                      left: formData.profile_image ? '0' : 'auto'
                     }}
                   >
                     <i className="bi bi-person" style={{ fontSize: '5rem', color: 'white' }}></i>

@@ -285,10 +285,27 @@ const TopBar = () => {
               }}
             >
               {user.profile_image ? (
-                <img src={user.profile_image} alt={user.name} className="topbar-avatar" />
-              ) : (
-                <i className="bi bi-person-circle"></i>
-              )}
+                <img 
+                  src={user.profile_image} 
+                  alt={user.name || 'User'} 
+                  className="topbar-avatar"
+                  onError={(e) => {
+                    // Hide image and show icon if image fails to load
+                    e.target.style.display = 'none';
+                    const icon = e.target.nextSibling;
+                    if (icon) icon.style.display = 'inline-block';
+                  }}
+                  onLoad={(e) => {
+                    // Hide icon when image loads successfully
+                    const icon = e.target.nextSibling;
+                    if (icon) icon.style.display = 'none';
+                  }}
+                />
+              ) : null}
+              <i 
+                className="bi bi-person-circle" 
+                style={{ display: user.profile_image ? 'none' : 'inline-block' }}
+              ></i>
               <span className="ms-2">{user.name || 'User'}</span>
               <i className="bi bi-chevron-down ms-2"></i>
             </button>

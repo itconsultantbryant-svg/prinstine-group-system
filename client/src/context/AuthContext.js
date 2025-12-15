@@ -35,8 +35,29 @@ export const AuthProvider = ({ children }) => {
             clearTimeout(timeoutId);
             if (isMounted && response.data?.user) {
               const userData = response.data.user;
-              setUser(userData);
-              localStorage.setItem('user', JSON.stringify(userData));
+              
+              // Normalize profile_image URL if it exists
+              const normalizeImageUrl = (url) => {
+                if (!url) return '';
+                // If already a full URL, return as is
+                if (url.startsWith('http://') || url.startsWith('https://')) {
+                  return url;
+                }
+                // If relative URL, prepend base URL
+                const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:3006/api';
+                const baseUrl = API_BASE_URL.replace('/api', '');
+                // Ensure URL starts with /
+                const relativeUrl = url.startsWith('/') ? url : `/${url}`;
+                return `${baseUrl}${relativeUrl}`;
+              };
+              
+              const normalizedUserData = {
+                ...userData,
+                profile_image: normalizeImageUrl(userData.profile_image)
+              };
+              
+              setUser(normalizedUserData);
+              localStorage.setItem('user', JSON.stringify(normalizedUserData));
               // Initialize WebSocket connection
               try {
                 initSocket(userData.id);
@@ -118,10 +139,30 @@ export const AuthProvider = ({ children }) => {
         };
       }
       
+      // Normalize profile_image URL if it exists
+      const normalizeImageUrl = (url) => {
+        if (!url) return '';
+        // If already a full URL, return as is
+        if (url.startsWith('http://') || url.startsWith('https://')) {
+          return url;
+        }
+        // If relative URL, prepend base URL
+        const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:3006/api';
+        const baseUrl = API_BASE_URL.replace('/api', '');
+        // Ensure URL starts with /
+        const relativeUrl = url.startsWith('/') ? url : `/${url}`;
+        return `${baseUrl}${relativeUrl}`;
+      };
+      
+      const normalizedUser = {
+        ...user,
+        profile_image: normalizeImageUrl(user.profile_image)
+      };
+      
       console.log('Storing token and user data...');
       localStorage.setItem('token', token);
-      localStorage.setItem('user', JSON.stringify(user));
-      setUser(user);
+      localStorage.setItem('user', JSON.stringify(normalizedUser));
+      setUser(normalizedUser);
       
       // Initialize WebSocket connection asynchronously (don't block login)
       try {

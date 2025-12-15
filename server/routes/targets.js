@@ -494,7 +494,7 @@ router.get('/:id', authenticateToken, async (req, res) => {
              (SELECT COALESCE(SUM(COALESCE(tp.amount, tp.progress_amount, 0)), 0) 
               FROM target_progress tp 
               WHERE tp.target_id = t.id
-                AND (UPPER(TRIM(COALESCE(tp.status, ''))) = 'APPROVED' OR tp.status IS NULL)) as total_progress,
+                AND (tp.status = 'Approved' OR tp.status IS NULL OR tp.status = '')) as total_progress,
              (SELECT COALESCE(SUM(CASE WHEN fs.status = 'Active' THEN fs.amount ELSE 0 END), 0)
               FROM fund_sharing fs
               WHERE fs.from_user_id = t.user_id) as shared_out,
@@ -727,7 +727,7 @@ router.post('/', authenticateToken, requireRole('Admin'), [
              (SELECT COALESCE(SUM(COALESCE(tp.amount, tp.progress_amount, 0)), 0) 
               FROM target_progress tp 
               WHERE tp.target_id = t.id
-                AND (UPPER(TRIM(COALESCE(tp.status, ''))) = 'APPROVED' OR tp.status IS NULL)) as total_progress,
+                AND (tp.status = 'Approved' OR tp.status IS NULL OR tp.status = '')) as total_progress,
              (SELECT COALESCE(SUM(CASE WHEN fs.status = 'Active' THEN fs.amount ELSE 0 END), 0)
               FROM fund_sharing fs
               WHERE fs.from_user_id = t.user_id) as shared_out,
@@ -879,7 +879,7 @@ router.put('/:id', authenticateToken, requireRole('Admin'), [
              (SELECT COALESCE(SUM(COALESCE(tp.amount, tp.progress_amount, 0)), 0) 
               FROM target_progress tp 
               WHERE tp.target_id = t.id
-                AND (UPPER(TRIM(COALESCE(tp.status, ''))) = 'APPROVED' OR tp.status IS NULL)) as total_progress,
+                AND (tp.status = 'Approved' OR tp.status IS NULL OR tp.status = '')) as total_progress,
              (SELECT COALESCE(SUM(CASE WHEN fs.status = 'Active' THEN fs.amount ELSE 0 END), 0)
               FROM fund_sharing fs
               WHERE fs.from_user_id = t.user_id) as shared_out,

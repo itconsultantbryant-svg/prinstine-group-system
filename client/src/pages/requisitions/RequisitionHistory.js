@@ -189,12 +189,13 @@ const RequisitionHistory = () => {
 
   const canApprove = (requisition) => {
     if (user.role === 'Admin') {
-      return requisition.status === 'Pending_Admin' || 
-             (requisition.status === 'Pending_DeptHead' && !['sick_leave', 'temporary_leave', 'vacation', 'annual_leave'].includes(requisition.request_type));
+      return requisition.status === 'Pending_Admin';
     }
     if (user.role === 'DepartmentHead') {
-      const isLeaveRequest = ['sick_leave', 'temporary_leave', 'vacation', 'annual_leave'].includes(requisition.request_type);
-      return isLeaveRequest && requisition.status === 'Pending_DeptHead';
+      // Finance Department Head can approve office supplies requisitions
+      // Other department heads cannot approve (leave requests go directly to Admin)
+      const isOfficeSupplies = requisition.request_type === 'office_supplies';
+      return isOfficeSupplies && requisition.status === 'Pending_DeptHead';
     }
     return false;
   };

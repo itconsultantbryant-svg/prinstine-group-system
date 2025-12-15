@@ -91,17 +91,15 @@ router.get('/', authenticateToken, async (req, res) => {
       
       if (financeDept) {
         // Finance Department Head sees:
-        // 1. Office supplies requisitions pending their approval
+        // 1. ALL office supplies requisitions pending their approval (from any department)
         // 2. Office supplies they've approved/rejected
         query += ` AND r.request_type = ? 
-                    AND ((r.status = ? AND (r.department_id = ? OR LOWER(TRIM(r.department_name)) = ?))
+                    AND ((r.status = ?)
                          OR (r.status IN (?, ?, ?) AND r.dept_head_reviewed_by = ?)
                          OR (r.status = ? AND r.dept_head_reviewed_by = ?))`;
         params.push(
           'office_supplies',
           'Pending_DeptHead',
-          financeDept.id,
-          financeDept.name.toLowerCase().trim(),
           'Pending_Admin', 'Admin_Approved', 'Admin_Rejected',
           req.user.id,
           'DeptHead_Rejected',

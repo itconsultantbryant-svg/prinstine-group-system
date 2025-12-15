@@ -463,7 +463,7 @@ const Notifications = () => {
                                   <div className="btn-group btn-group-sm">
                                     <button
                                       className="btn btn-outline-info btn-sm"
-                                      onClick={() => window.open(att.url, '_blank')}
+                                      onClick={() => handleAttachmentAction(att, 'view')}
                                       title="View"
                                     >
                                       <i className="bi bi-eye"></i>

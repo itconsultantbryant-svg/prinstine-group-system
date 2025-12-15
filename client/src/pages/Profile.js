@@ -297,32 +297,45 @@ const Profile = () => {
                       src={formData.profile_image}
                       alt={formData.name || 'Profile'}
                       className="img-fluid rounded-circle"
-                      style={{ width: '150px', height: '150px', objectFit: 'cover', border: '4px solid #dee2e6', display: 'block' }}
+                      style={{ 
+                        width: '150px', 
+                        height: '150px', 
+                        objectFit: 'cover', 
+                        border: '4px solid #dee2e6', 
+                        display: 'block',
+                        position: 'relative',
+                        zIndex: 2
+                      }}
                       onError={(e) => {
                         console.error('Profile image failed to load:', formData.profile_image);
                         e.target.style.display = 'none';
-                        if (e.target.nextSibling) {
-                          e.target.nextSibling.style.display = 'flex';
+                        const placeholder = e.target.parentElement.querySelector('.profile-placeholder');
+                        if (placeholder) {
+                          placeholder.style.display = 'flex';
+                          placeholder.style.zIndex = '1';
                         }
                       }}
                       onLoad={(e) => {
                         // Hide placeholder when image loads successfully
-                        if (e.target.nextSibling) {
-                          e.target.nextSibling.style.display = 'none';
+                        const placeholder = e.target.parentElement.querySelector('.profile-placeholder');
+                        if (placeholder) {
+                          placeholder.style.display = 'none';
                         }
+                        e.target.style.zIndex = '2';
                       }}
                     />
                   ) : null}
                   <div
-                    className="bg-info rounded-circle d-inline-flex align-items-center justify-content-center"
+                    className="bg-info rounded-circle d-inline-flex align-items-center justify-content-center profile-placeholder"
                     style={{
                       width: '150px',
                       height: '150px',
                       display: formData.profile_image ? 'none' : 'flex',
                       border: '4px solid #dee2e6',
-                      position: formData.profile_image ? 'absolute' : 'relative',
-                      top: formData.profile_image ? '0' : 'auto',
-                      left: formData.profile_image ? '0' : 'auto'
+                      position: 'absolute',
+                      top: 0,
+                      left: 0,
+                      zIndex: formData.profile_image ? 1 : 2
                     }}
                   >
                     <i className="bi bi-person" style={{ fontSize: '5rem', color: 'white' }}></i>

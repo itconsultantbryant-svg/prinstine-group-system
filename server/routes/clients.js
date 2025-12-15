@@ -220,9 +220,35 @@ router.post('/', authenticateToken, requireRole('Admin', 'Staff', 'DepartmentHea
 
     await logAction(req.user.id, 'create_client', 'clients', result.lastID, { clientId, email }, req);
 
+    // Get the created client with full details
+    const createdClient = await db.get(`
+      SELECT c.*, u.name, u.email, u.phone, u.profile_image
+      FROM clients c
+      LEFT JOIN users u ON c.user_id = u.id
+      WHERE c.id = ?
+    `, [result.lastID]);
+
+    // Emit real-time update for new client
+    if (global.io) {
+      global.io.emit('client_created', {
+        id: result.lastID,
+        client_id: clientId,
+        name: name,
+        company_name: company_name || name,
+        email: email,
+        phone: phone,
+        category: category || null,
+        progress_status: progress_status || null,
+        status: status || 'Active',
+        created_by: req.user.id,
+        created_by_name: req.user.name || req.user.email
+      });
+      console.log('Emitted client_created event for client:', clientId);
+    }
+
     res.status(201).json({
       message: 'Client created successfully',
-      client: { id: result.lastID, client_id: clientId }
+      client: createdClient || { id: result.lastID, client_id: clientId }
     });
   } catch (error) {
     console.error('Create client error:', error);

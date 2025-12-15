@@ -25,9 +25,12 @@ const storage = multer.diskStorage({
 const fileFilter = (req, file, cb) => {
   const allowedTypes = /jpeg|jpg|png|gif|pdf|doc|docx|xls|xlsx|ppt|pptx|txt|csv|zip|rar/;
   const extname = allowedTypes.test(path.extname(file.originalname).toLowerCase());
-  const mimetype = /image\/(jpeg|jpg|png|gif)|application\/(pdf|msword|vnd\.openxmlformats-officedocument\.wordprocessingml\.document|vnd\.ms-excel|vnd\.openxmlformats-officedocument\.spreadsheetml\.sheet|vnd\.ms-powerpoint|vnd\.openxmlformats-officedocument\.presentationml\.presentation|zip|x-rar-compressed)|text\/(plain|csv)/.test(file.mimetype);
+  
+  // More flexible mimetype check - allow if extension matches OR mimetype matches
+  const mimetype = /image\/(jpeg|jpg|png|gif)|application\/(pdf|msword|vnd\.openxmlformats-officedocument\.wordprocessingml\.document|vnd\.ms-excel|vnd\.openxmlformats-officedocument\.spreadsheetml\.sheet|vnd\.ms-powerpoint|vnd\.openxmlformats-officedocument\.presentationml\.presentation|zip|x-rar-compressed|octet-stream)|text\/(plain|csv)/.test(file.mimetype);
 
-  if (mimetype && extname) {
+  // Accept if extension matches OR mimetype matches (some browsers send application/octet-stream)
+  if (extname || mimetype) {
     return cb(null, true);
   } else {
     cb(new Error('File type not allowed. Allowed types: Images (JPEG, PNG, GIF), Documents (PDF, DOC, DOCX, XLS, XLSX, PPT, PPTX, TXT, CSV), Archives (ZIP, RAR)'));

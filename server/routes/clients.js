@@ -228,18 +228,19 @@ router.post('/', authenticateToken, requireRole('Admin', 'Staff', 'DepartmentHea
       WHERE c.id = ?
     `, [result.lastID]);
 
-    // Emit real-time update for new client
-    if (global.io) {
+    // Emit real-time update for new client with full details
+    if (global.io && createdClient) {
       global.io.emit('client_created', {
-        id: result.lastID,
-        client_id: clientId,
-        name: name,
-        company_name: company_name || name,
-        email: email,
-        phone: phone,
-        category: category || null,
-        progress_status: progress_status || null,
-        status: status || 'Active',
+        id: createdClient.id || result.lastID,
+        client_id: createdClient.client_id || clientId,
+        name: createdClient.name || name,
+        company_name: createdClient.company_name || company_name || name,
+        email: createdClient.email || email,
+        phone: createdClient.phone || phone,
+        category: createdClient.category || category || null,
+        progress_status: createdClient.progress_status || progress_status || null,
+        status: createdClient.status || status || 'Active',
+        profile_image: createdClient.profile_image || null,
         created_by: req.user.id,
         created_by_name: req.user.name || req.user.email
       });

@@ -61,7 +61,6 @@ const UserForm = ({ user, onClose }) => {
 
       const imageUrl = response.data.imageUrl;
       // Use centralized URL utility for consistency
-      const { normalizeUrl } = require('../../utils/apiUrl');
       const fullImageUrl = imageUrl.startsWith('http') ? imageUrl : normalizeUrl(imageUrl);
       setFormData(prev => ({ ...prev, profile_image: fullImageUrl }));
     } catch (err) {

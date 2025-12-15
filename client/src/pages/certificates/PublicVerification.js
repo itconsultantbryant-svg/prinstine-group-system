@@ -45,20 +45,17 @@ const PublicVerification = () => {
 
   const handleDownload = async (format) => {
     try {
-      // Use centralized API URL utility
-      const baseUrl = getApiBaseUrl();
-      const downloadUrl = `${baseUrl}/certificates/public/${certificate.id}/download/${format}`;
-      
-      const response = await fetch(downloadUrl, {
-        method: 'GET',
+      // Use centralized API config for consistent error handling
+      const downloadUrl = `/certificates/public/${certificate.id}/download/${format}`;
+      const response = await api.get(downloadUrl, {
+        responseType: 'blob',
         headers: {
           'Accept': `image/${format}`
         }
       });
       
-      if (!response.ok) throw new Error('Download failed');
-      
-      const blob = await response.blob();
+      // response.data is already a Blob when responseType is 'blob'
+      const blob = response.data;
       const url = window.URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = url;

@@ -28,6 +28,8 @@ const ArchivedDocuments = () => {
 
   // Listen for real-time document updates
   useEffect(() => {
+    if (!user) return;
+
     const socket = getSocket();
     if (socket) {
       const handleDocumentUploaded = async (data) => {
@@ -54,7 +56,7 @@ const ArchivedDocuments = () => {
         socket.off('document_deleted', handleDocumentDeleted);
       };
     }
-  }, []);
+  }, [user]);
 
   const fetchDocuments = async () => {
     try {

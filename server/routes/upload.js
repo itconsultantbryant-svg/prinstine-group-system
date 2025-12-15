@@ -6,6 +6,7 @@ const uploadCommunications = require('../utils/uploadCommunications');
 const uploadReports = require('../utils/uploadReports');
 const { authenticateToken } = require('../utils/auth');
 const path = require('path');
+const fs = require('fs');
 
 // Upload profile image
 router.post('/profile-image', authenticateToken, upload.single('image'), (req, res) => {
@@ -144,6 +145,172 @@ router.post('/', uploadClaims.single('file'), (req, res) => {
       return res.status(400).json({ error: 'File size too large. Maximum size is 10MB.' });
     }
     res.status(500).json({ error: 'Failed to upload file' });
+  }
+});
+
+// Download file endpoint (authenticated)
+// This endpoint allows authenticated users to download files
+// Usage: /api/upload/download?path=/uploads/communications/filename.pdf
+router.get('/download', authenticateToken, (req, res) => {
+  try {
+    const filePath = req.query.path;
+    
+    if (!filePath) {
+      return res.status(400).json({ error: 'File path is required' });
+    }
+
+    // Security: Ensure path is within uploads directory
+    if (!filePath.startsWith('/uploads/')) {
+      return res.status(403).json({ error: 'Invalid file path' });
+    }
+
+    // Resolve the full file path
+    const fullPath = path.join(__dirname, '../..', filePath);
+    
+    // Additional security check - ensure it's within the project directory
+    const normalizedPath = path.normalize(fullPath);
+    const uploadsBaseDir = path.normalize(path.join(__dirname, '../../uploads'));
+    
+    if (!normalizedPath.startsWith(uploadsBaseDir)) {
+      return res.status(403).json({ error: 'Access denied' });
+    }
+
+    // Check if file exists
+    if (!fs.existsSync(normalizedPath)) {
+      return res.status(404).json({ error: 'File not found' });
+    }
+
+    // Get file stats
+    const stats = fs.statSync(normalizedPath);
+    if (!stats.isFile()) {
+      return res.status(400).json({ error: 'Path is not a file' });
+    }
+
+    // Determine content type based on file extension
+    const ext = path.extname(normalizedPath).toLowerCase();
+    const contentTypeMap = {
+      '.pdf': 'application/pdf',
+      '.doc': 'application/msword',
+      '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      '.xls': 'application/vnd.ms-excel',
+      '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      '.ppt': 'application/vnd.ms-powerpoint',
+      '.pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+      '.jpg': 'image/jpeg',
+      '.jpeg': 'image/jpeg',
+      '.png': 'image/png',
+      '.gif': 'image/gif',
+      '.txt': 'text/plain',
+      '.zip': 'application/zip',
+      '.rar': 'application/x-rar-compressed'
+    };
+
+    const contentType = contentTypeMap[ext] || 'application/octet-stream';
+    const filename = path.basename(normalizedPath);
+
+    // Set headers
+    res.setHeader('Content-Type', contentType);
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.setHeader('Content-Length', stats.size);
+
+    // Stream the file
+    const fileStream = fs.createReadStream(normalizedPath);
+    fileStream.pipe(res);
+
+    fileStream.on('error', (error) => {
+      console.error('File stream error:', error);
+      if (!res.headersSent) {
+        res.status(500).json({ error: 'Failed to read file' });
+      }
+    });
+
+  } catch (error) {
+    console.error('Download error:', error);
+    if (!res.headersSent) {
+      res.status(500).json({ error: 'Failed to download file' });
+    }
+  }
+});
+
+// View file endpoint (authenticated) - opens file in browser instead of downloading
+// Usage: /api/upload/view?path=/uploads/communications/filename.pdf
+router.get('/view', authenticateToken, (req, res) => {
+  try {
+    const filePath = req.query.path;
+    
+    if (!filePath) {
+      return res.status(400).json({ error: 'File path is required' });
+    }
+
+    // Security: Ensure path is within uploads directory
+    if (!filePath.startsWith('/uploads/')) {
+      return res.status(403).json({ error: 'Invalid file path' });
+    }
+
+    // Resolve the full file path
+    const fullPath = path.join(__dirname, '../..', filePath);
+    
+    // Additional security check - ensure it's within the project directory
+    const normalizedPath = path.normalize(fullPath);
+    const uploadsBaseDir = path.normalize(path.join(__dirname, '../../uploads'));
+    
+    if (!normalizedPath.startsWith(uploadsBaseDir)) {
+      return res.status(403).json({ error: 'Access denied' });
+    }
+
+    // Check if file exists
+    if (!fs.existsSync(normalizedPath)) {
+      return res.status(404).json({ error: 'File not found' });
+    }
+
+    // Get file stats
+    const stats = fs.statSync(normalizedPath);
+    if (!stats.isFile()) {
+      return res.status(400).json({ error: 'Path is not a file' });
+    }
+
+    // Determine content type based on file extension
+    const ext = path.extname(normalizedPath).toLowerCase();
+    const contentTypeMap = {
+      '.pdf': 'application/pdf',
+      '.doc': 'application/msword',
+      '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      '.xls': 'application/vnd.ms-excel',
+      '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      '.ppt': 'application/vnd.ms-powerpoint',
+      '.pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+      '.jpg': 'image/jpeg',
+      '.jpeg': 'image/jpeg',
+      '.png': 'image/png',
+      '.gif': 'image/gif',
+      '.txt': 'text/plain',
+      '.zip': 'application/zip',
+      '.rar': 'application/x-rar-compressed'
+    };
+
+    const contentType = contentTypeMap[ext] || 'application/octet-stream';
+
+    // Set headers for viewing (inline instead of attachment)
+    res.setHeader('Content-Type', contentType);
+    res.setHeader('Content-Disposition', `inline; filename="${path.basename(normalizedPath)}"`);
+    res.setHeader('Content-Length', stats.size);
+
+    // Stream the file
+    const fileStream = fs.createReadStream(normalizedPath);
+    fileStream.pipe(res);
+
+    fileStream.on('error', (error) => {
+      console.error('File stream error:', error);
+      if (!res.headersSent) {
+        res.status(500).json({ error: 'Failed to read file' });
+      }
+    });
+
+  } catch (error) {
+    console.error('View file error:', error);
+    if (!res.headersSent) {
+      res.status(500).json({ error: 'Failed to view file' });
+    }
   }
 });
 

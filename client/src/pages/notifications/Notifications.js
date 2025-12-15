@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import api from '../../config/api';
 import { useAuth } from '../../hooks/useAuth';
 import { initSocket, getSocket } from '../../config/socket';
+import { handleAttachmentAction } from '../../utils/documentUtils';
 
 const Notifications = () => {
   const { user } = useAuth();

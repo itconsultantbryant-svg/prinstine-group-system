@@ -718,47 +718,97 @@ const Communications = () => {
                                     <i className="bi bi-paperclip me-2"></i>
                                     {att.filename} ({formatFileSize(att.size)})
                                   </a>
-                                  <div className="btn-group btn-group-sm">
-                                    <button
-                                      className="btn btn-outline-info btn-sm"
-                                      onClick={() => window.open(att.url, '_blank')}
-                                      title="View"
-                                    >
-                                      <i className="bi bi-eye"></i>
-                                    </button>
-                                    <button
-                                      className="btn btn-outline-primary btn-sm"
-                                      onClick={() => {
-                                        const link = document.createElement('a');
-                                        link.href = att.url;
-                                        link.download = att.filename;
-                                        document.body.appendChild(link);
-                                        link.click();
-                                        document.body.removeChild(link);
-                                      }}
-                                      title="Download"
-                                    >
-                                      <i className="bi bi-download"></i>
-                                    </button>
-                                    <button
-                                      className="btn btn-outline-secondary btn-sm"
-                                      onClick={() => {
-                                        const printWindow = window.open(att.url, '_blank');
-                                        if (printWindow) {
-                                          printWindow.onload = () => {
-                                            setTimeout(() => {
-                                              printWindow.print();
-                                            }, 500);
-                                          };
-                                        } else {
-                                          alert('Please allow popups to print this document');
-                                        }
-                                      }}
-                                      title="Print"
-                                    >
-                                      <i className="bi bi-printer"></i>
-                                    </button>
-                                  </div>
+                            <div className="btn-group btn-group-sm">
+                              <button
+                                className="btn btn-outline-info btn-sm"
+                                onClick={() => {
+                                  // Extract path from URL
+                                  let filePath = att.url;
+                                  if (filePath.startsWith('http://') || filePath.startsWith('https://')) {
+                                    try {
+                                      const urlObj = new URL(filePath);
+                                      filePath = urlObj.pathname;
+                                    } catch (e) {
+                                      // Use as-is if URL parsing fails
+                                    }
+                                  }
+                                  const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:3006/api';
+                                  const url = `${API_BASE_URL}/upload/view?path=${encodeURIComponent(filePath)}`;
+                                  window.open(url, '_blank');
+                                }}
+                                title="View"
+                              >
+                                <i className="bi bi-eye"></i>
+                              </button>
+                              <button
+                                className="btn btn-outline-primary btn-sm"
+                                onClick={async () => {
+                                  try {
+                                    // Extract path from URL
+                                    let filePath = att.url;
+                                    if (filePath.startsWith('http://') || filePath.startsWith('https://')) {
+                                      try {
+                                        const urlObj = new URL(filePath);
+                                        filePath = urlObj.pathname;
+                                      } catch (e) {
+                                        // Use as-is if URL parsing fails
+                                      }
+                                    }
+                                    const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:3006/api';
+                                    const url = `${API_BASE_URL}/upload/download?path=${encodeURIComponent(filePath)}`;
+                                    
+                                    const response = await api.get(url, {
+                                      responseType: 'blob'
+                                    });
+                                    
+                                    const blobUrl = window.URL.createObjectURL(new Blob([response.data]));
+                                    const link = document.createElement('a');
+                                    link.href = blobUrl;
+                                    link.download = att.filename || 'document';
+                                    document.body.appendChild(link);
+                                    link.click();
+                                    document.body.removeChild(link);
+                                    window.URL.revokeObjectURL(blobUrl);
+                                  } catch (error) {
+                                    console.error('Download error:', error);
+                                    alert('Failed to download document. Please try again.');
+                                  }
+                                }}
+                                title="Download"
+                              >
+                                <i className="bi bi-download"></i>
+                              </button>
+                              <button
+                                className="btn btn-outline-secondary btn-sm"
+                                onClick={() => {
+                                  // Extract path from URL
+                                  let filePath = att.url;
+                                  if (filePath.startsWith('http://') || filePath.startsWith('https://')) {
+                                    try {
+                                      const urlObj = new URL(filePath);
+                                      filePath = urlObj.pathname;
+                                    } catch (e) {
+                                      // Use as-is if URL parsing fails
+                                    }
+                                  }
+                                  const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:3006/api';
+                                  const url = `${API_BASE_URL}/upload/view?path=${encodeURIComponent(filePath)}`;
+                                  const printWindow = window.open(url, '_blank');
+                                  if (printWindow) {
+                                    printWindow.onload = () => {
+                                      setTimeout(() => {
+                                        printWindow.print();
+                                      }, 1000);
+                                    };
+                                  } else {
+                                    alert('Please allow popups to print this document');
+                                  }
+                                }}
+                                title="Print"
+                              >
+                                <i className="bi bi-printer"></i>
+                              </button>
+                            </div>
                                 </div>
                               ))}
                             </div>

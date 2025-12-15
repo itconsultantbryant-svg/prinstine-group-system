@@ -2167,22 +2167,49 @@ app.use((err, req, res, next) => {
   }
 });
 
-// 404 handler
-app.use((req, res) => {
-  console.error('404 - Route not found:', req.method, req.path);
-  console.error('Available routes:', [
-    '/api/auth',
-    '/api/users',
-    '/api/departments',
-    '/api/notifications',
-    '/api/dashboard',
-    // Add other routes as needed
-  ]);
-  res.status(404).json({ 
-    error: 'Route not found',
-    path: req.path,
-    method: req.method
+// Serve static files from React app build directory (for production)
+const buildPath = path.join(__dirname, '../client/build');
+if (fs.existsSync(buildPath)) {
+  // Serve static files from build folder
+  app.use(express.static(buildPath));
+  
+  // Serve React app for all non-API routes (client-side routing)
+  app.get('*', (req, res, next) => {
+    // Skip API routes
+    if (req.path.startsWith('/api/')) {
+      return next();
+    }
+    // Skip uploads and other static routes
+    if (req.path.startsWith('/uploads/')) {
+      return next();
+    }
+    // Serve index.html for all other routes
+    res.sendFile(path.join(buildPath, 'index.html'));
   });
+}
+
+// 404 handler for API routes only
+app.use((req, res) => {
+  // Only handle API routes here - client routes should be handled above
+  if (req.path.startsWith('/api/')) {
+    console.error('404 - API Route not found:', req.method, req.path);
+    res.status(404).json({ 
+      error: 'Route not found',
+      path: req.path,
+      method: req.method
+    });
+  } else {
+    // For non-API routes, if we get here, serve index.html (fallback)
+    if (fs.existsSync(buildPath)) {
+      res.sendFile(path.join(buildPath, 'index.html'));
+    } else {
+      res.status(404).json({ 
+        error: 'Route not found',
+        path: req.path,
+        method: req.method
+      });
+    }
+  }
 });
 
 // Start server

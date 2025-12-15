@@ -116,7 +116,7 @@ const TopBar = () => {
           if ('Notification' in window && Notification.permission === 'granted') {
             new Notification(title, {
               body: message,
-              icon: '/logo192.png'
+              icon: '/prinstine-logo.png'
             });
           }
         };

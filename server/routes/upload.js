@@ -149,9 +149,11 @@ router.post('/', uploadClaims.single('file'), (req, res) => {
 });
 
 // Download file endpoint (authenticated)
-// This endpoint allows authenticated users to download files
+// This endpoint allows authenticated users to download files permanently stored on server
 // Usage: /api/upload/download?path=/uploads/communications/filename.pdf
 router.get('/download', authenticateToken, (req, res) => {
+  let fileStream = null;
+  
   try {
     const filePath = req.query.path;
     
@@ -177,11 +179,18 @@ router.get('/download', authenticateToken, (req, res) => {
 
     // Check if file exists
     if (!fs.existsSync(normalizedPath)) {
-      return res.status(404).json({ error: 'File not found' });
+      return res.status(404).json({ error: 'File not found. The file may have been deleted or moved.' });
     }
 
     // Get file stats
-    const stats = fs.statSync(normalizedPath);
+    let stats;
+    try {
+      stats = fs.statSync(normalizedPath);
+    } catch (statError) {
+      console.error('Error getting file stats:', statError);
+      return res.status(500).json({ error: 'Unable to access file' });
+    }
+    
     if (!stats.isFile()) {
       return res.status(400).json({ error: 'Path is not a file' });
     }
@@ -208,26 +217,56 @@ router.get('/download', authenticateToken, (req, res) => {
     const contentType = contentTypeMap[ext] || 'application/octet-stream';
     const filename = path.basename(normalizedPath);
 
-    // Set headers
+    // Set headers for permanent file download
     res.setHeader('Content-Type', contentType);
-    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(filename)}"`);
     res.setHeader('Content-Length', stats.size);
+    // Cache control for production - files should be downloadable but not cached by browser
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
 
-    // Stream the file
-    const fileStream = fs.createReadStream(normalizedPath);
-    fileStream.pipe(res);
-
-    fileStream.on('error', (error) => {
-      console.error('File stream error:', error);
+    // Stream the file - this ensures the file is served directly from disk
+    fileStream = fs.createReadStream(normalizedPath);
+    
+    // Handle stream errors
+    fileStream.on('error', (streamError) => {
+      console.error('File stream error:', streamError);
       if (!res.headersSent) {
-        res.status(500).json({ error: 'Failed to read file' });
+        res.status(500).json({ error: 'Failed to read file. The file may be corrupted or inaccessible.' });
+      } else {
+        // Headers already sent, can't send error response
+        res.end();
       }
     });
+    
+    // Handle client disconnect
+    req.on('close', () => {
+      if (fileStream && !fileStream.destroyed) {
+        fileStream.destroy();
+      }
+    });
+    
+    // Pipe file to response
+    fileStream.pipe(res);
 
   } catch (error) {
     console.error('Download error:', error);
+    
+    // Clean up file stream if it exists
+    if (fileStream && !fileStream.destroyed) {
+      fileStream.destroy();
+    }
+    
     if (!res.headersSent) {
-      res.status(500).json({ error: 'Failed to download file' });
+      // Provide specific error messages for common issues
+      if (error.code === 'ENOENT') {
+        res.status(404).json({ error: 'File not found' });
+      } else if (error.code === 'EACCES') {
+        res.status(403).json({ error: 'Access denied to file' });
+      } else {
+        res.status(500).json({ error: 'Failed to download file. Please try again.' });
+      }
     }
   }
 });

@@ -79,28 +79,73 @@ export const handleDownloadDocument = async (filePath, filename = null) => {
   try {
     const url = getAuthenticatedFileUrl(filePath, 'download');
     
-    // Use axios (api) which automatically includes auth token
-    const response = await api.get(url, {
-      responseType: 'blob'
-    });
-    
     // Extract filename from path if not provided
     if (!filename) {
       const pathParts = filePath.split('/');
       filename = pathParts[pathParts.length - 1] || 'document';
     }
     
-    // response.data is already a Blob when responseType is 'blob'
-    // Get content type from response headers (server sets this correctly)
-    const contentType = response.headers['content-type'] || response.headers['Content-Type'] || 'application/octet-stream';
+    // Method 1: Try using fetch with blob for better control and error handling
+    try {
+      const token = localStorage.getItem('token');
+      const response = await fetch(url, {
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
+      
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+      
+      // Get content type from response
+      const contentType = response.headers.get('content-type') || 'application/octet-stream';
+      const blob = await response.blob();
+      
+      // Create blob URL and trigger download
+      const blobUrl = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = blobUrl;
+      link.download = filename;
+      link.style.display = 'none';
+      
+      // Add to DOM, click, then remove
+      document.body.appendChild(link);
+      link.click();
+      
+      // Don't revoke immediately - wait longer to ensure download completes
+      // Blob URLs will be cleaned up when the page is closed
+      setTimeout(() => {
+        try {
+          document.body.removeChild(link);
+          // Only revoke after a longer delay to ensure download started
+          setTimeout(() => {
+            window.URL.revokeObjectURL(blobUrl);
+          }, 10000); // 10 seconds - plenty of time for download to start
+        } catch (e) {
+          // Link might already be removed, ignore
+        }
+      }, 1000); // Wait 1 second before attempting cleanup
+      
+      return; // Success, exit function
+    } catch (fetchError) {
+      console.warn('Fetch download method failed, trying axios fallback:', fetchError);
+      // Fall through to axios method
+    }
     
-    // Use the blob directly - axios already creates it with the correct type from response headers
-    // If we need to ensure the type, we can read it and recreate, but typically the server headers are correct
+    // Method 2: Fallback to axios (original method)
+    const response = await api.get(url, {
+      responseType: 'blob',
+      timeout: 60000 // 60 second timeout for large files
+    });
+    
+    // Get content type from response headers
+    const contentType = response.headers['content-type'] || response.headers['Content-Type'] || 'application/octet-stream';
     let blob = response.data;
     
-    // If blob type doesn't match content type from headers, recreate with correct type
+    // Ensure blob has correct type
     if (blob instanceof Blob && blob.type !== contentType && contentType !== 'application/octet-stream') {
-      // Read the blob data and recreate with correct type
       const arrayBuffer = await blob.arrayBuffer();
       blob = new Blob([arrayBuffer], { type: contentType });
     }
@@ -115,33 +160,59 @@ export const handleDownloadDocument = async (filePath, filename = null) => {
     document.body.appendChild(link);
     link.click();
     
-    // Clean up after a short delay to ensure download starts
+    // Don't revoke immediately - wait longer to ensure download completes
     setTimeout(() => {
-      document.body.removeChild(link);
-      window.URL.revokeObjectURL(blobUrl);
-    }, 100);
+      try {
+        document.body.removeChild(link);
+        // Only revoke after a longer delay
+        setTimeout(() => {
+          window.URL.revokeObjectURL(blobUrl);
+        }, 10000); // 10 seconds
+      } catch (e) {
+        // Link might already be removed, ignore
+      }
+    }, 1000); // Wait 1 second before attempting cleanup
+    
   } catch (error) {
     console.error('Download error:', error);
-    console.error('Error details:', error.response?.data || error.message);
-    console.error('Error response:', error.response);
     
     // Try to extract error message from blob response if available
-    let errorMessage = 'Failed to download document';
+    let errorMessage = 'Failed to download document. Please try again.';
+    
     if (error.response?.data instanceof Blob) {
       try {
         const text = await error.response.data.text();
         const json = JSON.parse(text);
         errorMessage = json.error || errorMessage;
       } catch (e) {
-        // If parsing fails, use default message
+        // If parsing fails, check status code
+        if (error.response?.status === 404) {
+          errorMessage = 'Document not found. It may have been deleted.';
+        } else if (error.response?.status === 403) {
+          errorMessage = 'You do not have permission to download this document.';
+        } else if (error.response?.status === 401) {
+          errorMessage = 'Your session has expired. Please log in again.';
+        }
       }
     } else if (error.response?.data?.error) {
       errorMessage = error.response.data.error;
     } else if (error.message) {
-      errorMessage = error.message;
+      if (error.message.includes('timeout')) {
+        errorMessage = 'Download timed out. The file may be too large. Please try again.';
+      } else if (error.message.includes('Network Error')) {
+        errorMessage = 'Network error. Please check your connection and try again.';
+      } else {
+        errorMessage = error.message;
+      }
     }
     
-    alert(`Failed to download document: ${errorMessage}`);
+    // For production: Show user-friendly error message
+    alert(errorMessage);
+    
+    // Also log full error for debugging (only in development)
+    if (process.env.NODE_ENV === 'development') {
+      console.error('Full error details:', error);
+    }
   }
 };
 

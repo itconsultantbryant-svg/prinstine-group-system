@@ -102,7 +102,8 @@ router.post('/send', authenticateToken, uploadCommunications.array('attachments'
     // Handle file attachments
     let attachments = [];
     if (req.files && req.files.length > 0) {
-      const baseUrl = process.env.API_BASE_URL || 'http://localhost:3006';
+      // Use production API base URL or construct from request
+      const baseUrl = process.env.API_BASE_URL || (req.protocol + '://' + req.get('host'));
       attachments = req.files.map(file => ({
         filename: file.originalname,
         url: `${baseUrl}/uploads/communications/${file.filename}`,
@@ -225,7 +226,8 @@ router.post('/:id/reply', authenticateToken, uploadCommunications.array('attachm
     // Handle file attachments
     let attachments = [];
     if (req.files && req.files.length > 0) {
-      const baseUrl = process.env.API_BASE_URL || 'http://localhost:3006';
+      // Use production API base URL or construct from request
+      const baseUrl = process.env.API_BASE_URL || (req.protocol + '://' + req.get('host'));
       attachments = req.files.map(file => ({
         filename: file.originalname,
         url: `${baseUrl}/uploads/communications/${file.filename}`,

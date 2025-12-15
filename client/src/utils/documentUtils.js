@@ -2,6 +2,7 @@
  * Utility functions for handling document URLs, downloads, and printing
  */
 import api from '../config/api';
+import { getApiBaseUrl, getBaseUrl, normalizeUrl } from './apiUrl';
 
 /**
  * Normalize document URL to ensure it's a full URL
@@ -9,20 +10,7 @@ import api from '../config/api';
  * @returns {string} Full URL to the document
  */
 export const normalizeDocumentUrl = (filePath) => {
-  if (!filePath) return '';
-  
-  // If already a full URL, return as is
-  if (filePath.startsWith('http://') || filePath.startsWith('https://')) {
-    return filePath;
-  }
-  
-  // If relative URL, prepend base URL
-  const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:3006/api';
-  const baseUrl = API_BASE_URL.replace('/api', '');
-  
-  // Ensure URL starts with /
-  const relativeUrl = filePath.startsWith('/') ? filePath : `/${filePath}`;
-  return `${baseUrl}${relativeUrl}`;
+  return normalizeUrl(filePath);
 };
 
 /**
@@ -53,7 +41,7 @@ export const getAuthenticatedFileUrl = (filePath, action = 'download') => {
   }
   
   // Use API endpoint for authenticated access
-  const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:3006/api';
+  const API_BASE_URL = getApiBaseUrl();
   const endpoint = action === 'view' ? '/upload/view' : '/upload/download';
   return `${API_BASE_URL}${endpoint}?path=${encodeURIComponent(pathToUse)}`;
 };

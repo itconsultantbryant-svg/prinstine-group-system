@@ -35,12 +35,8 @@ const Profile = () => {
     if (url.startsWith('http://') || url.startsWith('https://')) {
       return url;
     }
-    // If relative URL, prepend base URL
-    const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:3006/api';
-    const baseUrl = API_BASE_URL.replace('/api', '');
-    // Ensure URL starts with /
-    const relativeUrl = url.startsWith('/') ? url : `/${url}`;
-    return `${baseUrl}${relativeUrl}`;
+    // Use centralized URL utility
+    return normalizeUrl(url);
   };
 
   useEffect(() => {
@@ -128,9 +124,7 @@ const Profile = () => {
       const imageUrl = response.data.imageUrl;
       
       // Normalize image URL - ensure it's a full URL for display
-      const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:3006/api';
-      const baseUrl = API_BASE_URL.replace('/api', '');
-      const fullImageUrl = imageUrl.startsWith('http') ? imageUrl : `${baseUrl}${imageUrl}`;
+      const fullImageUrl = imageUrl.startsWith('http') ? imageUrl : normalizeUrl(imageUrl);
       
       // Update form data with the new image URL (normalized)
       setFormData(prev => ({ ...prev, profile_image: fullImageUrl }));

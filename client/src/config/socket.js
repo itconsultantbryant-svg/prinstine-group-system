@@ -1,10 +1,12 @@
 import { io } from 'socket.io-client';
+import { getBaseUrl } from '../utils/apiUrl';
 
 let socket = null;
 
 export const initSocket = (userId) => {
   if (!socket) {
-    socket = io(process.env.REACT_APP_API_URL?.replace('/api', '') || 'http://localhost:3006', {
+    const socketUrl = getBaseUrl() || 'http://localhost:3006';
+    socket = io(socketUrl, {
       transports: ['websocket', 'polling'],
       reconnection: true,
       reconnectionDelay: 1000,

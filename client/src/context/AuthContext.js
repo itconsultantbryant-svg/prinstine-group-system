@@ -1,6 +1,7 @@
 import React, { createContext, useState, useEffect } from 'react';
 import api from '../config/api';
 import { initSocket, disconnectSocket } from '../config/socket';
+import { normalizeUrl } from '../utils/apiUrl';
 
 export const AuthContext = createContext();
 
@@ -43,12 +44,8 @@ export const AuthProvider = ({ children }) => {
                 if (url.startsWith('http://') || url.startsWith('https://')) {
                   return url;
                 }
-                // If relative URL, prepend base URL
-                const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:3006/api';
-                const baseUrl = API_BASE_URL.replace('/api', '');
-                // Ensure URL starts with /
-                const relativeUrl = url.startsWith('/') ? url : `/${url}`;
-                return `${baseUrl}${relativeUrl}`;
+                // Use centralized URL utility
+                return normalizeUrl(url);
               };
               
               const normalizedUserData = {
@@ -146,12 +143,8 @@ export const AuthProvider = ({ children }) => {
         if (url.startsWith('http://') || url.startsWith('https://')) {
           return url;
         }
-        // If relative URL, prepend base URL
-        const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:3006/api';
-        const baseUrl = API_BASE_URL.replace('/api', '');
-        // Ensure URL starts with /
-        const relativeUrl = url.startsWith('/') ? url : `/${url}`;
-        return `${baseUrl}${relativeUrl}`;
+        // Use centralized URL utility
+        return normalizeUrl(url);
       };
       
       const normalizedUser = {

@@ -117,8 +117,8 @@ router.post('/communication', authenticateToken, uploadCommunications.single('fi
       return res.status(400).json({ error: 'No file uploaded' });
     }
 
-    // Return full URL for communication attachments
-    const baseUrl = process.env.API_BASE_URL || 'http://localhost:3006';
+    // Return full URL for communication attachments - use production URL
+    const baseUrl = process.env.API_BASE_URL || process.env.FRONTEND_URL || (req.protocol + '://' + req.get('host'));
     const fileUrl = `${baseUrl}/uploads/communications/${req.file.filename}`;
     
     console.log('Communication attachment uploaded:', {
@@ -153,8 +153,8 @@ router.post('/report', authenticateToken, uploadReports.single('file'), (req, re
       return res.status(400).json({ error: 'No file uploaded' });
     }
 
-    // Return full URL for report attachments
-    const baseUrl = process.env.API_BASE_URL || 'http://localhost:3006';
+    // Return full URL for report attachments - use production URL
+    const baseUrl = process.env.API_BASE_URL || process.env.FRONTEND_URL || (req.protocol + '://' + req.get('host'));
     const fileUrl = `${baseUrl}/uploads/reports/${req.file.filename}`;
     
     console.log('Report attachment uploaded:', {
@@ -192,8 +192,8 @@ router.post('/', uploadClaims.single('file'), (req, res) => {
       return res.status(400).json({ error: 'No file uploaded' });
     }
 
-    // Return full URL for claim attachments
-    const baseUrl = process.env.API_BASE_URL || 'http://localhost:3006';
+    // Return full URL for claim attachments - use production URL
+    const baseUrl = process.env.API_BASE_URL || process.env.FRONTEND_URL || (req.protocol + '://' + req.get('host'));
     const fileUrl = `${baseUrl}/uploads/claims/${req.file.filename}`;
     
     console.log('Claim attachment uploaded:', {

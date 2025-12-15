@@ -275,7 +275,9 @@ router.post('/forgot-password', [
       [resetToken, resetExpires.toISOString(), user.id]
     );
 
-    const resetUrl = `${process.env.FRONTEND_URL || 'http://localhost:3000'}/reset-password?token=${resetToken}`;
+    // Use production frontend URL or construct from request
+    const frontendUrl = process.env.FRONTEND_URL || (req.protocol + '://' + req.get('host').replace(/:\d+$/, ''));
+    const resetUrl = `${frontendUrl}/reset-password?token=${resetToken}`;
     await sendPasswordReset(email, resetToken, resetUrl);
 
     await logAction(user.id, 'password_reset_requested', 'auth', user.id, {}, req);

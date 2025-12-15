@@ -1025,11 +1025,12 @@ router.put('/:id/approve', authenticateToken, requireRole('Admin'), [
             console.log('Target progress updated successfully for progress report:', req.params.id);
             
             // Verify the updated progress (only Approved entries, same as GET /targets)
+            // Use case-insensitive comparison to match the GET /targets query
             const totalProgressCheck = await db.get(
               `SELECT COALESCE(SUM(COALESCE(CAST(amount AS NUMERIC), CAST(progress_amount AS NUMERIC), 0)), 0) as total 
                FROM target_progress 
                WHERE CAST(target_id AS INTEGER) = CAST(? AS INTEGER)
-                 AND (status = 'Approved' OR status IS NULL)`,
+                 AND (UPPER(TRIM(COALESCE(status, ''))) = 'APPROVED' OR status IS NULL)`,
               [target.id]
             );
             console.log('Total progress after update for target', target.id, ':', totalProgressCheck?.total || 0);

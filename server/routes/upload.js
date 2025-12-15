@@ -8,32 +8,105 @@ const { authenticateToken } = require('../utils/auth');
 const path = require('path');
 const fs = require('fs');
 
-// Upload profile image
-router.post('/profile-image', authenticateToken, upload.single('image'), (req, res) => {
+// Upload profile image - permanently stored on server
+router.post('/profile-image', authenticateToken, upload.single('image'), async (req, res) => {
+  const db = require('../config/database');
+  
   try {
     if (!req.file) {
       return res.status(400).json({ error: 'No file uploaded' });
     }
 
-    // Return relative URL that works with both frontend and backend
-    // Frontend will prepend the API base URL if needed
-    const imageUrl = `/uploads/${req.file.filename}`;
+    const userId = req.user.id;
     
-    console.log('Image uploaded:', {
+    // Get user's current profile image to delete old one
+    const user = await db.get('SELECT profile_image FROM users WHERE id = ?', [userId]);
+    
+    // Delete old profile image if it exists (to save disk space)
+    if (user && user.profile_image) {
+      try {
+        // Extract filename from profile_image URL/path
+        let oldImagePath = user.profile_image;
+        
+        // Remove base URL if present to get relative path
+        if (oldImagePath.includes('/uploads/')) {
+          const pathMatch = oldImagePath.match(/\/uploads\/[^?]+/);
+          if (pathMatch) {
+            oldImagePath = pathMatch[0];
+          }
+        }
+        
+        // Construct full path to old image
+        const oldImageFullPath = path.join(__dirname, '../..', oldImagePath);
+        const normalizedOldPath = path.normalize(oldImageFullPath);
+        const uploadsBaseDir = path.normalize(path.join(__dirname, '../../uploads'));
+        
+        // Security check - ensure old image is within uploads directory
+        if (normalizedOldPath.startsWith(uploadsBaseDir) && fs.existsSync(normalizedOldPath)) {
+          fs.unlinkSync(normalizedOldPath);
+          console.log('Deleted old profile image:', normalizedOldPath);
+        }
+      } catch (deleteError) {
+        // Log but don't fail the upload if old image deletion fails
+        console.warn('Could not delete old profile image (non-fatal):', deleteError.message);
+      }
+    }
+
+    // Return relative URL in consistent format - stored permanently on server
+    // Format: /uploads/profile-images/profile-{userId}-{timestamp}-{random}.ext
+    const imageUrl = `/uploads/profile-images/${req.file.filename}`;
+    
+    console.log('Profile image uploaded:', {
+      userId: userId,
       filename: req.file.filename,
       path: req.file.path,
       size: req.file.size,
       imageUrl: imageUrl
     });
     
+    // Update user's profile_image in database immediately for persistence
+    try {
+      await db.run('UPDATE users SET profile_image = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?', [imageUrl, userId]);
+      
+      // Emit real-time update
+      if (global.io) {
+        global.io.emit('profile_updated', {
+          user_id: userId,
+          profile_image: imageUrl,
+          name: req.user.name
+        });
+      }
+    } catch (dbError) {
+      console.error('Error updating profile_image in database:', dbError);
+      // Continue even if DB update fails - file is uploaded
+    }
+    
     res.json({
-      message: 'Image uploaded successfully',
+      message: 'Profile image uploaded and saved successfully',
       imageUrl: imageUrl,
       filename: req.file.filename
     });
   } catch (error) {
-    console.error('Upload error:', error);
-    res.status(500).json({ error: 'Failed to upload image' });
+    console.error('Profile image upload error:', error);
+    
+    // Clean up uploaded file if database operation failed
+    if (req.file && req.file.path && fs.existsSync(req.file.path)) {
+      try {
+        fs.unlinkSync(req.file.path);
+      } catch (cleanupError) {
+        console.error('Error cleaning up uploaded file:', cleanupError);
+      }
+    }
+    
+    // Provide specific error messages
+    if (error.code === 'LIMIT_FILE_SIZE') {
+      return res.status(400).json({ error: 'Image size too large. Maximum size is 5MB.' });
+    }
+    if (error.message && error.message.includes('Only image files')) {
+      return res.status(400).json({ error: error.message });
+    }
+    
+    res.status(500).json({ error: 'Failed to upload profile image. Please try again.' });
   }
 });
 

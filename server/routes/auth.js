@@ -214,15 +214,21 @@ router.put('/profile', authenticateToken, async (req, res) => {
       [userId]
     );
 
+    if (!updatedUser) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
     await logAction(userId, 'update_profile', 'users', userId, { name, phone, profile_image }, req);
 
-    // Emit real-time update for profile image change
-    if (global.io && profile_image !== undefined) {
+    // Emit real-time update for profile changes (including profile_image)
+    if (global.io) {
       global.io.emit('profile_updated', {
         user_id: userId,
         profile_image: updatedUser.profile_image,
-        name: updatedUser.name
+        name: updatedUser.name,
+        phone: updatedUser.phone
       });
+      console.log('Emitted profile_updated event for user:', userId);
     }
 
     res.json({
@@ -231,7 +237,19 @@ router.put('/profile', authenticateToken, async (req, res) => {
     });
   } catch (error) {
     console.error('Update profile error:', error);
-    res.status(500).json({ error: 'Failed to update profile' });
+    console.error('Error details:', {
+      message: error.message,
+      code: error.code,
+      stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
+    });
+    
+    // Provide specific error messages for production
+    let errorMessage = 'Failed to update profile. Please try again.';
+    if (error.message && error.message.includes('database')) {
+      errorMessage = 'Database error. Please contact support if this persists.';
+    }
+    
+    res.status(500).json({ error: errorMessage });
   }
 });
 

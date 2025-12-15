@@ -97,6 +97,13 @@ const Profile = () => {
     const file = e.target.files[0];
     if (!file) return;
 
+    // Validate file type
+    const allowedTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp'];
+    if (!allowedTypes.includes(file.type)) {
+      setError('Invalid file type. Please upload a JPEG, PNG, GIF, or WebP image.');
+      return;
+    }
+
     if (file.size > 5 * 1024 * 1024) {
       setError('Image size must be less than 5MB');
       return;
@@ -104,45 +111,76 @@ const Profile = () => {
 
     setUploadingImage(true);
     setError('');
+    setMessage('');
+    
     try {
       const formDataObj = new FormData();
       formDataObj.append('image', file);
 
+      // Upload image - backend now automatically saves to database and deletes old image
       const response = await api.post('/upload/profile-image', formDataObj, {
         headers: {
           'Content-Type': 'multipart/form-data'
-        }
+        },
+        timeout: 30000 // 30 second timeout for large images
       });
 
       const imageUrl = response.data.imageUrl;
-      // Use API base URL for relative paths
+      
+      // Normalize image URL - ensure it's a full URL for display
       const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:3006/api';
-      const baseUrl = API_BASE_URL.replace('/api', ''); // Remove /api to get base URL
+      const baseUrl = API_BASE_URL.replace('/api', '');
       const fullImageUrl = imageUrl.startsWith('http') ? imageUrl : `${baseUrl}${imageUrl}`;
       
-      // Update form data with the new image URL
+      // Update form data with the new image URL (normalized)
       setFormData(prev => ({ ...prev, profile_image: fullImageUrl }));
       
-      // Immediately save to profile so it persists
-      try {
-        await api.put('/auth/profile', {
+      // Update user context immediately for real-time UI update
+      if (user) {
+        updateUser({
+          ...user,
           profile_image: fullImageUrl
         });
-        // Update user context
-        if (user) {
-          updateUser({
-            ...user,
-            profile_image: fullImageUrl
-          });
-        }
-      } catch (saveError) {
-        console.error('Error saving profile image:', saveError);
-        // Don't show error - image is uploaded, just saving failed
       }
       
-      setMessage('Image uploaded successfully');
+      // Refresh user data from server to ensure consistency
+      try {
+        const meResponse = await api.get('/auth/me');
+        if (meResponse.data) {
+          const serverUser = meResponse.data;
+          const normalizedImageUrl = normalizeImageUrl(serverUser.profile_image || '');
+          updateUser({
+            ...serverUser,
+            profile_image: normalizedImageUrl
+          });
+          setFormData(prev => ({
+            ...prev,
+            profile_image: normalizedImageUrl
+          }));
+        }
+      } catch (refreshError) {
+        console.warn('Could not refresh user data (non-fatal):', refreshError);
+        // Continue - image is already uploaded and displayed
+      }
+      
+      setMessage('Profile image uploaded and saved successfully');
     } catch (err) {
-      setError('Failed to upload image: ' + (err.response?.data?.error || err.message));
+      console.error('Profile image upload error:', err);
+      
+      let errorMessage = 'Failed to upload image. Please try again.';
+      if (err.response?.data?.error) {
+        errorMessage = err.response.data.error;
+      } else if (err.message) {
+        if (err.message.includes('timeout')) {
+          errorMessage = 'Upload timed out. The image may be too large. Please try a smaller image.';
+        } else if (err.message.includes('Network Error')) {
+          errorMessage = 'Network error. Please check your connection and try again.';
+        } else {
+          errorMessage = err.message;
+        }
+      }
+      
+      setError(errorMessage);
     } finally {
       setUploadingImage(false);
     }

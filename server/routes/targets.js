@@ -192,11 +192,12 @@ router.get('/', authenticateToken, async (req, res) => {
 
     // Build safe subqueries that won't fail if tables don't exist
     // Only count approved progress entries (or NULL status for backward compatibility)
+    // Use simpler syntax that works in both SQLite and PostgreSQL
     const totalProgressSubquery = targetProgressExists
       ? `(SELECT COALESCE(SUM(COALESCE(CAST(tp.amount AS NUMERIC), CAST(tp.progress_amount AS NUMERIC), 0)), 0) 
           FROM target_progress tp 
-          WHERE CAST(tp.target_id AS INTEGER) = CAST(t.id AS INTEGER)
-            AND (UPPER(TRIM(COALESCE(tp.status, ''))) = 'APPROVED' OR tp.status IS NULL))`
+          WHERE tp.target_id = t.id
+            AND (tp.status = 'Approved' OR tp.status IS NULL OR tp.status = ''))`
       : 'CAST(0 AS NUMERIC)';
     
     // Note: Only Approved progress entries are counted in net_amount calculation

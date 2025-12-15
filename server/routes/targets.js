@@ -1802,15 +1802,35 @@ router.post('/recalculate-all', authenticateToken, requireRole('Admin'), async (
     for (const target of allTargets) {
       // Recalculate total_progress using the same query as GET /targets
       // Use case-insensitive comparison for status
+      // First, let's see ALL entries for this target for debugging
+      const allEntries = targetProgressExists
+        ? await db.all(
+            `SELECT id, amount, status, progress_amount, CAST(amount AS NUMERIC) as amount_num
+             FROM target_progress
+             WHERE CAST(target_id AS INTEGER) = CAST(? AS INTEGER)`,
+            [target.id]
+          )
+        : [];
+      
+      console.log(`Target ${target.id} - All progress entries:`, allEntries);
+      
       const totalProgressResult = targetProgressExists
         ? await db.get(
-            `SELECT COALESCE(SUM(COALESCE(CAST(amount AS NUMERIC), CAST(progress_amount AS NUMERIC), 0)), 0) as total
+            `SELECT 
+              COALESCE(SUM(COALESCE(CAST(amount AS NUMERIC), CAST(progress_amount AS NUMERIC), 0)), 0) as total,
+              COUNT(*) as count
              FROM target_progress
              WHERE CAST(target_id AS INTEGER) = CAST(? AS INTEGER)
                AND (UPPER(TRIM(COALESCE(status, ''))) = 'APPROVED' OR status IS NULL)`,
             [target.id]
           )
-        : { total: 0 };
+        : { total: 0, count: 0 };
+      
+      console.log(`Target ${target.id} - Approved entries summary:`, {
+        total: totalProgressResult?.total,
+        count: totalProgressResult?.count,
+        entries_checked: allEntries.length
+      });
       
       const totalProgress = parseFloat(totalProgressResult?.total || 0) || 0;
       

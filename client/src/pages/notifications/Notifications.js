@@ -402,39 +402,21 @@ const Notifications = () => {
                             <div className="btn-group btn-group-sm">
                               <button
                                 className="btn btn-outline-info btn-sm"
-                                onClick={() => window.open(att.url, '_blank')}
+                                onClick={() => handleAttachmentAction(att, 'view')}
                                 title="View"
                               >
                                 <i className="bi bi-eye"></i>
                               </button>
                               <button
                                 className="btn btn-outline-primary btn-sm"
-                                onClick={() => {
-                                  const link = document.createElement('a');
-                                  link.href = att.url;
-                                  link.download = att.filename;
-                                  document.body.appendChild(link);
-                                  link.click();
-                                  document.body.removeChild(link);
-                                }}
+                                onClick={() => handleAttachmentAction(att, 'download')}
                                 title="Download"
                               >
                                 <i className="bi bi-download"></i>
                               </button>
                               <button
                                 className="btn btn-outline-secondary btn-sm"
-                                onClick={() => {
-                                  const printWindow = window.open(att.url, '_blank');
-                                  if (printWindow) {
-                                    printWindow.onload = () => {
-                                      setTimeout(() => {
-                                        printWindow.print();
-                                      }, 500);
-                                    };
-                                  } else {
-                                    alert('Please allow popups to print this document');
-                                  }
-                                }}
+                                onClick={() => handleAttachmentAction(att, 'print')}
                                 title="Print"
                               >
                                 <i className="bi bi-printer"></i>

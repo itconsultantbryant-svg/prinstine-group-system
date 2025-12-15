@@ -249,16 +249,48 @@ export const AuthProvider = ({ children }) => {
         const handleProfileUpdate = (data) => {
           if (data.user_id === user.id) {
             console.log('Profile updated via socket in AuthContext:', data);
-            // Fetch updated user data
+            
+            // Normalize profile_image URL if it exists
+            const normalizeImageUrl = (url) => {
+              if (!url) return '';
+              if (url.startsWith('http://') || url.startsWith('https://')) {
+                return url;
+              }
+              const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:3006/api';
+              const baseUrl = API_BASE_URL.replace('/api', '');
+              const relativeUrl = url.startsWith('/') ? url : `/${url}`;
+              return `${baseUrl}${relativeUrl}`;
+            };
+            
+            // Fetch updated user data from server to ensure consistency
             api.get('/auth/me')
               .then(response => {
                 if (response.data?.user) {
                   const updatedUser = response.data.user;
+                  // Normalize profile_image URL
+                  const normalizedUser = {
+                    ...updatedUser,
+                    profile_image: normalizeImageUrl(updatedUser.profile_image || '')
+                  };
+                  setUser(normalizedUser);
+                  localStorage.setItem('user', JSON.stringify(normalizedUser));
+                }
+              })
+              .catch(err => {
+                console.error('Error fetching updated profile:', err);
+                // Fallback: update with socket data if API call fails
+                if (data.profile_image) {
+                  const normalizedImageUrl = normalizeImageUrl(data.profile_image);
+                  const updatedUser = {
+                    ...user,
+                    profile_image: normalizedImageUrl,
+                    name: data.name || user.name,
+                    phone: data.phone || user.phone
+                  };
                   setUser(updatedUser);
                   localStorage.setItem('user', JSON.stringify(updatedUser));
                 }
-              })
-              .catch(err => console.error('Error fetching updated profile:', err));
+              });
           }
         };
 

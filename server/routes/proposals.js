@@ -121,6 +121,101 @@ router.post('/', authenticateToken, upload.single('document'), async (req, res) 
     const user = await db.get('SELECT name FROM users WHERE id = ?', [req.user.id]);
     const created_by_name = user?.name || req.user.name || req.user.email;
 
+    // Auto-create client if client_id is not provided but client_name is
+    let finalClientId = client_id;
+    if (!client_id && client_name) {
+      try {
+        // Generate a temporary email for the client
+        const tempEmail = `${client_name.toLowerCase().replace(/[^a-z0-9]/g, '.')}@client.prinstinegroup.org`;
+        
+        // Check if client already exists by name
+        const existingClientByName = await db.get(`
+          SELECT c.id 
+          FROM clients c
+          LEFT JOIN users u ON c.user_id = u.id
+          WHERE u.name = ? OR c.company_name = ?
+          LIMIT 1
+        `, [client_name, client_name]);
+        
+        if (existingClientByName) {
+          finalClientId = existingClientByName.id;
+        } else {
+          // Create new client - generate client ID
+          const crypto = require('crypto');
+          const generateClientId = () => {
+            return 'CLT-' + Date.now().toString().slice(-8) + '-' + crypto.randomBytes(2).toString('hex').toUpperCase();
+          };
+          const clientId = generateClientId();
+          
+          // Check if user exists
+          let userId = null;
+          const existingUser = await db.get('SELECT id FROM users WHERE email = ?', [tempEmail]);
+          
+          if (!existingUser) {
+            const { hashPassword } = require('../utils/auth');
+            const passwordHash = await hashPassword('Client@123');
+            const userResult = await db.run(
+              `INSERT INTO users (email, username, password_hash, role, name, is_active, email_verified)
+               VALUES (?, ?, ?, ?, ?, 1, 1)`,
+              [tempEmail, tempEmail.split('@')[0], passwordHash, 'Client', client_name]
+            );
+            userId = userResult.lastID;
+          } else {
+            userId = existingUser.id;
+          }
+          
+          // Check columns in clients table
+          const clientsTableInfo = await db.all("PRAGMA table_info(clients)");
+          const clientsColumnNames = clientsTableInfo.map(col => col.name);
+          const hasCategory = clientsColumnNames.includes('category');
+          const hasProgressStatus = clientsColumnNames.includes('progress_status');
+          const hasCreatedBy = clientsColumnNames.includes('created_by');
+          
+          let insertColumns = ['user_id', 'client_id', 'company_name', 'status'];
+          let insertValues = [userId, clientId, client_name, 'Active'];
+          
+          if (hasCategory) {
+            insertColumns.push('category');
+            insertValues.push('others');
+          }
+          if (hasProgressStatus) {
+            insertColumns.push('progress_status');
+            insertValues.push('pipeline client');
+          }
+          if (hasCreatedBy) {
+            insertColumns.push('created_by');
+            insertValues.push(req.user.id);
+          }
+          
+          const placeholders = insertColumns.map(() => '?').join(', ');
+          const clientResult = await db.run(
+            `INSERT INTO clients (${insertColumns.join(', ')})
+             VALUES (${placeholders})`,
+            insertValues
+          );
+          
+          finalClientId = clientResult.lastID;
+          
+          // Emit client_created event
+          if (global.io) {
+            global.io.emit('client_created', {
+              id: finalClientId,
+              client_id: clientId,
+              name: client_name,
+              company_name: client_name,
+              email: tempEmail,
+              status: 'Active',
+              created_by: req.user.id,
+              created_by_name: created_by_name
+            });
+          }
+        }
+      } catch (clientError) {
+        console.error('Error auto-creating client from proposal:', clientError);
+        // Continue without client_id if creation fails
+      }
+    }
+
     // Determine initial status
     // If created by Admin, status is Pending_Admin (admin approves their own)
     // Otherwise, status is Pending_Marketing
@@ -133,9 +228,9 @@ router.post('/', authenticateToken, upload.single('document'), async (req, res) 
       INSERT INTO proposals (
         client_id, client_name, proposal_date, document_path, document_name,
         status, created_by, created_by_name
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      )       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     `, [
-      client_id || null, client_name, proposal_date, document_path, document_name,
+      finalClientId || null, client_name, proposal_date, document_path, document_name,
       initialStatus, req.user.id, created_by_name
     ]);
 

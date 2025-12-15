@@ -48,10 +48,20 @@ const ClientManagement = () => {
 
   const fetchClients = async () => {
     try {
+      setLoading(true);
       const response = await api.get('/clients');
-      setClients(response.data.clients);
+      console.log('Clients API response:', response.data);
+      if (response.data && response.data.clients) {
+        setClients(response.data.clients);
+      } else {
+        console.warn('Unexpected response format:', response.data);
+        setClients([]);
+      }
     } catch (error) {
       console.error('Error fetching clients:', error);
+      console.error('Error details:', error.response?.data || error.message);
+      setClients([]);
+      alert('Failed to load clients. Please refresh the page.');
     } finally {
       setLoading(false);
     }

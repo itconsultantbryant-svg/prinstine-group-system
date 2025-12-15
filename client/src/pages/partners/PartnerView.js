@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import api from '../../config/api';
+import { normalizeUrl } from '../../utils/apiUrl';
 
 const PartnerView = () => {
   const { id } = useParams();
@@ -76,7 +77,7 @@ const PartnerView = () => {
             <div className="card-body text-center">
               {partner.profile_image && partner.profile_image.trim() !== '' ? (
                 <img 
-                  src={partner.profile_image.startsWith('http') ? partner.profile_image : `http://localhost:3002${partner.profile_image}`}
+                  src={partner.profile_image.startsWith('http') ? partner.profile_image : normalizeUrl(partner.profile_image)}
                   alt={partner.company_name} 
                   className="img-fluid rounded-circle mb-3"
                   style={{ width: '150px', height: '150px', objectFit: 'cover' }}

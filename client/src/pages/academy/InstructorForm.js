@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import api from '../../config/api';
+import { normalizeUrl } from '../../utils/apiUrl';
 import { useAuth } from '../../hooks/useAuth';
 
 const InstructorForm = ({ instructor, courses, onClose }) => {
@@ -72,7 +73,7 @@ const InstructorForm = ({ instructor, courses, onClose }) => {
       // Construct full URL if needed
       const imageUrl = response.data.imageUrl;
       // If it's a relative URL, prepend the backend base URL
-      const fullImageUrl = imageUrl.startsWith('http') ? imageUrl : `http://localhost:3002${imageUrl}`;
+      const fullImageUrl = imageUrl.startsWith('http') ? imageUrl : normalizeUrl(imageUrl);
       setFormData(prev => ({ ...prev, profile_image: fullImageUrl }));
     } catch (err) {
       setError('Failed to upload image: ' + (err.response?.data?.error || err.message));

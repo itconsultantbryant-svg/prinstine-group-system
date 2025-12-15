@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import api from '../../config/api';
+import { normalizeUrl } from '../../utils/apiUrl';
 import PartnerForm from './PartnerForm';
 
 const PartnerManagement = () => {
@@ -100,7 +101,7 @@ const PartnerManagement = () => {
                       <td>
                         {partner.profile_image && partner.profile_image.trim() !== '' ? (
                           <img
-                            src={partner.profile_image.startsWith('http') ? partner.profile_image : `http://localhost:3002${partner.profile_image}`}
+                            src={partner.profile_image.startsWith('http') ? partner.profile_image : normalizeUrl(partner.profile_image)}
                             alt={partner.company_name}
                             className="rounded-circle"
                             style={{ width: '40px', height: '40px', objectFit: 'cover' }}

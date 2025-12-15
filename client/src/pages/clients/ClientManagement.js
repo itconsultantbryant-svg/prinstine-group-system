@@ -4,6 +4,7 @@ import api from '../../config/api';
 import ClientForm from './ClientForm';
 import { useAuth } from '../../hooks/useAuth';
 import { getSocket } from '../../config/socket';
+import { normalizeUrl } from '../../utils/apiUrl';
 
 const ClientManagement = () => {
   const { user } = useAuth();
@@ -192,7 +193,7 @@ const ClientManagement = () => {
                       <td>
                         {client.profile_image && client.profile_image.trim() !== '' ? (
                           <img
-                            src={client.profile_image.startsWith('http') ? client.profile_image : `http://localhost:3002${client.profile_image}`}
+                            src={client.profile_image.startsWith('http') ? client.profile_image : normalizeUrl(client.profile_image)}
                             alt={client.name}
                             className="rounded-circle"
                             style={{ width: '40px', height: '40px', objectFit: 'cover' }}

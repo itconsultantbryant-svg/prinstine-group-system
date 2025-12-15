@@ -4,6 +4,7 @@ import api from '../config/api';
 import { Link, Navigate, useNavigate } from 'react-router-dom';
 import ProgressReport from './departments/ProgressReport';
 import { getSocket } from '../config/socket';
+import { normalizeUrl } from '../utils/apiUrl';
 import {
   Chart as ChartJS,
   CategoryScale,
@@ -273,7 +274,7 @@ const Dashboard = () => {
                             <div className="d-flex align-items-center">
                               {result.profile_image && result.profile_image.trim() !== '' ? (
                                 <img
-                                  src={result.profile_image.startsWith('http') ? result.profile_image : `http://localhost:3002${result.profile_image}`}
+                                  src={result.profile_image.startsWith('http') ? result.profile_image : normalizeUrl(result.profile_image)}
                                   alt={result.name}
                                   className="rounded-circle me-3"
                                   style={{ width: '40px', height: '40px', objectFit: 'cover' }}

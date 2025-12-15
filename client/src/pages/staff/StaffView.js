@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import api from '../../config/api';
+import { normalizeUrl } from '../../utils/apiUrl';
 
 const StaffView = () => {
   const { id } = useParams();
@@ -76,7 +77,7 @@ const StaffView = () => {
             <div className="card-body text-center">
               {staff.profile_image && staff.profile_image.trim() !== '' ? (
                 <img 
-                  src={staff.profile_image.startsWith('http') ? staff.profile_image : `http://localhost:3002${staff.profile_image}`}
+                  src={staff.profile_image.startsWith('http') ? staff.profile_image : normalizeUrl(staff.profile_image)}
                   alt={staff.name} 
                   className="img-fluid rounded-circle mb-3"
                   style={{ width: '150px', height: '150px', objectFit: 'cover' }}

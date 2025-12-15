@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import api from '../../config/api';
+import { normalizeUrl } from '../../utils/apiUrl';
 
 const StaffForm = ({ staff, onClose }) => {
   const [formData, setFormData] = useState({
@@ -170,7 +171,7 @@ const StaffForm = ({ staff, onClose }) => {
                 <div className="position-relative d-inline-block">
                   {formData.profile_image && formData.profile_image.trim() !== '' ? (
                     <img
-                      src={formData.profile_image.startsWith('http') ? formData.profile_image : `http://localhost:3002${formData.profile_image}`}
+                      src={formData.profile_image.startsWith('http') ? formData.profile_image : normalizeUrl(formData.profile_image)}
                       alt={formData.name || 'Staff'}
                       className="img-fluid rounded-circle mb-2"
                       style={{ width: '100px', height: '100px', objectFit: 'cover', border: '3px solid #dee2e6' }}

@@ -1,5 +1,6 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
+import { normalizeUrl } from '../../utils/apiUrl';
 
 const StaffList = ({ staff, onEdit, onDelete }) => {
   return (
@@ -32,7 +33,7 @@ const StaffList = ({ staff, onEdit, onDelete }) => {
                     <td>
                       {member.profile_image && member.profile_image.trim() !== '' ? (
                         <img
-                          src={member.profile_image.startsWith('http') ? member.profile_image : `http://localhost:3002${member.profile_image}`}
+                          src={member.profile_image.startsWith('http') ? member.profile_image : normalizeUrl(member.profile_image)}
                           alt={member.name}
                           className="rounded-circle"
                           style={{ width: '40px', height: '40px', objectFit: 'cover' }}

@@ -46,7 +46,7 @@ const CertificateView = ({ certificate, onClose }) => {
 
   const getFileUrl = () => {
     if (certificate.file_path) {
-      return `http://localhost:3002${certificate.file_path}`;
+      return normalizeUrl(certificate.file_path);
     }
     return null;
   };

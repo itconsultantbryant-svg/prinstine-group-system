@@ -56,14 +56,14 @@ const PublicVerification = () => {
       
       // response.data is already a Blob when responseType is 'blob'
       const blob = response.data;
-      const url = window.URL.createObjectURL(blob);
+      const blobUrl = window.URL.createObjectURL(blob);
       const link = document.createElement('a');
-      link.href = url;
+      link.href = blobUrl;
       link.setAttribute('download', `certificate-${certificate.certificate_id}.${format}`);
       document.body.appendChild(link);
       link.click();
       link.remove();
-      window.URL.revokeObjectURL(url);
+      window.URL.revokeObjectURL(blobUrl);
     } catch (error) {
       console.error('Download error:', error);
       alert('Failed to download certificate. Please try again.');
@@ -89,7 +89,8 @@ const PublicVerification = () => {
 
   const getFileUrl = () => {
     if (certificate?.file_path) {
-      return `http://localhost:3002${certificate.file_path}`;
+      // Use centralized URL utility for production-ready URLs
+      return normalizeUrl(certificate.file_path);
     }
     return null;
   };

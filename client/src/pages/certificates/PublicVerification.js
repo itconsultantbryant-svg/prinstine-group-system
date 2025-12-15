@@ -45,10 +45,8 @@ const PublicVerification = () => {
 
   const handleDownload = async (format) => {
     try {
-      // Use the API base URL from environment or default
-      const apiBaseUrl = process.env.REACT_APP_API_URL || 'http://localhost:3006/api';
-      // Remove /api from the end if present, then add it back
-      const baseUrl = apiBaseUrl.endsWith('/api') ? apiBaseUrl : `${apiBaseUrl}/api`;
+      // Use centralized API URL utility
+      const baseUrl = getApiBaseUrl();
       const downloadUrl = `${baseUrl}/certificates/public/${certificate.id}/download/${format}`;
       
       const response = await fetch(downloadUrl, {

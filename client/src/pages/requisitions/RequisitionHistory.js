@@ -4,6 +4,7 @@ import { useAuth } from '../../hooks/useAuth';
 import RequisitionForm from './RequisitionForm';
 import { exportToPDF, exportToWord, printContent } from '../../utils/exportUtils';
 import { getSocket } from '../../config/socket';
+import { handleViewDocument, handleDownloadDocument, handlePrintDocument } from '../../utils/documentUtils';
 
 const RequisitionHistory = () => {
   const { user } = useAuth();
@@ -627,46 +628,25 @@ ${req.admin_notes ? `Admin Notes: ${req.admin_notes}` : ''}
                     <div className="btn-group mt-2" role="group">
                       <button
                         className="btn btn-sm btn-outline-info"
-                        onClick={() => {
-                          const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:3006/api';
-                          const baseUrl = API_BASE_URL.replace('/api', '');
-                          const url = viewingRequisition.document_path.startsWith('http') 
-                            ? viewingRequisition.document_path 
-                            : `${baseUrl}${viewingRequisition.document_path}`;
-                          window.open(url, '_blank');
-                        }}
+                        onClick={() => handleViewDocument(viewingRequisition.document_path)}
                         title="View"
                       >
                         <i className="bi bi-eye me-1"></i>View
                       </button>
                       <button
                         className="btn btn-sm btn-outline-primary"
-                        onClick={() => {
-                          const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:3006/api';
-                          const baseUrl = API_BASE_URL.replace('/api', '');
-                          const url = viewingRequisition.document_path.startsWith('http') 
-                            ? viewingRequisition.document_path 
-                            : `${baseUrl}${viewingRequisition.document_path}`;
-                          const link = document.createElement('a');
-                          link.href = url;
-                          link.download = viewingRequisition.document_name || 'document';
-                          document.body.appendChild(link);
-                          link.click();
-                          document.body.removeChild(link);
-                        }}
+                        onClick={() => handleDownloadDocument(viewingRequisition.document_path, viewingRequisition.document_name)}
                         title="Download"
                     >
                         <i className="bi bi-download me-1"></i>Download
                       </button>
                       <button
                         className="btn btn-sm btn-outline-secondary"
-                        onClick={() => {
-                          const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:3006/api';
-                          const baseUrl = API_BASE_URL.replace('/api', '');
-                          const url = viewingRequisition.document_path.startsWith('http') 
-                            ? viewingRequisition.document_path 
-                            : `${baseUrl}${viewingRequisition.document_path}`;
-                          const printWindow = window.open(url, '_blank');
+                        onClick={() => handlePrintDocument(viewingRequisition.document_path)}
+                        title="Print"
+                      >
+                        <i className="bi bi-printer me-1"></i>Print
+                      </button>
                           if (printWindow) {
                             printWindow.onload = () => {
                               setTimeout(() => {

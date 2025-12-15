@@ -315,20 +315,10 @@ router.post('/', authenticateToken, upload.single('document'), async (req, res) 
       }
     }
 
-    // Determine initial status based on request type
-    // - Sick leave, temporary leave, annual leave: Direct to Admin (Pending_Admin)
-    // - Office supplies: Finance Department Head → Admin (Pending_DeptHead)
-    // - Work support: No approval needed, direct (Approved)
-    let initialStatus;
-    if (request_type === 'work_support') {
-      initialStatus = 'Approved'; // No approval needed
-    } else if (['sick_leave', 'temporary_leave', 'annual_leave'].includes(request_type)) {
-      initialStatus = 'Pending_Admin'; // Direct to Admin
-    } else if (request_type === 'office_supplies') {
-      initialStatus = 'Pending_DeptHead'; // Finance Head → Admin
-    } else {
-      initialStatus = 'Pending_DeptHead'; // Default: Department Head → Admin
-    }
+    // Simplified workflow:
+    // - work_support: auto Approved (no approval)
+    // - all other types: Pending_Admin (Admin-only approval)
+    let initialStatus = request_type === 'work_support' ? 'Approved' : 'Pending_Admin';
 
     const document_path = req.file ? `/uploads/requisitions/${req.file.filename}` : null;
     const document_name = req.file ? req.file.originalname : null;

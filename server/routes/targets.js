@@ -193,6 +193,7 @@ router.get('/', authenticateToken, async (req, res) => {
     // Build safe subqueries that won't fail if tables don't exist
     // Only count approved progress entries (or NULL status for backward compatibility)
     // Use simpler syntax that works in both SQLite and PostgreSQL
+    // Note: We'll recalculate manually anyway, so this is just for initial query
     const totalProgressSubquery = targetProgressExists
       ? `(SELECT COALESCE(SUM(COALESCE(CAST(tp.amount AS NUMERIC), CAST(tp.progress_amount AS NUMERIC), 0)), 0) 
           FROM target_progress tp 
@@ -1924,7 +1925,7 @@ router.post('/recalculate-all', authenticateToken, requireRole('Admin'), async (
         ? await db.all(
             `SELECT id, amount, status, progress_amount, CAST(amount AS NUMERIC) as amount_num
              FROM target_progress
-             WHERE CAST(target_id AS INTEGER) = CAST(? AS INTEGER)`,
+             WHERE target_id = ?`,
             [target.id]
           )
         : [];
@@ -1937,8 +1938,8 @@ router.post('/recalculate-all', authenticateToken, requireRole('Admin'), async (
               COALESCE(SUM(COALESCE(CAST(amount AS NUMERIC), CAST(progress_amount AS NUMERIC), 0)), 0) as total,
               COUNT(*) as count
              FROM target_progress
-             WHERE CAST(target_id AS INTEGER) = CAST(? AS INTEGER)
-               AND (UPPER(TRIM(COALESCE(status, ''))) = 'APPROVED' OR status IS NULL)`,
+             WHERE target_id = ?
+               AND (status = 'Approved' OR status IS NULL OR status = '')`,
             [target.id]
           )
         : { total: 0, count: 0 };
@@ -1954,7 +1955,7 @@ router.post('/recalculate-all', authenticateToken, requireRole('Admin'), async (
         const statusBreakdown = await db.all(
           `SELECT status, COUNT(*) as count, SUM(CAST(amount AS NUMERIC)) as total_amount
            FROM target_progress 
-           WHERE CAST(target_id AS INTEGER) = CAST(? AS INTEGER)
+           WHERE target_id = ?
            GROUP BY status`,
           [target.id]
         );

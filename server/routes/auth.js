@@ -48,7 +48,7 @@ router.post('/login', [
     // Find user (case-insensitive email lookup) - optimized query with index
     // Use normalized email directly to leverage index
     const user = await db.get(
-      'SELECT id, email, username, password_hash, role, name, is_active, email_verified FROM users WHERE LOWER(TRIM(email)) = ? LIMIT 1',
+      'SELECT id, email, username, password_hash, role, name, phone, profile_image, is_active, email_verified FROM users WHERE LOWER(TRIM(email)) = ? LIMIT 1',
       [normalizedEmail]
     );
 
@@ -125,6 +125,8 @@ router.post('/login', [
       username: user.username,
       role: user.role,
       name: user.name,
+      phone: user.phone || null,
+      profile_image: user.profile_image || null,
       emailVerified: user.email_verified === 1
     };
     

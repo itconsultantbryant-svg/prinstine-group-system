@@ -367,11 +367,16 @@ router.put('/:id', authenticateToken, requireRole('Admin', 'Staff'), async (req,
         id: clientId,
         client_id: updatedClient.client_id,
         name: updatedClient.name,
+        email: updatedClient.email,
+        phone: updatedClient.phone,
         company_name: updatedClient.company_name,
         category: updatedClient.category,
         progress_status: updatedClient.progress_status,
         status: updatedClient.status,
-        updated_by: req.user.name,
+        services_availed: updatedClient.services_availed,
+        profile_image: updatedClient.profile_image,
+        created_by_name: updatedClient.created_by_name,
+        updated_by: req.user.name || req.user.email,
         updated_at: new Date().toISOString()
       });
       console.log('Emitted client_updated event for client:', updatedClient.client_id);
@@ -443,7 +448,14 @@ router.delete('/:id', authenticateToken, requireRole('Admin', 'Staff'), async (r
   try {
     const clientId = req.params.id;
 
-    const client = await db.get('SELECT id FROM clients WHERE id = ?', [clientId]);
+    // Get client details before deleting for real-time event
+    const client = await db.get(`
+      SELECT c.id, c.client_id, c.company_name, u.name, u.email
+      FROM clients c
+      LEFT JOIN users u ON c.user_id = u.id
+      WHERE c.id = ?
+    `, [clientId]);
+    
     if (!client) {
       return res.status(404).json({ error: 'Client not found' });
     }
@@ -451,6 +463,18 @@ router.delete('/:id', authenticateToken, requireRole('Admin', 'Staff'), async (r
     await db.run('DELETE FROM clients WHERE id = ?', [clientId]);
 
     await logAction(req.user.id, 'delete_client', 'clients', clientId, {}, req);
+
+    // Emit real-time update for client deletion
+    if (global.io) {
+      global.io.emit('client_deleted', {
+        id: clientId,
+        client_id: client.client_id,
+        name: client.name,
+        company_name: client.company_name,
+        deleted_by: req.user.name || req.user.email
+      });
+      console.log('Emitted client_deleted event for client:', client.client_id);
+    }
 
     res.json({ message: 'Client deleted successfully' });
   } catch (error) {

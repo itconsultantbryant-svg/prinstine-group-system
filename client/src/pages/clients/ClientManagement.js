@@ -21,7 +21,7 @@ const ClientManagement = () => {
       if (socket) {
         const handleClientCreated = async (newClient) => {
           console.log('Client created event received:', newClient);
-          // Refresh the clients list to get the full client data
+          // Refresh the clients list to get the full client data with all details
           setTimeout(() => {
             fetchClients();
           }, 300);
@@ -29,18 +29,44 @@ const ClientManagement = () => {
 
         const handleClientUpdated = async (updatedClient) => {
           console.log('Client updated event received:', updatedClient);
-          // Refresh the clients list to get the updated client data
+          // Update the specific client in the state for immediate UI update
+          setClients(prevClients => {
+            const index = prevClients.findIndex(client => 
+              client.id === updatedClient.id || client.client_id === updatedClient.client_id
+            );
+            if (index !== -1) {
+              // Update existing client in place
+              const updated = [...prevClients];
+              updated[index] = { ...updated[index], ...updatedClient };
+              return updated;
+            } else {
+              // Client not found, refresh to get updated data
+              setTimeout(() => fetchClients(), 100);
+              return prevClients;
+            }
+          });
+          // Also refresh after a short delay to ensure we have the latest data with all fields
           setTimeout(() => {
             fetchClients();
-          }, 300);
+          }, 500);
+        };
+
+        const handleClientDeleted = (deletedClient) => {
+          console.log('Client deleted event received:', deletedClient);
+          // Remove the deleted client from the state immediately
+          setClients(prevClients => 
+            prevClients.filter(client => client.id !== deletedClient.id && client.client_id !== deletedClient.client_id)
+          );
         };
 
         socket.on('client_created', handleClientCreated);
         socket.on('client_updated', handleClientUpdated);
+        socket.on('client_deleted', handleClientDeleted);
 
         return () => {
           socket.off('client_created', handleClientCreated);
           socket.off('client_updated', handleClientUpdated);
+          socket.off('client_deleted', handleClientDeleted);
         };
       }
     }
@@ -88,7 +114,10 @@ const ClientManagement = () => {
     if (window.confirm('Are you sure you want to delete this client?')) {
       try {
         await api.delete(`/clients/${id}`);
-        fetchClients();
+        // Real-time event will handle the UI update, but refresh as fallback
+        setTimeout(() => {
+          fetchClients();
+        }, 200);
       } catch (error) {
         alert(error.response?.data?.error || 'Error deleting client');
       }

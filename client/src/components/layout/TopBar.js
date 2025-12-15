@@ -26,7 +26,7 @@ const TopBar = () => {
         Notification.requestPermission();
       }
 
-      // Listen for real-time profile updates
+      // Listen for real-time profile updates and notifications via WebSocket
       if (socket) {
         const handleProfileUpdate = (data) => {
           if (data.user_id === user.id) {
@@ -45,10 +45,6 @@ const TopBar = () => {
         };
 
         socket.on('profile_updated', handleProfileUpdate);
-      }
-
-      // Listen for real-time notifications via WebSocket
-      if (socket) {
         const handleNotification = (notification) => {
           // Parse notification if it's a string
           let parsedNotification = notification;

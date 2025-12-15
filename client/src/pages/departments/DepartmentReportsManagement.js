@@ -592,23 +592,45 @@ const DepartmentReportsManagement = () => {
                               )}
                             </div>
                             <div className="btn-group" role="group">
-                              <a
-                                href={file.url}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="btn btn-sm btn-outline-primary"
-                                title="View File"
+                              <button
+                                className="btn btn-sm btn-outline-info"
+                                onClick={() => window.open(file.url, '_blank')}
+                                title="View"
                               >
                                 <i className="bi bi-eye"></i>
-                              </a>
-                              <a
-                                href={file.url}
-                                download
-                                className="btn btn-sm btn-outline-secondary"
-                                title="Download File"
+                              </button>
+                              <button
+                                className="btn btn-sm btn-outline-primary"
+                                onClick={() => {
+                                  const link = document.createElement('a');
+                                  link.href = file.url;
+                                  link.download = file.originalName || file.filename || 'document';
+                                  document.body.appendChild(link);
+                                  link.click();
+                                  document.body.removeChild(link);
+                                }}
+                                title="Download"
                               >
                                 <i className="bi bi-download"></i>
-                              </a>
+                              </button>
+                              <button
+                                className="btn btn-sm btn-outline-secondary"
+                                onClick={() => {
+                                  const printWindow = window.open(file.url, '_blank');
+                                  if (printWindow) {
+                                    printWindow.onload = () => {
+                                      setTimeout(() => {
+                                        printWindow.print();
+                                      }, 500);
+                                    };
+                                  } else {
+                                    alert('Please allow popups to print this document');
+                                  }
+                                }}
+                                title="Print"
+                              >
+                                <i className="bi bi-printer"></i>
+                              </button>
                             </div>
                           </div>
                         ))}

@@ -404,14 +404,64 @@ ${proposal.admin_notes ? `Admin Notes: ${proposal.admin_notes}\n` : ''}
                   <div className="col-md-6">
                     <strong>Document:</strong> {viewingProposal.document_name || 'N/A'}
                     {viewingProposal.document_path && (
-                      <a
-                        href={`http://localhost:3006${viewingProposal.document_path}`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="ms-2 btn btn-sm btn-outline-primary"
-                      >
-                        <i className="bi bi-download me-1"></i>Download
-                      </a>
+                      <div className="btn-group ms-2" role="group">
+                        <button
+                          className="btn btn-sm btn-outline-info"
+                          onClick={() => {
+                            const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:3006/api';
+                            const baseUrl = API_BASE_URL.replace('/api', '');
+                            const url = viewingProposal.document_path.startsWith('http') 
+                              ? viewingProposal.document_path 
+                              : `${baseUrl}${viewingProposal.document_path}`;
+                            window.open(url, '_blank');
+                          }}
+                          title="View"
+                        >
+                          <i className="bi bi-eye me-1"></i>View
+                        </button>
+                        <button
+                          className="btn btn-sm btn-outline-primary"
+                          onClick={() => {
+                            const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:3006/api';
+                            const baseUrl = API_BASE_URL.replace('/api', '');
+                            const url = viewingProposal.document_path.startsWith('http') 
+                              ? viewingProposal.document_path 
+                              : `${baseUrl}${viewingProposal.document_path}`;
+                            const link = document.createElement('a');
+                            link.href = url;
+                            link.download = viewingProposal.document_name || 'document';
+                            document.body.appendChild(link);
+                            link.click();
+                            document.body.removeChild(link);
+                          }}
+                          title="Download"
+                        >
+                          <i className="bi bi-download me-1"></i>Download
+                        </button>
+                        <button
+                          className="btn btn-sm btn-outline-secondary"
+                          onClick={() => {
+                            const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:3006/api';
+                            const baseUrl = API_BASE_URL.replace('/api', '');
+                            const url = viewingProposal.document_path.startsWith('http') 
+                              ? viewingProposal.document_path 
+                              : `${baseUrl}${viewingProposal.document_path}`;
+                            const printWindow = window.open(url, '_blank');
+                            if (printWindow) {
+                              printWindow.onload = () => {
+                                setTimeout(() => {
+                                  printWindow.print();
+                                }, 500);
+                              };
+                            } else {
+                              alert('Please allow popups to print this document');
+                            }
+                          }}
+                          title="Print"
+                        >
+                          <i className="bi bi-printer me-1"></i>Print
+                        </button>
+                      </div>
                     )}
                   </div>
                 </div>

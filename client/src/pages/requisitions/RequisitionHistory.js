@@ -624,14 +624,64 @@ ${req.admin_notes ? `Admin Notes: ${req.admin_notes}` : ''}
                   <div className="mb-3">
                     <strong>Document:</strong>
                     <br />
-                    <a 
-                      href={`http://localhost:3006${viewingRequisition.document_path}`} 
-                      target="_blank" 
-                      rel="noopener noreferrer"
-                      className="btn btn-sm btn-outline-primary mt-2"
-                    >
-                      <i className="bi bi-download me-1"></i>Download Document
-                    </a>
+                    <div className="btn-group mt-2" role="group">
+                      <button
+                        className="btn btn-sm btn-outline-info"
+                        onClick={() => {
+                          const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:3006/api';
+                          const baseUrl = API_BASE_URL.replace('/api', '');
+                          const url = viewingRequisition.document_path.startsWith('http') 
+                            ? viewingRequisition.document_path 
+                            : `${baseUrl}${viewingRequisition.document_path}`;
+                          window.open(url, '_blank');
+                        }}
+                        title="View"
+                      >
+                        <i className="bi bi-eye me-1"></i>View
+                      </button>
+                      <button
+                        className="btn btn-sm btn-outline-primary"
+                        onClick={() => {
+                          const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:3006/api';
+                          const baseUrl = API_BASE_URL.replace('/api', '');
+                          const url = viewingRequisition.document_path.startsWith('http') 
+                            ? viewingRequisition.document_path 
+                            : `${baseUrl}${viewingRequisition.document_path}`;
+                          const link = document.createElement('a');
+                          link.href = url;
+                          link.download = viewingRequisition.document_name || 'document';
+                          document.body.appendChild(link);
+                          link.click();
+                          document.body.removeChild(link);
+                        }}
+                        title="Download"
+                      >
+                        <i className="bi bi-download me-1"></i>Download
+                      </button>
+                      <button
+                        className="btn btn-sm btn-outline-secondary"
+                        onClick={() => {
+                          const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:3006/api';
+                          const baseUrl = API_BASE_URL.replace('/api', '');
+                          const url = viewingRequisition.document_path.startsWith('http') 
+                            ? viewingRequisition.document_path 
+                            : `${baseUrl}${viewingRequisition.document_path}`;
+                          const printWindow = window.open(url, '_blank');
+                          if (printWindow) {
+                            printWindow.onload = () => {
+                              setTimeout(() => {
+                                printWindow.print();
+                              }, 500);
+                            };
+                          } else {
+                            alert('Please allow popups to print this document');
+                          }
+                        }}
+                        title="Print"
+                      >
+                        <i className="bi bi-printer me-1"></i>Print
+                      </button>
+                    </div>
                   </div>
                 )}
               </div>

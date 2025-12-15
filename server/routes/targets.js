@@ -247,11 +247,39 @@ router.get('/', authenticateToken, async (req, res) => {
     console.log('Query params:', params);
     console.log('Tables exist - targets:', !!tableExists, 'target_progress:', !!targetProgressExists, 'fund_sharing:', !!fundSharingExists, 'target_progress:', !!targetProgressExists);
     
-    const targets = await db.all(query, params);
+    let targets = await db.all(query, params);
     console.log(`Fetched ${targets.length} targets from database`);
     
+    // Calculate progress separately if subquery might have issues
+    // This ensures we get accurate totals even if subquery has problems
+    if (targetProgressExists && targets && targets.length > 0) {
+      console.log('Recalculating progress for all targets separately...');
+      for (let i = 0; i < targets.length; i++) {
+        const target = targets[i];
+        
+        // Get approved progress entries manually
+        const progressResult = await db.get(
+          `SELECT COALESCE(SUM(COALESCE(CAST(amount AS NUMERIC), CAST(progress_amount AS NUMERIC), 0)), 0) as total
+           FROM target_progress
+           WHERE target_id = ?
+             AND (status = 'Approved' OR status IS NULL OR status = '')`,
+          [target.id]
+        );
+        
+        const manualTotalProgress = parseFloat(progressResult?.total || 0) || 0;
+        
+        // Override the subquery result with manual calculation
+        if (Math.abs(manualTotalProgress - parseFloat(target.total_progress || 0)) > 0.01) {
+          console.log(`Target ${target.id}: Subquery returned ${target.total_progress}, manual calculation: ${manualTotalProgress} - USING MANUAL`);
+          targets[i].total_progress = manualTotalProgress;
+        } else {
+          console.log(`Target ${target.id}: Subquery and manual match: ${target.total_progress}`);
+        }
+      }
+    }
+    
     if (targets && targets.length > 0) {
-      console.log('First target sample:', {
+      console.log('First target sample after recalculation:', {
         id: targets[0].id,
         user_id: targets[0].user_id,
         user_name: targets[0].user_name,
@@ -262,20 +290,24 @@ router.get('/', authenticateToken, async (req, res) => {
         status: targets[0].status
       });
       
-      // Debug: Check actual target_progress records for all targets
+      // Debug: Check actual target_progress records for first target
       if (targetProgressExists && targets.length > 0) {
-        for (const target of targets.slice(0, 3)) { // Check first 3 targets
-          const progressCheck = await db.get(
-            'SELECT COALESCE(SUM(amount), 0) as total, COUNT(*) as count FROM target_progress WHERE target_id = ?',
-            [target.id]
-          );
-          console.log(`Direct progress check for target ${target.id}:`, {
-            total_from_query: progressCheck?.total || 0,
-            count: progressCheck?.count || 0,
-            total_from_subquery: target.total_progress,
-            match: (progressCheck?.total || 0) === parseFloat(target.total_progress || 0)
-          });
-        }
+        const firstTarget = targets[0];
+        const progressCheck = await db.all(
+          `SELECT id, amount, status, progress_amount
+           FROM target_progress 
+           WHERE target_id = ?`,
+          [firstTarget.id]
+        );
+        console.log(`All progress entries for target ${firstTarget.id}:`, JSON.stringify(progressCheck, null, 2));
+        
+        const approvedCheck = await db.get(
+          `SELECT COALESCE(SUM(COALESCE(CAST(amount AS NUMERIC), CAST(progress_amount AS NUMERIC), 0)), 0) as total, COUNT(*) as count
+           FROM target_progress 
+           WHERE target_id = ? AND (status = 'Approved' OR status IS NULL OR status = '')`,
+          [firstTarget.id]
+        );
+        console.log(`Approved entries for target ${firstTarget.id}:`, approvedCheck);
       }
     } else {
       console.log('No targets found in database - checking if targets table has any rows...');

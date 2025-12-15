@@ -67,7 +67,7 @@ async function updateAdminTargetInDatabase(periodStart = null) {
           COALESCE(SUM(target_amount), 0) as total_target,
           COALESCE(SUM(
             ${targetProgressExists 
-              ? `(SELECT COALESCE(SUM(CAST(tp.amount AS NUMERIC)), 0) FROM target_progress tp WHERE CAST(tp.target_id AS INTEGER) = CAST(t.id AS INTEGER))`
+              ? `(SELECT COALESCE(SUM(CAST(tp.amount AS NUMERIC)), 0) FROM target_progress tp WHERE CAST(tp.target_id AS INTEGER) = CAST(t.id AS INTEGER) AND (tp.status = 'Approved' OR tp.status IS NULL))`
               : 'CAST(0 AS NUMERIC)'}
           ), 0) as total_progress,
           COALESCE(SUM(
@@ -446,7 +446,8 @@ router.get('/:id', authenticateToken, async (req, res) => {
              COALESCE(creator.name, 'System') as created_by_name,
              (SELECT COALESCE(SUM(tp.amount), 0) 
               FROM target_progress tp 
-              WHERE tp.target_id = t.id) as total_progress,
+              WHERE tp.target_id = t.id
+                AND (tp.status = 'Approved' OR tp.status IS NULL)) as total_progress,
              (SELECT COALESCE(SUM(CASE WHEN fs.status = 'Active' THEN fs.amount ELSE 0 END), 0)
               FROM fund_sharing fs
               WHERE fs.from_user_id = t.user_id) as shared_out,
@@ -572,7 +573,7 @@ router.post('/', authenticateToken, requireRole('Admin'), [
               `SELECT 
                 COALESCE(SUM(target_amount), 0) as total_target,
                 COALESCE(SUM(
-                  (SELECT COALESCE(SUM(tp.amount), 0) FROM target_progress tp WHERE tp.target_id = t.id)
+                  (SELECT COALESCE(SUM(tp.amount), 0) FROM target_progress tp WHERE tp.target_id = t.id AND (tp.status = 'Approved' OR tp.status IS NULL))
                 ), 0) as total_progress,
                 COALESCE(SUM(
                   (SELECT COALESCE(SUM(CASE WHEN fs.status = 'Active' THEN fs.amount ELSE 0 END), 0)
@@ -678,7 +679,8 @@ router.post('/', authenticateToken, requireRole('Admin'), [
              COALESCE(creator.name, 'System') as created_by_name,
              (SELECT COALESCE(SUM(tp.amount), 0) 
               FROM target_progress tp 
-              WHERE tp.target_id = t.id) as total_progress,
+              WHERE tp.target_id = t.id
+                AND (tp.status = 'Approved' OR tp.status IS NULL)) as total_progress,
              (SELECT COALESCE(SUM(CASE WHEN fs.status = 'Active' THEN fs.amount ELSE 0 END), 0)
               FROM fund_sharing fs
               WHERE fs.from_user_id = t.user_id) as shared_out,
@@ -829,7 +831,8 @@ router.put('/:id', authenticateToken, requireRole('Admin'), [
              COALESCE(creator.name, 'System') as created_by_name,
              (SELECT COALESCE(SUM(tp.amount), 0) 
               FROM target_progress tp 
-              WHERE tp.target_id = t.id) as total_progress,
+              WHERE tp.target_id = t.id
+                AND (tp.status = 'Approved' OR tp.status IS NULL)) as total_progress,
              (SELECT COALESCE(SUM(CASE WHEN fs.status = 'Active' THEN fs.amount ELSE 0 END), 0)
               FROM fund_sharing fs
               WHERE fs.from_user_id = t.user_id) as shared_out,
@@ -996,7 +999,7 @@ router.post('/share-fund', authenticateToken, [
     // Verify sender has active target and sufficient progress
     const senderTarget = await db.get(
       `SELECT t.*, 
-              (SELECT COALESCE(SUM(tp.amount), 0) FROM target_progress tp WHERE tp.target_id = t.id) as total_progress,
+              (SELECT COALESCE(SUM(tp.amount), 0) FROM target_progress tp WHERE tp.target_id = t.id AND (tp.status = 'Approved' OR tp.status IS NULL)) as total_progress,
               (SELECT COALESCE(SUM(CASE WHEN fs.status = 'Active' THEN fs.amount ELSE 0 END), 0)
                FROM fund_sharing fs WHERE fs.from_user_id = t.user_id) as shared_out,
               (SELECT COALESCE(SUM(CASE WHEN fs.status = 'Active' THEN fs.amount ELSE 0 END), 0)
@@ -1463,7 +1466,7 @@ router.delete('/:id', authenticateToken, requireRole('Admin'), async (req, res) 
               `SELECT 
                 COALESCE(SUM(target_amount), 0) as total_target,
                 COALESCE(SUM(
-                  (SELECT COALESCE(SUM(tp.amount), 0) FROM target_progress tp WHERE tp.target_id = t.id)
+                  (SELECT COALESCE(SUM(tp.amount), 0) FROM target_progress tp WHERE tp.target_id = t.id AND (tp.status = 'Approved' OR tp.status IS NULL))
                 ), 0) as total_progress,
                 COALESCE(SUM(
                   (SELECT COALESCE(SUM(CASE WHEN fs.status = 'Active' THEN fs.amount ELSE 0 END), 0)

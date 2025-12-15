@@ -306,17 +306,23 @@ router.get('/', authenticateToken, async (req, res) => {
 
     // Calculate progress percentage and net amount for each target
     // Allow progress to exceed 100% (users can exceed their targets)
-    const targetsWithProgress = targets.map(target => {
-      // Ensure all values are numbers
-      const totalProgress = parseFloat(target.total_progress || 0) || 0;
-      const sharedIn = parseFloat(target.shared_in || 0) || 0;
-      const sharedOut = parseFloat(target.shared_out || 0) || 0;
-      const targetAmount = parseFloat(target.target_amount || 0) || 0;
+    const targetsWithProgress = targets.map((target, index) => {
+      // Ensure all values are numbers - use explicit parsing
+      const totalProgress = parseFloat(String(target.total_progress || 0)) || 0;
+      const sharedIn = parseFloat(String(target.shared_in || 0)) || 0;
+      const sharedOut = parseFloat(String(target.shared_out || 0)) || 0;
+      const targetAmount = parseFloat(String(target.target_amount || 0)) || 0;
       
+      // Calculate net amount: total_progress + shared_in - shared_out
       const netAmount = totalProgress + sharedIn - sharedOut;
+      
+      // Calculate progress percentage
       const progressPercentage = targetAmount > 0 
         ? (netAmount / targetAmount) * 100 
         : 0;
+      
+      // Calculate remaining amount (cannot be negative)
+      const remainingAmount = Math.max(0, targetAmount - netAmount);
       
       const result = {
         ...target,
@@ -325,18 +331,21 @@ router.get('/', authenticateToken, async (req, res) => {
         shared_out: sharedOut,
         net_amount: netAmount,
         progress_percentage: progressPercentage.toFixed(2),
-        remaining_amount: Math.max(0, targetAmount - netAmount)
+        remaining_amount: remainingAmount
       };
       
-      // Log calculation for debugging
-      if (targets.indexOf(target) === 0) {
-        console.log('Net amount calculation for first target:', {
+      // Log calculation for debugging (first 3 targets)
+      if (index < 3) {
+        console.log(`Target ${index + 1} calculation:`, {
           target_id: target.id,
+          user_name: target.user_name,
+          target_amount: targetAmount,
           total_progress: totalProgress,
           shared_in: sharedIn,
           shared_out: sharedOut,
           net_amount: netAmount,
-          target_amount: targetAmount
+          progress_percentage: progressPercentage.toFixed(2),
+          remaining_amount: remainingAmount
         });
       }
       

@@ -5,6 +5,144 @@ const db = require('../config/database');
 const { authenticateToken, requireRole } = require('../utils/auth');
 const { logAction } = require('../utils/audit');
 
+// Helper function to update admin target in database with aggregated staff and department head data
+async function updateAdminTargetInDatabase(periodStart = null) {
+  try {
+    const adminUser = await db.get("SELECT id FROM users WHERE role = 'Admin' LIMIT 1");
+    if (!adminUser) {
+      console.log('No admin user found, skipping admin target update');
+      return;
+    }
+
+    // If periodStart is not provided, update all active admin targets
+    let adminTargets;
+    if (periodStart) {
+      adminTargets = await db.all(
+        'SELECT id, period_start FROM targets WHERE user_id = ? AND status = ? AND period_start = ?',
+        [adminUser.id, 'Active', periodStart]
+      );
+    } else {
+      adminTargets = await db.all(
+        'SELECT id, period_start FROM targets WHERE user_id = ? AND status = ?',
+        [adminUser.id, 'Active']
+      );
+    }
+
+    if (!adminTargets || adminTargets.length === 0) {
+      console.log('No active admin targets found to update');
+      return;
+    }
+
+    // Check if target_progress and fund_sharing tables exist
+    const USE_POSTGRESQL = !!process.env.DATABASE_URL;
+    let targetProgressExists = false;
+    let fundSharingExists = false;
+
+    if (USE_POSTGRESQL) {
+      const tpCheck = await db.get(
+        "SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'target_progress'"
+      );
+      targetProgressExists = !!tpCheck;
+      
+      const fsCheck = await db.get(
+        "SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'fund_sharing'"
+      );
+      fundSharingExists = !!fsCheck;
+    } else {
+      const tpCheck = await db.get("SELECT name FROM sqlite_master WHERE type='table' AND name='target_progress'");
+      targetProgressExists = !!tpCheck;
+      
+      const fsCheck = await db.get("SELECT name FROM sqlite_master WHERE type='table' AND name='fund_sharing'");
+      fundSharingExists = !!fsCheck;
+    }
+
+    // Update each admin target
+    for (const adminTarget of adminTargets) {
+      const period = adminTarget.period_start;
+      
+      // Aggregate all staff and department head targets (exclude admin)
+      // This includes both Staff and DepartmentHead roles
+      const allStaffTargets = await db.all(
+        `SELECT 
+          COALESCE(SUM(target_amount), 0) as total_target,
+          COALESCE(SUM(
+            ${targetProgressExists 
+              ? `(SELECT COALESCE(SUM(CAST(tp.amount AS NUMERIC)), 0) FROM target_progress tp WHERE CAST(tp.target_id AS INTEGER) = CAST(t.id AS INTEGER))`
+              : 'CAST(0 AS NUMERIC)'}
+          ), 0) as total_progress,
+          COALESCE(SUM(
+            ${fundSharingExists
+              ? `(SELECT COALESCE(SUM(CASE WHEN fs.status = 'Active' THEN CAST(fs.amount AS NUMERIC) ELSE 0 END), 0)
+                   FROM fund_sharing fs WHERE CAST(fs.from_user_id AS INTEGER) = CAST(t.user_id AS INTEGER))`
+              : 'CAST(0 AS NUMERIC)'}
+          ), 0) as total_shared_out,
+          COALESCE(SUM(
+            ${fundSharingExists
+              ? `(SELECT COALESCE(SUM(CASE WHEN fs.status = 'Active' THEN CAST(fs.amount AS NUMERIC) ELSE 0 END), 0)
+                   FROM fund_sharing fs WHERE CAST(fs.to_user_id AS INTEGER) = CAST(t.user_id AS INTEGER))`
+              : 'CAST(0 AS NUMERIC)'}
+          ), 0) as total_shared_in
+         FROM targets t
+         WHERE CAST(t.user_id AS INTEGER) != CAST(? AS INTEGER) 
+           AND t.status = ? 
+           AND t.period_start = ?`,
+        [adminUser.id, 'Active', period]
+      );
+
+      if (allStaffTargets && allStaffTargets[0]) {
+        const staffData = allStaffTargets[0];
+        const totalProgress = parseFloat(staffData.total_progress || 0);
+        const totalSharedIn = parseFloat(staffData.total_shared_in || 0);
+        const totalSharedOut = parseFloat(staffData.total_shared_out || 0);
+        const totalTarget = parseFloat(staffData.total_target || 0);
+        
+        const adminNetAmount = totalProgress + totalSharedIn - totalSharedOut;
+        
+        await db.run(
+          `UPDATE targets 
+           SET target_amount = ?, 
+               notes = ?,
+               updated_at = CURRENT_TIMESTAMP
+           WHERE id = ?`,
+          [
+            totalTarget,
+            `Auto-aggregated from all staff and department head targets for period ${period}`,
+            adminTarget.id
+          ]
+        );
+        
+        console.log(`Admin target ${adminTarget.id} updated:`, {
+          total_target: totalTarget,
+          total_progress: totalProgress,
+          total_shared_in: totalSharedIn,
+          total_shared_out: totalSharedOut,
+          net_amount: adminNetAmount,
+          period: period
+        });
+        
+        // Emit update event for real-time frontend refresh
+        if (global.io) {
+          global.io.emit('target_updated', {
+            id: adminTarget.id,
+            updated_by: 'System',
+            reason: 'admin_target_aggregated',
+            period: period
+          });
+          global.io.emit('target_progress_updated', {
+            target_id: adminTarget.id,
+            action: 'admin_target_recalculated',
+            total_progress: totalProgress,
+            net_amount: adminNetAmount
+          });
+        }
+      }
+    }
+  } catch (error) {
+    console.error('Error updating admin target in database:', error);
+    // Don't throw - this is a background operation
+  }
+}
+
 // Get all targets (Admin sees all, others see their own)
 router.get('/', authenticateToken, async (req, res) => {
   try {
@@ -203,7 +341,7 @@ router.get('/', authenticateToken, async (req, res) => {
       return result;
     });
 
-    // For admin targets, recalculate with aggregated staff data
+    // For admin targets, recalculate with aggregated staff and department head data
     // Find admin user and update admin targets with aggregated data
     try {
       const adminUser = await db.get("SELECT id FROM users WHERE role = 'Admin' LIMIT 1");
@@ -211,42 +349,54 @@ router.get('/', authenticateToken, async (req, res) => {
         for (let i = 0; i < targetsWithProgress.length; i++) {
           const target = targetsWithProgress[i];
           if (target.user_id === adminUser.id && target.status === 'Active') {
-            // Recalculate admin target with aggregated staff data
+            // Recalculate admin target with aggregated staff and department head data
+            // This includes both Staff and DepartmentHead roles (excludes Admin)
             const allStaffTargets = await db.all(
               `SELECT 
                 COALESCE(SUM(target_amount), 0) as total_target,
                 COALESCE(SUM(
-                  (SELECT COALESCE(SUM(tp.amount), 0) FROM target_progress tp WHERE tp.target_id = t.id)
+                  ${targetProgressExists 
+                    ? `(SELECT COALESCE(SUM(CAST(tp.amount AS NUMERIC)), 0) FROM target_progress tp WHERE CAST(tp.target_id AS INTEGER) = CAST(t.id AS INTEGER))`
+                    : 'CAST(0 AS NUMERIC)'}
                 ), 0) as total_progress,
                 COALESCE(SUM(
-                  (SELECT COALESCE(SUM(CASE WHEN fs.status = 'Active' THEN fs.amount ELSE 0 END), 0)
-                   FROM fund_sharing fs WHERE fs.from_user_id = t.user_id)
+                  ${fundSharingExists
+                    ? `(SELECT COALESCE(SUM(CASE WHEN fs.status = 'Active' THEN CAST(fs.amount AS NUMERIC) ELSE 0 END), 0)
+                         FROM fund_sharing fs WHERE CAST(fs.from_user_id AS INTEGER) = CAST(t.user_id AS INTEGER))`
+                    : 'CAST(0 AS NUMERIC)'}
                 ), 0) as total_shared_out,
                 COALESCE(SUM(
-                  (SELECT COALESCE(SUM(CASE WHEN fs.status = 'Active' THEN fs.amount ELSE 0 END), 0)
-                   FROM fund_sharing fs WHERE fs.to_user_id = t.user_id)
+                  ${fundSharingExists
+                    ? `(SELECT COALESCE(SUM(CASE WHEN fs.status = 'Active' THEN CAST(fs.amount AS NUMERIC) ELSE 0 END), 0)
+                         FROM fund_sharing fs WHERE CAST(fs.to_user_id AS INTEGER) = CAST(t.user_id AS INTEGER))`
+                    : 'CAST(0 AS NUMERIC)'}
                 ), 0) as total_shared_in
                FROM targets t
-               WHERE t.user_id != ? AND t.status = ? AND t.period_start = ?`,
+               WHERE CAST(t.user_id AS INTEGER) != CAST(? AS INTEGER) AND t.status = ? AND t.period_start = ?`,
               [adminUser.id, 'Active', target.period_start]
             );
 
             if (allStaffTargets && allStaffTargets[0]) {
               const staffData = allStaffTargets[0];
-              const adminNetAmount = (staffData.total_progress || 0) + (staffData.total_shared_in || 0) - (staffData.total_shared_out || 0);
-              const adminProgressPercentage = (staffData.total_target || 0) > 0 
-                ? (adminNetAmount / (staffData.total_target || 1)) * 100 
+              const totalProgress = parseFloat(staffData.total_progress || 0);
+              const totalSharedIn = parseFloat(staffData.total_shared_in || 0);
+              const totalSharedOut = parseFloat(staffData.total_shared_out || 0);
+              const totalTarget = parseFloat(staffData.total_target || 0);
+              
+              const adminNetAmount = totalProgress + totalSharedIn - totalSharedOut;
+              const adminProgressPercentage = totalTarget > 0 
+                ? (adminNetAmount / totalTarget) * 100 
                 : 0;
               
               targetsWithProgress[i] = {
                 ...target,
-                target_amount: staffData.total_target || 0,
-                total_progress: staffData.total_progress || 0,
-                shared_in: staffData.total_shared_in || 0,
-                shared_out: staffData.total_shared_out || 0,
+                target_amount: totalTarget,
+                total_progress: totalProgress,
+                shared_in: totalSharedIn,
+                shared_out: totalSharedOut,
                 net_amount: adminNetAmount,
                 progress_percentage: adminProgressPercentage.toFixed(2),
-                remaining_amount: Math.max(0, (staffData.total_target || 0) - adminNetAmount)
+                remaining_amount: Math.max(0, totalTarget - adminNetAmount)
               };
             }
           }
@@ -454,7 +604,10 @@ router.post('/', authenticateToken, requireRole('Admin'), [
                 ]
               );
               
-              console.log('Admin target updated with aggregated staff targets');
+              console.log('Admin target updated with aggregated staff and department head targets');
+              
+              // Also update admin target in database using helper function
+              await updateAdminTargetInDatabase(period_start);
               
               // Emit update event
               if (global.io) {
@@ -492,7 +645,10 @@ router.post('/', authenticateToken, requireRole('Admin'), [
               
               const adminTargetId = adminTargetResult.lastID || adminTargetResult.id || (adminTargetResult.rows && adminTargetResult.rows[0] && adminTargetResult.rows[0].id);
               
-              console.log('Admin target created with aggregated staff targets:', adminTargetId);
+              console.log('Admin target created with aggregated staff and department head targets:', adminTargetId);
+              
+              // Also update admin target in database using helper function to ensure progress is included
+              await updateAdminTargetInDatabase(period_start);
               
               // Emit create event
               if (global.io) {
@@ -931,6 +1087,17 @@ router.post('/share-fund', authenticateToken, [
       console.log('Emitted target_progress_updated events for fund sharing');
     }
 
+    // Update admin target in database when fund sharing occurs
+    try {
+      const senderTargetInfo = await db.get('SELECT period_start FROM targets WHERE id = ?', [senderTarget.id]);
+      if (senderTargetInfo && senderTargetInfo.period_start) {
+        await updateAdminTargetInDatabase(senderTargetInfo.period_start);
+        console.log('Admin target updated after fund sharing');
+      }
+    } catch (adminUpdateError) {
+      console.error('Error updating admin target after fund sharing (non-fatal):', adminUpdateError);
+    }
+
     res.status(201).json({
       message: 'Fund shared successfully',
       sharing: { id: sharingId }
@@ -966,6 +1133,17 @@ router.post('/reverse-sharing/:id', authenticateToken, requireRole('Admin'), [
       reversal_reason: req.body.reversal_reason 
     }, req);
 
+    // Update admin target in database when fund sharing is reversed
+    try {
+      const fromTarget = await db.get('SELECT id, period_start FROM targets WHERE user_id = ? AND status = ?', [sharing.from_user_id, 'Active']);
+      if (fromTarget && fromTarget.period_start) {
+        await updateAdminTargetInDatabase(fromTarget.period_start);
+        console.log('Admin target updated after fund sharing reversal');
+      }
+    } catch (adminUpdateError) {
+      console.error('Error updating admin target after fund reversal (non-fatal):', adminUpdateError);
+    }
+    
     // Emit real-time updates for both sender and recipient targets
     if (global.io) {
       // Emit fund_reversed event
@@ -1273,5 +1451,7 @@ router.delete('/:id', authenticateToken, requireRole('Admin'), async (req, res) 
   }
 });
 
+// Export the helper function for use in other routes
 module.exports = router;
+module.exports.updateAdminTargetInDatabase = updateAdminTargetInDatabase;
 

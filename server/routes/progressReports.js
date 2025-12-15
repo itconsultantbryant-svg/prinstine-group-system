@@ -864,6 +864,21 @@ router.put('/:id/approve', authenticateToken, requireRole('Admin'), [
               matches_direct_query: (subqueryCheck?.total_progress || 0) === (totalProgressCheck?.total || 0)
             });
             
+            // Update admin target in database when staff/dept head target progress changes
+            try {
+              const { updateAdminTargetInDatabase } = require('./targets');
+              if (typeof updateAdminTargetInDatabase === 'function') {
+                // Get the target's period_start to update the correct admin target
+                const targetInfo = await db.get('SELECT period_start FROM targets WHERE id = ?', [targetIdInt]);
+                if (targetInfo && targetInfo.period_start) {
+                  await updateAdminTargetInDatabase(targetInfo.period_start);
+                  console.log('Admin target updated after progress report approval');
+                }
+              }
+            } catch (adminUpdateError) {
+              console.error('Error updating admin target after progress approval (non-fatal):', adminUpdateError);
+            }
+            
             // Emit real-time update for target progress - emit to ALL users so everyone sees the update
             if (global.io) {
               // Emit a general update event with consistent data types
@@ -912,6 +927,22 @@ router.put('/:id/approve', authenticateToken, requireRole('Admin'), [
               [target.id]
             );
             console.log('Total progress after update for target', target.id, ':', totalProgressCheck?.total || 0);
+            
+            // Update admin target in database when staff/dept head target progress changes
+            try {
+              // Get the target's period_start to update the correct admin target
+              const targetInfo = await db.get('SELECT period_start FROM targets WHERE id = ?', [target.id]);
+              if (targetInfo && targetInfo.period_start) {
+                // Dynamically require the function to avoid circular dependency
+                const targetsModule = require('./targets');
+                if (targetsModule && typeof targetsModule.updateAdminTargetInDatabase === 'function') {
+                  await targetsModule.updateAdminTargetInDatabase(targetInfo.period_start);
+                  console.log('Admin target updated after progress report approval (update case)');
+                }
+              }
+            } catch (adminUpdateError) {
+              console.error('Error updating admin target after progress approval (non-fatal):', adminUpdateError);
+            }
             
             // Emit real-time update - emit to ALL users
             if (global.io) {

@@ -450,15 +450,14 @@ const Notifications = () => {
                             <div className="list-group mt-2">
                               {reply.attachments.map((att, idx) => (
                                 <div key={idx} className="list-group-item d-flex justify-content-between align-items-center">
-                                  <a
-                                    href={att.url}
-                                    target="_blank"
-                                    rel="noopener noreferrer"
+                                  <span
                                     className="text-decoration-none flex-grow-1"
+                                    style={{ cursor: 'pointer' }}
+                                    onClick={() => handleAttachmentAction(att, 'view')}
                                   >
                                     <i className="bi bi-paperclip me-2"></i>
                                     {att.filename} ({formatFileSize(att.size)})
-                                  </a>
+                                  </span>
                                   <div className="btn-group btn-group-sm">
                                     <button
                                       className="btn btn-outline-info btn-sm"

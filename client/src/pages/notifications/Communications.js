@@ -658,27 +658,26 @@ const Communications = () => {
                             </a>
                             <div className="btn-group btn-group-sm">
                               <button
-                                className="btn btn-outline-primary btn-sm"
-                                onClick={() => window.open(att.url, '_blank')}
+                                className="btn btn-outline-info btn-sm"
+                                onClick={() => handleAttachmentAction(att, 'view')}
                                 title="View"
                               >
                                 <i className="bi bi-eye"></i>
                               </button>
                               <button
+                                className="btn btn-outline-primary btn-sm"
+                                onClick={() => handleAttachmentAction(att, 'download')}
+                                title="Download"
+                              >
+                                <i className="bi bi-download"></i>
+                              </button>
+                              <button
                                 className="btn btn-outline-secondary btn-sm"
-                                onClick={() => window.print()}
+                                onClick={() => handleAttachmentAction(att, 'print')}
                                 title="Print"
                               >
                                 <i className="bi bi-printer"></i>
                               </button>
-                              <a
-                                href={att.url}
-                                download={att.filename}
-                                className="btn btn-outline-success btn-sm"
-                                title="Download"
-                              >
-                                <i className="bi bi-download"></i>
-                              </a>
                             </div>
                           </div>
                         ))}

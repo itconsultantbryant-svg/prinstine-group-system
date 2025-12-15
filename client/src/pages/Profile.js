@@ -441,22 +441,47 @@ const Profile = () => {
                         <div className="position-relative">
                           {formData.profile_image ? (
                             <img 
+                              key={`edit-${formData.profile_image}`}
                               src={formData.profile_image} 
                               alt="Profile preview" 
                               className="rounded-circle border border-2"
-                              style={{ width: '120px', height: '120px', objectFit: 'cover' }}
+                              style={{ 
+                                width: '120px', 
+                                height: '120px', 
+                                objectFit: 'cover',
+                                display: 'block',
+                                position: 'relative',
+                                zIndex: 2
+                              }}
                               onError={(e) => {
+                                console.error('Profile image failed to load in edit mode:', formData.profile_image);
                                 e.target.style.display = 'none';
-                                e.target.nextSibling.style.display = 'flex';
+                                const placeholder = e.target.parentElement.querySelector('.profile-placeholder-edit');
+                                if (placeholder) {
+                                  placeholder.style.display = 'flex';
+                                  placeholder.style.zIndex = '1';
+                                }
+                              }}
+                              onLoad={(e) => {
+                                // Hide placeholder when image loads successfully
+                                const placeholder = e.target.parentElement.querySelector('.profile-placeholder-edit');
+                                if (placeholder) {
+                                  placeholder.style.display = 'none';
+                                }
+                                e.target.style.zIndex = '2';
                               }}
                             />
                           ) : null}
                           <div 
-                            className="bg-secondary rounded-circle d-inline-flex align-items-center justify-content-center border border-2"
+                            className="bg-secondary rounded-circle d-inline-flex align-items-center justify-content-center border border-2 profile-placeholder-edit"
                             style={{ 
                               width: '120px', 
                               height: '120px',
-                              display: formData.profile_image ? 'none' : 'flex'
+                              display: formData.profile_image ? 'none' : 'flex',
+                              position: 'absolute',
+                              top: 0,
+                              left: 0,
+                              zIndex: formData.profile_image ? 1 : 2
                             }}
                           >
                             <i className="bi bi-person" style={{ fontSize: '3rem', color: 'white' }}></i>

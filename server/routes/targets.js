@@ -625,25 +625,47 @@ router.put('/progress/:id/approve', authenticateToken, requireRole('Admin'), [
       return res.status(404).json({ error: 'Progress entry not found' });
     }
 
-    // Update status (note: target_progress table may not have updated_at column)
+    // Update status - normalize to 'Approved' or 'Rejected'
+    const normalizedStatus = status === 'Approved' ? 'Approved' : 'Rejected';
+    
     try {
       await db.run(
         'UPDATE target_progress SET status = ? WHERE id = ?',
-        [status, req.params.id]
+        [normalizedStatus, req.params.id]
       );
     } catch (updateError) {
       // If column doesn't exist, try without updated_at
       if (updateError.message && updateError.message.includes('updated_at')) {
         await db.run(
           'UPDATE target_progress SET status = ? WHERE id = ?',
-          [status, req.params.id]
+          [normalizedStatus, req.params.id]
         );
       } else {
         throw updateError;
       }
     }
 
-    await logAction(req.user.id, 'approve_target_progress', 'target_progress', req.params.id, { status }, req);
+    // Wait a moment for database commit (especially for PostgreSQL)
+    await new Promise(resolve => setTimeout(resolve, 200));
+
+    // Verify the update was successful
+    const verifyProgress = await db.get(
+      'SELECT status, amount FROM target_progress WHERE id = ?',
+      [req.params.id]
+    );
+    
+    if (!verifyProgress) {
+      return res.status(404).json({ error: 'Progress entry not found after update' });
+    }
+    
+    console.log('Progress entry updated:', {
+      id: req.params.id,
+      status: verifyProgress.status,
+      amount: verifyProgress.amount,
+      expected_status: normalizedStatus
+    });
+
+    await logAction(req.user.id, 'approve_target_progress', 'target_progress', req.params.id, { status: normalizedStatus }, req);
 
     // Get updated target with metrics
     const target = await db.get('SELECT * FROM targets WHERE id = ?', [progressEntry.target_id]);
@@ -651,11 +673,34 @@ router.put('/progress/:id/approve', authenticateToken, requireRole('Admin'), [
       return res.status(404).json({ error: 'Target not found after progress update' });
     }
     
+    // Verify approved entries are being counted correctly
+    const debugQuery = await db.all(
+      `SELECT id, amount, status, 
+              UPPER(TRIM(COALESCE(status, ''))) as normalized_status
+       FROM target_progress
+       WHERE target_id = ?
+       ORDER BY id`,
+      [target.id]
+    );
+    console.log('All target_progress entries for target', target.id, ':', debugQuery);
+    
+    const approvedSum = await db.get(
+      `SELECT COALESCE(SUM(COALESCE(CAST(amount AS NUMERIC), CAST(progress_amount AS NUMERIC), 0)), 0) as total,
+              COUNT(*) as count
+       FROM target_progress
+       WHERE target_id = ?
+         AND (UPPER(TRIM(COALESCE(status, ''))) = 'APPROVED' OR status IS NULL OR status = '')`,
+      [target.id]
+    );
+    console.log('Approved entries sum for target', target.id, ':', approvedSum);
+    
     let metrics;
     try {
       metrics = await calculateTargetMetrics(target);
+      console.log('Calculated metrics for target', target.id, ':', metrics);
     } catch (metricsError) {
       console.error('Error calculating target metrics:', metricsError);
+      console.error('Error stack:', metricsError.stack);
       // Return basic response even if metrics calculation fails
       metrics = {
         total_progress: 0,

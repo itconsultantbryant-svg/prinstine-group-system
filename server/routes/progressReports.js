@@ -905,6 +905,135 @@ router.put('/:id/approve', authenticateToken, requireRole('Admin'), [
       // Continue even if logging fails
     }
 
+    // Create client if client_name is provided but client_id is not
+    if (status === 'Approved' && report.client_name && !report.client_id) {
+      try {
+        const { generateClientId } = require('./clients');
+        const USE_POSTGRESQL = !!process.env.DATABASE_URL;
+        
+        // Check if client already exists by name
+        const existingClientByName = await db.get(
+          'SELECT * FROM clients WHERE company_name = ? OR name = ? LIMIT 1',
+          [report.client_name, report.client_name]
+        );
+        
+        if (!existingClientByName) {
+          // Find or create user for client
+          let userId = null;
+          const clientEmail = report.client_email || `${report.client_name.toLowerCase().replace(/\s+/g, '.')}@client.local`;
+          
+          const existingUser = await db.get('SELECT * FROM users WHERE email = ?', [clientEmail]);
+          
+          if (!existingUser) {
+            const crypto = require('crypto');
+            const passwordHash = crypto.randomBytes(16).toString('hex');
+            
+            const userResult = await db.run(
+              `INSERT INTO users (email, username, password_hash, role, name, is_active, email_verified)
+               VALUES (?, ?, ?, ?, ?, 1, 1)`,
+              [clientEmail, clientEmail.split('@')[0], passwordHash, 'Client', report.client_name]
+            );
+            userId = USE_POSTGRESQL ? (userResult.rows && userResult.rows[0] && userResult.rows[0].id) : userResult.lastID;
+          } else {
+            userId = existingUser.id;
+          }
+          
+          // Check if client already exists for this user
+          const existingClient = await db.get('SELECT id FROM clients WHERE user_id = ?', [userId]);
+          if (!existingClient) {
+            const generatedClientId = generateClientId();
+            
+            // Map progress report category to client table category
+            const categoryMap = {
+              'Client for Consultancy': 'client for consultancy',
+              'Client for Audit': 'client for audit',
+              'Others': 'others'
+            };
+            const clientCategory = categoryMap[report.category] || (report.category ? report.category.toLowerCase() : 'others');
+            
+            // Map progress report status to client table progress_status
+            const statusMap = {
+              'Signed Contract': 'signed contract',
+              'Pipeline Client': 'pipeline client',
+              'Submitted': 'submitted',
+              'Pending': 'pending'
+            };
+            const clientProgressStatus = statusMap[report.status] || (report.status ? report.status.toLowerCase() : 'pending');
+            
+            // Check which columns exist in clients table
+            let clientsColumnNames = [];
+            if (USE_POSTGRESQL) {
+              const columns = await db.all(
+                "SELECT column_name FROM information_schema.columns WHERE table_name = 'clients'"
+              );
+              clientsColumnNames = columns.map(col => col.column_name);
+            } else {
+              const tableInfo = await db.all("PRAGMA table_info(clients)");
+              clientsColumnNames = tableInfo.map(col => col.name);
+            }
+            
+            const hasCategory = clientsColumnNames.includes('category');
+            const hasProgressStatus = clientsColumnNames.includes('progress_status');
+            const hasCreatedBy = clientsColumnNames.includes('created_by');
+            
+            // Build INSERT query dynamically
+            let insertColumns = ['user_id', 'client_id', 'company_name', 'status'];
+            let insertValues = [userId, generatedClientId, report.client_name, 'Active'];
+            
+            if (hasCategory) {
+              insertColumns.push('category');
+              insertValues.push(clientCategory);
+            }
+            if (hasProgressStatus) {
+              insertColumns.push('progress_status');
+              insertValues.push(clientProgressStatus);
+            }
+            if (hasCreatedBy) {
+              insertColumns.push('created_by');
+              insertValues.push(req.user.id);
+            }
+            
+            const placeholders = insertColumns.map(() => '?').join(', ');
+            const clientResult = await db.run(
+              `INSERT INTO clients (${insertColumns.join(', ')})
+               VALUES (${placeholders})`,
+              insertValues
+            );
+            
+            const createdClientId = USE_POSTGRESQL 
+              ? (clientResult.rows && clientResult.rows[0] && clientResult.rows[0].id)
+              : clientResult.lastID;
+            
+            console.log('Client created from progress report approval:', {
+              client_id: generatedClientId,
+              client_db_id: createdClientId,
+              name: report.client_name,
+              category: clientCategory
+            });
+            
+            // Emit real-time update for new client
+            if (global.io) {
+              global.io.emit('client_created', {
+                id: createdClientId,
+                client_id: generatedClientId,
+                name: report.client_name,
+                company_name: report.client_name,
+                category: clientCategory,
+                progress_status: clientProgressStatus,
+                status: 'Active',
+                created_by: req.user.name || 'Admin',
+                created_by_email: req.user.email
+              });
+              console.log('Emitted client_created event for client:', generatedClientId);
+            }
+          }
+        }
+      } catch (clientError) {
+        console.error('Error creating client from progress report approval (non-fatal):', clientError);
+        // Continue - don't fail the approval if client creation fails
+      }
+    }
+
     // Only update target progress if the report is APPROVED and has an amount
     if (status === 'Approved' && report.amount && parseFloat(report.amount) > 0) {
       try {
@@ -992,10 +1121,17 @@ router.put('/:id/approve', authenticateToken, requireRole('Admin'), [
             
             // Verify the total progress for this target using the same query as GET /targets (only Approved entries)
             const totalProgressCheck = await db.get(
-              `SELECT COALESCE(SUM(COALESCE(CAST(amount AS NUMERIC), CAST(progress_amount AS NUMERIC), 0)), 0) as total, COUNT(*) as count 
+              `SELECT COALESCE(SUM(CASE 
+                 WHEN status = 'Approved' OR UPPER(TRIM(COALESCE(status, ''))) = 'APPROVED' OR status IS NULL OR status = ''
+                 THEN COALESCE(CAST(amount AS NUMERIC), CAST(progress_amount AS NUMERIC), 0)
+                 ELSE 0
+               END), 0) as total,
+               COUNT(CASE 
+                 WHEN status = 'Approved' OR UPPER(TRIM(COALESCE(status, ''))) = 'APPROVED' OR status IS NULL OR status = ''
+                 THEN 1
+               END) as count 
                FROM target_progress 
-               WHERE CAST(target_id AS INTEGER) = CAST(? AS INTEGER)
-                 AND (status = 'Approved' OR status IS NULL)`,
+               WHERE CAST(target_id AS INTEGER) = CAST(? AS INTEGER)`,
               [targetIdInt]
             );
             console.log('Total progress for target', targetIdInt, ':', {

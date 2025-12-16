@@ -714,6 +714,17 @@ router.put('/progress/:id/approve', authenticateToken, requireRole('Admin'), [
     );
     console.log('All target_progress entries for target', target.id, ':', debugQuery);
     
+    // Directly query to verify what's actually in the database
+    const allProgressEntries = await db.all(
+      `SELECT id, amount, status, 
+              UPPER(TRIM(COALESCE(status, ''))) as normalized_status
+       FROM target_progress
+       WHERE target_id = ?
+       ORDER BY id`,
+      [target.id]
+    );
+    console.log('ALL progress entries for target', target.id, ':', JSON.stringify(allProgressEntries, null, 2));
+    
     const approvedSum = await db.get(
       `SELECT COALESCE(SUM(CASE 
          WHEN status = 'Approved' OR UPPER(TRIM(COALESCE(status, ''))) = 'APPROVED' OR status IS NULL OR status = ''
@@ -729,6 +740,21 @@ router.put('/progress/:id/approve', authenticateToken, requireRole('Admin'), [
       [target.id]
     );
     console.log('Approved entries sum for target', target.id, ':', approvedSum);
+    
+    // Also try a manual calculation to verify
+    let manualSum = 0;
+    let manualCount = 0;
+    if (allProgressEntries) {
+      for (const entry of allProgressEntries) {
+        const entryStatus = entry.status || '';
+        const normalizedStatus = entry.normalized_status || '';
+        if (entryStatus === 'Approved' || normalizedStatus === 'APPROVED' || !entryStatus) {
+          manualSum += parseFloat(entry.amount || 0);
+          manualCount++;
+        }
+      }
+    }
+    console.log('Manual calculation for target', target.id, ':', { total: manualSum, count: manualCount });
     
     let metrics;
     try {

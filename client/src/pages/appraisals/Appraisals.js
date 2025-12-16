@@ -139,15 +139,21 @@ const Appraisals = () => {
 
   const fetchStaff = async () => {
     try {
+      setError('');
       const response = await api.get('/appraisals/staff');
-      setStaff(response.data.staff || []);
-      if (!response.data.staff || response.data.staff.length === 0) {
+      const staffList = response.data.staff || [];
+      setStaff(staffList);
+      if (staffList.length === 0) {
         console.warn('No staff available for appraisal');
+        setError('No staff or department heads found in the system. Please ensure there are active staff members and department heads.');
+      } else {
+        console.log(`Loaded ${staffList.length} staff/department heads for appraisal`);
       }
     } catch (error) {
       console.error('Error fetching staff:', error);
       setStaff([]);
-      // Don't show error to user for staff list, just log it
+      const errorMessage = error.response?.data?.error || error.message || 'Failed to load staff list';
+      setError(`Error loading staff: ${errorMessage}`);
     }
   };
 
@@ -618,11 +624,16 @@ const Appraisals = () => {
                       required
                     >
                       <option value="">Select staff...</option>
-                      {staff.map((s) => (
-                        <option key={s.user_id} value={s.user_id}>
-                          {s.name} ({s.email})
-                        </option>
-                      ))}
+                      {staff.length === 0 ? (
+                        <option disabled>No staff or department heads available</option>
+                      ) : (
+                        staff.map((s) => (
+                          <option key={s.user_id} value={s.user_id}>
+                            {s.name} ({s.email}) - {s.role || 'Staff'}
+                            {s.department_name && ` - ${s.department_name}`}
+                          </option>
+                        ))
+                      )}
                     </select>
                   </div>
 

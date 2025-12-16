@@ -161,25 +161,82 @@ router.get('/my-history', authenticateToken, async (req, res) => {
 /**
  * GET /api/appraisals/staff
  * Get all staff for selection in appraisal form
+ * Returns all Staff and DepartmentHead users in the system
  */
 router.get('/staff', authenticateToken, async (req, res) => {
   try {
-    const staff = await db.all(`
+    // Get all Staff users with their staff records and department info
+    const staffUsers = await db.all(`
       SELECT u.id as user_id, u.name, u.email, u.role,
              s.id as staff_id, s.department,
              d.id as department_id, d.name as department_name
       FROM users u
-      LEFT JOIN staff s ON u.id = s.user_id
-      LEFT JOIN departments d ON s.department_id = d.id OR d.manager_id = u.id
-      WHERE u.role IN ('Staff', 'DepartmentHead')
+      INNER JOIN staff s ON u.id = s.user_id
+      LEFT JOIN departments d ON s.department_id = d.id
+      WHERE u.role = 'Staff'
         AND u.is_active = 1
       ORDER BY u.name
     `);
 
-    res.json({ staff });
+    // Get all Department Head users - they may or may not have staff records
+    // First, get dept heads who have staff records
+    const deptHeadsWithStaff = await db.all(`
+      SELECT DISTINCT u.id as user_id, u.name, u.email, u.role,
+             s.id as staff_id, s.department,
+             d.id as department_id, d.name as department_name
+      FROM users u
+      INNER JOIN departments d ON d.manager_id = u.id
+      LEFT JOIN staff s ON u.id = s.user_id
+      LEFT JOIN departments d2 ON s.department_id = d2.id
+      WHERE u.role = 'DepartmentHead'
+        AND u.is_active = 1
+      ORDER BY u.name
+    `);
+
+    // Get dept heads who don't have staff records
+    const deptHeadsWithoutStaff = await db.all(`
+      SELECT DISTINCT u.id as user_id, u.name, u.email, u.role,
+             NULL as staff_id, NULL as department,
+             d.id as department_id, d.name as department_name
+      FROM users u
+      INNER JOIN departments d ON d.manager_id = u.id
+      LEFT JOIN staff s ON u.id = s.user_id
+      WHERE u.role = 'DepartmentHead'
+        AND u.is_active = 1
+        AND s.id IS NULL
+      ORDER BY u.name
+    `);
+
+    // Combine all results
+    const allUsers = [...staffUsers, ...deptHeadsWithStaff, ...deptHeadsWithoutStaff];
+    
+    // Remove duplicates by user_id (in case a dept head also has a staff record)
+    const uniqueUsers = [];
+    const seenUserIds = new Set();
+    
+    allUsers.forEach(user => {
+      if (!seenUserIds.has(user.user_id)) {
+        seenUserIds.add(user.user_id);
+        // If user is both staff and dept head, prioritize showing dept head info
+        if (user.role === 'DepartmentHead' || deptHeadsWithStaff.find(dh => dh.user_id === user.user_id)) {
+          user.role = 'DepartmentHead';
+        }
+        uniqueUsers.push(user);
+      }
+    });
+
+    // Sort by name
+    uniqueUsers.sort((a, b) => {
+      const nameA = (a.name || '').toLowerCase();
+      const nameB = (b.name || '').toLowerCase();
+      return nameA.localeCompare(nameB);
+    });
+
+    console.log(`[Appraisals] Fetched ${uniqueUsers.length} staff/department heads for appraisal form`);
+    res.json({ staff: uniqueUsers });
   } catch (error) {
     console.error('Get staff for appraisal error:', error);
-    res.status(500).json({ error: 'Failed to fetch staff list' });
+    res.status(500).json({ error: 'Failed to fetch staff list: ' + error.message });
   }
 });
 

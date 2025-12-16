@@ -375,13 +375,38 @@ const Targets = () => {
     try {
       const response = await api.put(`/targets/progress/${progressId}/approve`, { status });
       
-      // Update target state immediately from response
+      // Update target state immediately from response data
       if (response.data && response.data.target) {
-        setTargets(prevTargets => prevTargets.map(target => 
-          target.id === response.data.target.id 
-            ? { ...target, ...response.data.target }
-            : target
-        ));
+        const updatedTarget = response.data.target;
+        setTargets(prevTargets => prevTargets.map(target => {
+          if (target.id === updatedTarget.id) {
+            // Merge all metrics from response
+            return {
+              ...target,
+              net_amount: parseFloat(updatedTarget.net_amount || 0),
+              progress_percentage: updatedTarget.progress_percentage || '0.00',
+              remaining_amount: parseFloat(updatedTarget.remaining_amount || 0),
+              total_progress: parseFloat(updatedTarget.total_progress || 0),
+              shared_in: parseFloat(updatedTarget.shared_in || 0),
+              shared_out: parseFloat(updatedTarget.shared_out || 0),
+              _lastUpdate: Date.now()
+            };
+          }
+          return target;
+        }));
+        
+        // Update selected target if viewing it
+        if (selectedTarget && selectedTarget.id === updatedTarget.id) {
+          setSelectedTarget(prev => ({
+            ...prev,
+            net_amount: parseFloat(updatedTarget.net_amount || 0),
+            progress_percentage: updatedTarget.progress_percentage || '0.00',
+            remaining_amount: parseFloat(updatedTarget.remaining_amount || 0),
+            total_progress: parseFloat(updatedTarget.total_progress || 0),
+            shared_in: parseFloat(updatedTarget.shared_in || 0),
+            shared_out: parseFloat(updatedTarget.shared_out || 0)
+          }));
+        }
       }
       
       // Refresh progress modal if viewing this target
@@ -389,7 +414,19 @@ const Targets = () => {
         await fetchTargetProgress(response.data.target.id);
       }
       
-      // Don't call fetchTargets() - socket event will handle the update
+      // Don't call fetchTargets() - socket event will handle the update, but wait a bit for socket
+      setTimeout(() => {
+        // Verify update after socket event should have fired
+        if (response.data && response.data.target) {
+          const target = targets.find(t => t.id === response.data.target.id);
+          if (target && parseFloat(target.net_amount || 0) === 0 && parseFloat(response.data.target.net_amount || 0) > 0) {
+            // Socket event might have missed, force update
+            setTargets(prevTargets => prevTargets.map(t => 
+              t.id === response.data.target.id ? { ...t, ...response.data.target } : t
+            ));
+          }
+        }
+      }, 1000);
     } catch (err) {
       const isNetworkError = err.code === 'ERR_NETWORK' || 
                             err.code === 'ERR_INTERNET_DISCONNECTED';

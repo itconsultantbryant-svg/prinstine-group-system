@@ -43,14 +43,41 @@ async function calculateTargetMetrics(target) {
     // Calculate total_progress (only approved entries)
     let totalProgress = 0;
     if (targetProgressExists) {
-      const progressResult = await db.get(
-        `SELECT COALESCE(SUM(COALESCE(CAST(amount AS NUMERIC), CAST(progress_amount AS NUMERIC), 0)), 0) as total
+      // Get all entries for debugging
+      const allEntries = await db.all(
+        `SELECT id, amount, status, 
+                UPPER(TRIM(COALESCE(status, ''))) as normalized_status
          FROM target_progress
-         WHERE target_id = ?
-           AND (UPPER(TRIM(COALESCE(status, ''))) = 'APPROVED' OR status IS NULL OR status = '')`,
+         WHERE target_id = ?`,
         [target.id]
       );
+      
+      if (allEntries && allEntries.length > 0) {
+        console.log(`[calculateTargetMetrics] Target ${target.id} progress entries:`, allEntries);
+      }
+      
+      // Calculate sum of approved entries - check for 'Approved' first, then normalized
+      // SQLite and PostgreSQL may store status differently, so check both
+      const progressResult = await db.get(
+        `SELECT COALESCE(SUM(CASE 
+           WHEN status = 'Approved' OR UPPER(TRIM(COALESCE(status, ''))) = 'APPROVED' OR status IS NULL OR status = ''
+           THEN COALESCE(CAST(amount AS NUMERIC), CAST(progress_amount AS NUMERIC), 0)
+           ELSE 0
+         END), 0) as total,
+         COUNT(CASE 
+           WHEN status = 'Approved' OR UPPER(TRIM(COALESCE(status, ''))) = 'APPROVED' OR status IS NULL OR status = ''
+           THEN 1
+         END) as count
+         FROM target_progress
+         WHERE target_id = ?`,
+        [target.id]
+      );
+      
       totalProgress = parseFloat(progressResult?.total || 0) || 0;
+      
+      if (allEntries && allEntries.length > 0) {
+        console.log(`[calculateTargetMetrics] Target ${target.id} - Approved count: ${progressResult?.count || 0}, Total: ${totalProgress}`);
+      }
     }
 
     // Check if fund_sharing table exists

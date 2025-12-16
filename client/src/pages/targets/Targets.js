@@ -233,12 +233,13 @@ const Targets = () => {
 
     const handleTargetProgressUpdated = (data) => {
       if (data && data.target_id) {
+        console.log('handleTargetProgressUpdated received data:', data);
+        
         // Update target metrics in real-time from socket data (no API call needed)
         setTargets(prevTargets => {
           return prevTargets.map(target => {
             if (target.id === data.target_id) {
-              // Merge new metrics from socket event with timestamp
-              return {
+              const updatedTarget = {
                 ...target,
                 net_amount: data.net_amount !== undefined ? parseFloat(data.net_amount) : target.net_amount,
                 progress_percentage: data.progress_percentage !== undefined ? data.progress_percentage : target.progress_percentage,
@@ -248,6 +249,16 @@ const Targets = () => {
                 shared_out: data.shared_out !== undefined ? parseFloat(data.shared_out) : target.shared_out,
                 _lastUpdate: Date.now() // Track when this was last updated
               };
+              
+              console.log('Updated target from socket event:', {
+                target_id: data.target_id,
+                old_net_amount: target.net_amount,
+                new_net_amount: updatedTarget.net_amount,
+                old_total_progress: target.total_progress,
+                new_total_progress: updatedTarget.total_progress
+              });
+              
+              return updatedTarget;
             }
             return target;
           });

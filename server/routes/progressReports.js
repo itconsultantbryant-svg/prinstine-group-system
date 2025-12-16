@@ -1143,15 +1143,31 @@ router.put('/:id/approve', authenticateToken, requireRole('Admin'), [
             
             // Also verify using the exact subquery from GET /targets (only Approved entries)
             const subqueryCheck = await db.get(
-              `SELECT COALESCE(SUM(COALESCE(CAST(tp.amount AS NUMERIC), CAST(tp.progress_amount AS NUMERIC), 0)), 0) as total_progress
+              `SELECT COALESCE(SUM(CASE 
+                 WHEN tp.status = 'Approved' OR UPPER(TRIM(COALESCE(tp.status, ''))) = 'APPROVED' OR tp.status IS NULL OR tp.status = ''
+                 THEN COALESCE(CAST(tp.amount AS NUMERIC), CAST(tp.progress_amount AS NUMERIC), 0)
+                 ELSE 0
+               END), 0) as total_progress
                FROM target_progress tp 
-               WHERE CAST(tp.target_id AS INTEGER) = CAST(? AS INTEGER)
-                 AND (tp.status = 'Approved' OR tp.status IS NULL)`,
+               WHERE CAST(tp.target_id AS INTEGER) = CAST(? AS INTEGER)`,
               [targetIdInt]
             );
             console.log('Subquery check (same as GET /targets - only Approved entries):', {
               total_progress: subqueryCheck?.total_progress || 0,
               matches_direct_query: (subqueryCheck?.total_progress || 0) === (totalProgressCheck?.total || 0)
+            });
+            
+            // Log the actual status value saved
+            const savedProgress = await db.get(
+              'SELECT id, amount, status FROM target_progress WHERE id = ?',
+              [progressId]
+            );
+            console.log('Saved progress entry details:', {
+              id: savedProgress?.id,
+              amount: savedProgress?.amount,
+              status: savedProgress?.status,
+              status_type: typeof savedProgress?.status,
+              status_length: savedProgress?.status?.length
             });
             
             // Update admin target in database when staff/dept head target progress changes

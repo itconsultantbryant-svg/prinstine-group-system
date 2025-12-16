@@ -41,12 +41,21 @@ const ProgressReport = ({ onClose }) => {
         }, 300);
       };
 
+      const handleProgressReportDeleted = () => {
+        console.log('Progress report deleted event received, refreshing...');
+        setTimeout(() => {
+          fetchReports();
+        }, 300);
+      };
+
       socket.on('progress_report_updated', handleProgressReportUpdated);
       socket.on('progress_report_approved', handleProgressReportApproved);
+      socket.on('progress_report_deleted', handleProgressReportDeleted);
 
       return () => {
         socket.off('progress_report_updated', handleProgressReportUpdated);
         socket.off('progress_report_approved', handleProgressReportApproved);
+        socket.off('progress_report_deleted', handleProgressReportDeleted);
       };
     }
   }, []);
@@ -217,6 +226,29 @@ const ProgressReport = ({ onClose }) => {
     } catch (err) {
       console.error('Error approving report:', err);
       setError(err.response?.data?.error || `Failed to ${status.toLowerCase()} progress report`);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleDeleteReport = async (reportId) => {
+    if (!window.confirm('Are you sure you want to delete this progress report? This action cannot be undone and will delete the report for everyone in the system.')) {
+      return;
+    }
+
+    try {
+      setError('');
+      setLoading(true);
+      await api.delete(`/progress-reports/${reportId}`);
+      
+      // Refresh reports after deletion
+      await fetchReports();
+      
+      // Show success message
+      alert('Progress report deleted successfully. All associated data has been removed.');
+    } catch (err) {
+      console.error('Error deleting report:', err);
+      setError(err.response?.data?.error || 'Failed to delete progress report');
     } finally {
       setLoading(false);
     }
@@ -489,6 +521,13 @@ const ProgressReport = ({ onClose }) => {
                                   title="Edit"
                                 >
                                   <i className="bi bi-pencil"></i>
+                                </button>
+                                <button
+                                  className="btn btn-sm btn-outline-danger"
+                                  onClick={() => handleDeleteReport(report.id)}
+                                  title="Delete Report"
+                                >
+                                  <i className="bi bi-trash"></i>
                                 </button>
                               </>
                             )}

@@ -40,6 +40,10 @@ const DepartmentHeadDashboard = () => {
   const [isMarketingDeptHead, setIsMarketingDeptHead] = useState(false);
   const [viewingStaffReport, setViewingStaffReport] = useState(null);
   
+  // Clients management for Marketing Department Head
+  const [clients, setClients] = useState([]);
+  const [clientsLoading, setClientsLoading] = useState(false);
+  
   // Department staff management
   const [departmentStaff, setDepartmentStaff] = useState([]);
   const [staffLoading, setStaffLoading] = useState(false);
@@ -68,6 +72,7 @@ const DepartmentHeadDashboard = () => {
   useEffect(() => {
     if (isMarketingDeptHead) {
       fetchStaffClientReports();
+      fetchClients();
     }
   }, [isMarketingDeptHead]);
 
@@ -122,6 +127,19 @@ const DepartmentHeadDashboard = () => {
       setStaffClientReports(pendingReports);
     } catch (error) {
       console.error('Error fetching staff client reports:', error);
+    }
+  };
+
+  const fetchClients = async () => {
+    try {
+      setClientsLoading(true);
+      const response = await api.get('/clients');
+      setClients(response.data.clients || []);
+    } catch (error) {
+      console.error('Error fetching clients:', error);
+      setClients([]);
+    } finally {
+      setClientsLoading(false);
     }
   };
 

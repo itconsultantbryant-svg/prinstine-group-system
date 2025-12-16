@@ -25,6 +25,7 @@ const PettyCash = () => {
   });
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
+  const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
     fetchTransactions();
@@ -36,11 +37,19 @@ const PettyCash = () => {
       socket.on('petty_cash_created', handlePettyCashCreated);
       socket.on('petty_cash_updated', handlePettyCashUpdated);
       socket.on('petty_cash_deleted', handlePettyCashDeleted);
+      socket.on('connect_error', (error) => {
+        console.error('Socket connection error:', error);
+      });
+      socket.on('error', (error) => {
+        console.error('Socket error:', error);
+      });
       
       return () => {
         socket.off('petty_cash_created', handlePettyCashCreated);
         socket.off('petty_cash_updated', handlePettyCashUpdated);
         socket.off('petty_cash_deleted', handlePettyCashDeleted);
+        socket.off('connect_error');
+        socket.off('error');
       };
     }
   }, []);
@@ -48,6 +57,14 @@ const PettyCash = () => {
   useEffect(() => {
     applyFilters();
   }, [transactions, fromDate, toDate]);
+
+  useEffect(() => {
+    // Clear errors when form is closed
+    if (!showForm) {
+      setError('');
+      setSuccess('');
+    }
+  }, [showForm]);
 
   const checkDeletePermission = async () => {
     // Only Assistant Finance Officer and Finance Department Head can delete
@@ -91,16 +108,26 @@ const PettyCash = () => {
   const fetchTransactions = async () => {
     try {
       setLoading(true);
+      setError('');
       const params = {};
       if (fromDate) params.from_date = fromDate;
       if (toDate) params.to_date = toDate;
       
       const response = await api.get('/finance/petty-cash', { params });
       setTransactions(response.data.transactions || []);
-      setSummary(response.data.summary || {});
+      setSummary(response.data.summary || {
+        total_deposited: 0,
+        total_withdrawn: 0,
+        closing_balance: 0
+      });
     } catch (error) {
       console.error('Error fetching transactions:', error);
-      setError('Failed to load petty cash entries');
+      const errorMessage = error.response?.data?.error || 
+                          error.message || 
+                          (error.code === 'ERR_NETWORK' ? 'Network error. Please check your connection.' : 'Failed to load petty cash entries');
+      setError(errorMessage);
+      setTransactions([]);
+      setSummary({ total_deposited: 0, total_withdrawn: 0, closing_balance: 0 });
     } finally {
       setLoading(false);
     }
@@ -110,8 +137,16 @@ const PettyCash = () => {
     try {
       const response = await api.get('/finance/petty-cash/custodians');
       setCustodians(response.data.custodians || []);
+      if (!response.data.custodians || response.data.custodians.length === 0) {
+        console.warn('No custodians available');
+      }
     } catch (error) {
       console.error('Error fetching custodians:', error);
+      setCustodians([]);
+      // Don't show error to user for custodians, just log it
+      if (error.response?.status === 403) {
+        console.error('Access denied to custodians endpoint');
+      }
     }
   };
 
@@ -137,70 +172,161 @@ const PettyCash = () => {
     setError('');
     setSuccess('');
 
+    // Prevent double submission
+    if (submitting) {
+      return;
+    }
+
+    // Validation
+    if (!formData.transaction_date) {
+      setError('Transaction date and time is required');
+      return;
+    }
+
     if (!formData.petty_cash_custodian_id) {
       setError('Please select a custodian');
       return;
     }
 
-    if (!formData.amount_deposit && !formData.amount_withdrawal) {
+    const deposit = parseFloat(formData.amount_deposit) || 0;
+    const withdrawal = parseFloat(formData.amount_withdrawal) || 0;
+
+    if (deposit === 0 && withdrawal === 0) {
       setError('Please enter either deposit or withdrawal amount');
       return;
     }
 
-    if (formData.amount_deposit && formData.amount_withdrawal) {
+    if (deposit > 0 && withdrawal > 0) {
       setError('Cannot have both deposit and withdrawal in the same transaction');
       return;
     }
 
+    if (deposit < 0 || withdrawal < 0) {
+      setError('Amounts cannot be negative');
+      return;
+    }
+
+    setSubmitting(true);
     try {
-      if (editingTransaction) {
-        await api.put(`/finance/petty-cash/${editingTransaction.id}`, formData);
+      const payload = {
+        transaction_date: formData.transaction_date,
+        petty_cash_custodian_id: formData.petty_cash_custodian_id,
+        amount_deposit: deposit > 0 ? deposit : 0,
+        amount_withdrawal: withdrawal > 0 ? withdrawal : 0,
+        description: formData.description || '',
+        charged_to: formData.charged_to || ''
+      };
+
+      if (editingTransaction && editingTransaction.id) {
+        await api.put(`/finance/petty-cash/${editingTransaction.id}`, payload);
         setSuccess('Petty cash entry updated successfully');
       } else {
-        await api.post('/finance/petty-cash', formData);
+        await api.post('/finance/petty-cash', payload);
         setSuccess('Petty cash entry created successfully');
       }
       
-      setShowForm(false);
-      setEditingTransaction(null);
-      setFormData({
-        transaction_date: new Date().toISOString().slice(0, 16),
-        petty_cash_custodian_id: '',
-        amount_deposit: '',
-        amount_withdrawal: '',
-        description: '',
-        charged_to: ''
-      });
-      fetchTransactions();
+      // Clear form and close modal after a short delay to show success message
+      setTimeout(() => {
+        setShowForm(false);
+        setEditingTransaction(null);
+        setFormData({
+          transaction_date: new Date().toISOString().slice(0, 16),
+          petty_cash_custodian_id: '',
+          amount_deposit: '',
+          amount_withdrawal: '',
+          description: '',
+          charged_to: ''
+        });
+        setSubmitting(false);
+      }, 500);
+      
+      await fetchTransactions();
     } catch (error) {
-      setError(error.response?.data?.error || 'Failed to save petty cash entry');
+      setSubmitting(false);
+      console.error('Error saving petty cash entry:', error);
+      
+      let errorMessage = 'Failed to save petty cash entry';
+      
+      if (error.response) {
+        // Server responded with error
+        if (error.response.data?.errors && Array.isArray(error.response.data.errors)) {
+          // Multiple validation errors
+          errorMessage = error.response.data.errors.map(err => err.msg || err.message).join(', ');
+        } else if (error.response.data?.error) {
+          errorMessage = error.response.data.error;
+        } else if (error.response.status === 403) {
+          errorMessage = 'You do not have permission to perform this action.';
+        } else if (error.response.status === 404) {
+          errorMessage = 'Entry not found.';
+        } else if (error.response.status === 400) {
+          errorMessage = error.response.data?.message || 'Invalid data provided. Please check your input.';
+        }
+      } else if (error.code === 'ERR_NETWORK' || error.message === 'Network Error') {
+        errorMessage = 'Network error. Please check your connection and try again.';
+      } else if (error.message) {
+        errorMessage = error.message;
+      }
+      
+      setError(errorMessage);
     }
   };
 
   const handleEdit = (transaction) => {
-    setEditingTransaction(transaction);
-    setFormData({
-      transaction_date: transaction.transaction_date ? new Date(transaction.transaction_date).toISOString().slice(0, 16) : new Date().toISOString().slice(0, 16),
-      petty_cash_custodian_id: transaction.custodian_id || '',
-      amount_deposit: transaction.amount_deposited || '',
-      amount_withdrawal: transaction.amount_withdrawn || '',
-      description: transaction.description || '',
-      charged_to: transaction.charged_to || ''
-    });
-    setShowForm(true);
-  };
-
-  const handleDelete = async (id) => {
-    if (!window.confirm('Are you sure you want to delete this petty cash entry?')) {
+    if (!transaction || !transaction.id) {
+      setError('Invalid transaction data');
       return;
     }
 
     try {
+      setEditingTransaction(transaction);
+      let transactionDate = new Date().toISOString().slice(0, 16);
+      if (transaction.transaction_date) {
+        try {
+          transactionDate = new Date(transaction.transaction_date).toISOString().slice(0, 16);
+        } catch (e) {
+          console.warn('Invalid transaction date, using current date');
+        }
+      }
+      
+      setFormData({
+        transaction_date: transactionDate,
+        petty_cash_custodian_id: transaction.custodian_id || transaction.petty_cash_custodian_id || '',
+        amount_deposit: transaction.amount_deposited || '',
+        amount_withdrawal: transaction.amount_withdrawn || '',
+        description: transaction.description || '',
+        charged_to: transaction.charged_to || ''
+      });
+      setShowForm(true);
+      setError('');
+    } catch (error) {
+      console.error('Error preparing edit form:', error);
+      setError('Failed to load transaction for editing');
+    }
+  };
+
+  const handleDelete = async (id) => {
+    if (!id) {
+      setError('Invalid entry ID');
+      return;
+    }
+
+    if (!window.confirm('Are you sure you want to delete this petty cash entry? This action cannot be undone.')) {
+      return;
+    }
+
+    try {
+      setError('');
       await api.delete(`/finance/petty-cash/${id}`);
       setSuccess('Petty cash entry deleted successfully');
-      fetchTransactions();
+      await fetchTransactions();
     } catch (error) {
-      setError(error.response?.data?.error || 'Failed to delete petty cash entry');
+      console.error('Error deleting petty cash entry:', error);
+      const errorMessage = error.response?.data?.error || 
+                          (error.response?.status === 403 ? 'You do not have permission to delete this entry.' :
+                          error.response?.status === 404 ? 'Entry not found.' :
+                          error.code === 'ERR_NETWORK' ? 'Network error. Please check your connection and try again.' : 
+                          'Failed to delete petty cash entry');
+      setError(errorMessage);
     }
   };
 
@@ -496,8 +622,15 @@ const PettyCash = () => {
                     >
                       Cancel
                     </button>
-                    <button type="submit" className="btn btn-primary">
-                      {editingTransaction ? 'Update' : 'Create'}
+                    <button type="submit" className="btn btn-primary" disabled={submitting}>
+                      {submitting ? (
+                        <>
+                          <span className="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>
+                          {editingTransaction ? 'Updating...' : 'Creating...'}
+                        </>
+                      ) : (
+                        editingTransaction ? 'Update' : 'Create'
+                      )}
                     </button>
                   </div>
                 </form>

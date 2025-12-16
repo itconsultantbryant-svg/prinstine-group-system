@@ -249,7 +249,10 @@ router.post('/', authenticateToken, [
   try {
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
-      return res.status(400).json({ errors: errors.array() });
+      return res.status(400).json({ 
+        error: 'Validation failed',
+        errors: errors.array() 
+      });
     }
 
     const {
@@ -264,16 +267,37 @@ router.post('/', authenticateToken, [
       comment_management
     } = req.body;
 
+    // Validate required fields
+    if (!staff_id || !appraised_by_user_id) {
+      return res.status(400).json({ error: 'Staff ID and appraised by user ID are required' });
+    }
+
     // Get staff details
-    const staff = await db.get('SELECT id, name, email FROM users WHERE id = ?', [staff_id]);
+    const staff = await db.get('SELECT id, name, email, is_active FROM users WHERE id = ?', [staff_id]);
     if (!staff) {
       return res.status(404).json({ error: 'Staff member not found' });
     }
+    if (!staff.is_active) {
+      return res.status(400).json({ error: 'Cannot create appraisal for inactive staff member' });
+    }
 
     // Get appraised_by user details
-    const appraisedBy = await db.get('SELECT id, name, email, role FROM users WHERE id = ?', [appraised_by_user_id]);
+    const appraisedBy = await db.get('SELECT id, name, email, role, is_active FROM users WHERE id = ?', [appraised_by_user_id]);
     if (!appraisedBy) {
       return res.status(404).json({ error: 'Appraised by user not found' });
+    }
+    if (!appraisedBy.is_active) {
+      return res.status(400).json({ error: 'Cannot create appraisal with inactive user as appraiser' });
+    }
+
+    // Validate grade levels
+    const gradeAppraise = parseInt(grade_level_appraise);
+    const gradeManagement = parseInt(grade_level_management);
+    if (isNaN(gradeAppraise) || gradeAppraise < 1 || gradeAppraise > 3) {
+      return res.status(400).json({ error: 'Invalid grade level (Appraise). Must be 1, 2, or 3.' });
+    }
+    if (isNaN(gradeManagement) || gradeManagement < 1 || gradeManagement > 3) {
+      return res.status(400).json({ error: 'Invalid grade level (Management). Must be 1, 2, or 3.' });
     }
 
     // Create appraisal
@@ -405,15 +429,22 @@ router.get('/:id', authenticateToken, async (req, res) => {
  * Update appraisal (only by creator)
  */
 router.put('/:id', authenticateToken, [
-  body('grade_level_appraise').optional().isInt({ min: 1, max: 3 }),
-  body('grade_level_management').optional().isInt({ min: 1, max: 3 }),
+  body('grade_level_appraise').optional().isInt({ min: 1, max: 3 }).withMessage('Grade level (Appraise) must be 1, 2, or 3'),
+  body('grade_level_management').optional().isInt({ min: 1, max: 3 }).withMessage('Grade level (Management) must be 1, 2, or 3'),
   body('comment_appraise').optional().trim(),
   body('comment_management').optional().trim()
 ], async (req, res) => {
   try {
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
-      return res.status(400).json({ errors: errors.array() });
+      return res.status(400).json({ 
+        error: 'Validation failed',
+        errors: errors.array() 
+      });
+    }
+
+    if (!req.params.id || isNaN(parseInt(req.params.id))) {
+      return res.status(400).json({ error: 'Invalid appraisal ID' });
     }
 
     const appraisal = await db.get('SELECT * FROM appraisals WHERE id = ?', [req.params.id]);

@@ -28,6 +28,7 @@ const Appraisals = () => {
   });
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
+  const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
     fetchAppraisals();
@@ -40,17 +41,29 @@ const Appraisals = () => {
       socket.on('appraisal_updated', handleAppraisalUpdated);
       socket.on('appraisal_deleted', handleAppraisalDeleted);
       socket.on('appraisal_received', handleAppraisalReceived);
+      socket.on('connect_error', (error) => {
+        console.error('Socket connection error:', error);
+      });
+      socket.on('error', (error) => {
+        console.error('Socket error:', error);
+      });
       
       return () => {
         socket.off('appraisal_created', handleAppraisalCreated);
         socket.off('appraisal_updated', handleAppraisalUpdated);
         socket.off('appraisal_deleted', handleAppraisalDeleted);
         socket.off('appraisal_received', handleAppraisalReceived);
+        socket.off('connect_error');
+        socket.off('error');
       };
     }
   }, []);
 
   useEffect(() => {
+    // Clear messages when switching tabs
+    setError('');
+    setSuccess('');
+    
     if (activeTab === 'summary' && user?.role === 'Admin') {
       fetchSummary();
     } else if (activeTab === 'my-history') {
@@ -60,14 +73,27 @@ const Appraisals = () => {
     }
   }, [activeTab]);
 
+  useEffect(() => {
+    // Clear errors when form is closed
+    if (!showForm) {
+      setError('');
+      setSuccess('');
+    }
+  }, [showForm]);
+
   const fetchAppraisals = async () => {
     try {
       setLoading(true);
+      setError('');
       const response = await api.get('/appraisals');
       setAppraisals(response.data.appraisals || []);
     } catch (error) {
       console.error('Error fetching appraisals:', error);
-      setError('Failed to load appraisals');
+      const errorMessage = error.response?.data?.error || 
+                          error.message || 
+                          (error.code === 'ERR_NETWORK' ? 'Network error. Please check your connection.' : 'Failed to load appraisals');
+      setError(errorMessage);
+      setAppraisals([]);
     } finally {
       setLoading(false);
     }
@@ -76,11 +102,16 @@ const Appraisals = () => {
   const fetchMyHistory = async () => {
     try {
       setLoading(true);
+      setError('');
       const response = await api.get('/appraisals/my-history');
       setAppraisals(response.data.appraisals || []);
     } catch (error) {
       console.error('Error fetching my history:', error);
-      setError('Failed to load appraisal history');
+      const errorMessage = error.response?.data?.error || 
+                          error.message || 
+                          (error.code === 'ERR_NETWORK' ? 'Network error. Please check your connection.' : 'Failed to load appraisal history');
+      setError(errorMessage);
+      setAppraisals([]);
     } finally {
       setLoading(false);
     }
@@ -89,11 +120,18 @@ const Appraisals = () => {
   const fetchSummary = async () => {
     try {
       setLoading(true);
+      setError('');
       const response = await api.get('/appraisals/summary');
       setSummary(response.data.summaries || []);
     } catch (error) {
       console.error('Error fetching summary:', error);
-      setError('Failed to load appraisal summary');
+      const errorMessage = error.response?.data?.error || 
+                          error.message || 
+                          (error.response?.status === 403 ? 'You do not have permission to view this summary.' :
+                          error.code === 'ERR_NETWORK' ? 'Network error. Please check your connection.' : 
+                          'Failed to load appraisal summary');
+      setError(errorMessage);
+      setSummary([]);
     } finally {
       setLoading(false);
     }
@@ -103,8 +141,13 @@ const Appraisals = () => {
     try {
       const response = await api.get('/appraisals/staff');
       setStaff(response.data.staff || []);
+      if (!response.data.staff || response.data.staff.length === 0) {
+        console.warn('No staff available for appraisal');
+      }
     } catch (error) {
       console.error('Error fetching staff:', error);
+      setStaff([]);
+      // Don't show error to user for staff list, just log it
     }
   };
 
@@ -112,8 +155,13 @@ const Appraisals = () => {
     try {
       const response = await api.get('/departments');
       setDepartments(response.data.departments || []);
+      if (!response.data.departments || response.data.departments.length === 0) {
+        console.warn('No departments available');
+      }
     } catch (error) {
       console.error('Error fetching departments:', error);
+      setDepartments([]);
+      // Don't show error to user for departments list, just log it
     }
   };
 
@@ -145,27 +193,59 @@ const Appraisals = () => {
     setError('');
     setSuccess('');
 
+    // Prevent double submission
+    if (submitting) {
+      return;
+    }
+
+    // Validation
     if (!formData.staff_id || !formData.appraised_by_user_id || 
-        !formData.grade_level_appraise || !formData.grade_level_management) {
+        !formData.grade_level_appraise || !formData.grade_level_management ||
+        !formData.department_name) {
       setError('Please fill in all required fields');
+      return;
+    }
+
+    // Validate grade levels
+    const gradeAppraise = parseInt(formData.grade_level_appraise);
+    const gradeManagement = parseInt(formData.grade_level_management);
+    
+    if (isNaN(gradeAppraise) || gradeAppraise < 1 || gradeAppraise > 3) {
+      setError('Invalid grade level for appraise. Must be 1, 2, or 3.');
+      return;
+    }
+    
+    if (isNaN(gradeManagement) || gradeManagement < 1 || gradeManagement > 3) {
+      setError('Invalid grade level for management. Must be 1, 2, or 3.');
       return;
     }
 
     try {
       // Get appraised by user details
-      const appraisedByUser = [...staff, ...(departmentStaff.staff || []), departmentStaff.department_head].find(
+      const allUsers = [...staff, ...(departmentStaff.staff || [])];
+      if (departmentStaff.department_head) {
+        allUsers.push(departmentStaff.department_head);
+      }
+      
+      const appraisedByUser = allUsers.find(
         u => u && (u.user_id === parseInt(formData.appraised_by_user_id) || u.id === parseInt(formData.appraised_by_user_id))
       );
 
+      if (!appraisedByUser) {
+        setError('Selected appraised by user not found');
+        return;
+      }
+
+      setSubmitting(true);
       const payload = {
         ...formData,
         appraised_by_user_id: parseInt(formData.appraised_by_user_id),
-        appraised_by_name: appraisedByUser?.name || user.name,
-        grade_level_appraise: parseInt(formData.grade_level_appraise),
-        grade_level_management: parseInt(formData.grade_level_management)
+        appraised_by_name: appraisedByUser.name || user.name,
+        grade_level_appraise: gradeAppraise,
+        grade_level_management: gradeManagement
       };
 
-      if (editingAppraisal) {
+      if (editingAppraisal && editingAppraisal.id) {
         await api.put(`/appraisals/${editingAppraisal.id}`, payload);
         setSuccess('Appraisal updated successfully');
       } else {
@@ -173,47 +253,103 @@ const Appraisals = () => {
         setSuccess('Appraisal created successfully');
       }
 
-      setShowForm(false);
-      setEditingAppraisal(null);
-      resetForm();
-      fetchAppraisals();
-      if (activeTab === 'my-history') fetchMyHistory();
+      // Clear form and close modal after a short delay to show success message
+      setTimeout(() => {
+        setShowForm(false);
+        setEditingAppraisal(null);
+        resetForm();
+        setSubmitting(false);
+      }, 500);
+      
+      await fetchAppraisals();
+      if (activeTab === 'my-history') await fetchMyHistory();
+      if (activeTab === 'summary') await fetchSummary();
     } catch (error) {
-      setError(error.response?.data?.error || 'Failed to save appraisal');
+      setSubmitting(false);
+      console.error('Error saving appraisal:', error);
+      
+      let errorMessage = 'Failed to save appraisal';
+      
+      if (error.response) {
+        // Server responded with error
+        if (error.response.data?.errors && Array.isArray(error.response.data.errors)) {
+          // Multiple validation errors
+          errorMessage = error.response.data.errors.map(err => err.msg || err.message).join(', ');
+        } else if (error.response.data?.error) {
+          errorMessage = error.response.data.error;
+        } else if (error.response.status === 403) {
+          errorMessage = 'You do not have permission to perform this action.';
+        } else if (error.response.status === 404) {
+          errorMessage = 'Staff member or appraiser not found.';
+        } else if (error.response.status === 400) {
+          errorMessage = error.response.data?.message || 'Invalid data provided. Please check your input.';
+        }
+      } else if (error.code === 'ERR_NETWORK' || error.message === 'Network Error') {
+        errorMessage = 'Network error. Please check your connection and try again.';
+      } else if (error.message) {
+        errorMessage = error.message;
+      }
+      
+      setError(errorMessage);
     }
   };
 
   const handleEdit = (appraisal) => {
-    setEditingAppraisal(appraisal);
-    setFormData({
-      staff_id: appraisal.staff_id,
-      department_id: appraisal.department_id || '',
-      department_name: appraisal.department_name || '',
-      appraised_by_user_id: appraisal.appraised_by_user_id,
-      appraised_by_name: appraisal.appraised_by_name || '',
-      grade_level_appraise: appraisal.grade_level_appraise.toString(),
-      grade_level_management: appraisal.grade_level_management.toString(),
-      comment_appraise: appraisal.comment_appraise || '',
-      comment_management: appraisal.comment_management || ''
-    });
-    if (appraisal.department_id) {
-      fetchDepartmentStaff(appraisal.department_id);
-    }
-    setShowForm(true);
-  };
-
-  const handleDelete = async (id) => {
-    if (!window.confirm('Are you sure you want to delete this appraisal?')) {
+    if (!appraisal || !appraisal.id) {
+      setError('Invalid appraisal data');
       return;
     }
 
     try {
+      setEditingAppraisal(appraisal);
+      setFormData({
+        staff_id: appraisal.staff_id || '',
+        department_id: appraisal.department_id || '',
+        department_name: appraisal.department_name || '',
+        appraised_by_user_id: appraisal.appraised_by_user_id || '',
+        appraised_by_name: appraisal.appraised_by_name || '',
+        grade_level_appraise: appraisal.grade_level_appraise ? appraisal.grade_level_appraise.toString() : '',
+        grade_level_management: appraisal.grade_level_management ? appraisal.grade_level_management.toString() : '',
+        comment_appraise: appraisal.comment_appraise || '',
+        comment_management: appraisal.comment_management || ''
+      });
+      if (appraisal.department_id) {
+        fetchDepartmentStaff(appraisal.department_id);
+      }
+      setShowForm(true);
+      setError('');
+      setSuccess('');
+    } catch (error) {
+      console.error('Error preparing edit form:', error);
+      setError('Failed to load appraisal for editing');
+    }
+  };
+
+  const handleDelete = async (id) => {
+    if (!id) {
+      setError('Invalid appraisal ID');
+      return;
+    }
+
+    if (!window.confirm('Are you sure you want to delete this appraisal? This action cannot be undone.')) {
+      return;
+    }
+
+    try {
+      setError('');
       await api.delete(`/appraisals/${id}`);
       setSuccess('Appraisal deleted successfully');
-      fetchAppraisals();
-      if (activeTab === 'my-history') fetchMyHistory();
+      await fetchAppraisals();
+      if (activeTab === 'my-history') await fetchMyHistory();
+      if (activeTab === 'summary') await fetchSummary();
     } catch (error) {
-      setError(error.response?.data?.error || 'Failed to delete appraisal');
+      console.error('Error deleting appraisal:', error);
+      const errorMessage = error.response?.data?.error || 
+                          (error.response?.status === 403 ? 'You do not have permission to delete this appraisal.' :
+                          error.response?.status === 404 ? 'Appraisal not found.' :
+                          error.code === 'ERR_NETWORK' ? 'Network error. Please check your connection and try again.' : 
+                          'Failed to delete appraisal');
+      setError(errorMessage);
     }
   };
 
@@ -604,8 +740,15 @@ const Appraisals = () => {
                     >
                       Cancel
                     </button>
-                    <button type="submit" className="btn btn-primary">
-                      {editingAppraisal ? 'Update' : 'Create'}
+                    <button type="submit" className="btn btn-primary" disabled={submitting}>
+                      {submitting ? (
+                        <>
+                          <span className="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>
+                          {editingAppraisal ? 'Updating...' : 'Creating...'}
+                        </>
+                      ) : (
+                        editingAppraisal ? 'Update' : 'Create'
+                      )}
                     </button>
                   </div>
                 </form>

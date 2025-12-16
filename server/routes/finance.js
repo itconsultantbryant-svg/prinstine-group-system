@@ -161,17 +161,23 @@ router.get('/petty-cash', authenticateToken, async (req, res) => {
     });
 
     // Calculate closing balance for each period
-    Object.values(byPeriod).forEach(period => {
+    // Note: This is simplified - for production, consider async/await or pre-fetching ledger data
+    for (const period of Object.values(byPeriod)) {
       const ledger = transactions.find(t => `${months[t.month - 1]} ${t.year}` === period.period);
       if (ledger) {
-        const ledgerData = db.get(
-          'SELECT starting_balance FROM petty_cash_ledgers WHERE year = ? AND month = ?',
-          [ledger.year, ledger.month]
-        );
-        period.starting_balance = ledgerData?.starting_balance || 0;
+        try {
+          const ledgerData = await db.get(
+            'SELECT starting_balance FROM petty_cash_ledgers WHERE year = ? AND month = ?',
+            [ledger.year, ledger.month]
+          );
+          period.starting_balance = ledgerData?.starting_balance || 0;
+        } catch (err) {
+          console.error('Error fetching ledger data for period:', err);
+          period.starting_balance = 0;
+        }
       }
       period.closing_balance = period.starting_balance + period.total_deposited - period.total_withdrawn;
-    });
+    }
 
     res.json({ 
       transactions,
@@ -243,15 +249,18 @@ router.get('/petty-cash/custodians', authenticateToken, async (req, res) => {
 router.post('/petty-cash', authenticateToken, [
   body('transaction_date').isISO8601().withMessage('Valid transaction date and time required'),
   body('petty_cash_custodian_id').notEmpty().withMessage('Petty cash custodian is required'),
-  body('amount_deposit').optional().isFloat({ min: 0 }),
-  body('amount_withdrawal').optional().isFloat({ min: 0 }),
+  body('amount_deposit').optional().isFloat({ min: 0 }).withMessage('Amount deposit must be a non-negative number'),
+  body('amount_withdrawal').optional().isFloat({ min: 0 }).withMessage('Amount withdrawal must be a non-negative number'),
   body('description').optional().trim(),
   body('charged_to').optional().trim()
 ], async (req, res) => {
   try {
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
-      return res.status(400).json({ errors: errors.array() });
+      return res.status(400).json({ 
+        error: 'Validation failed',
+        errors: errors.array() 
+      });
     }
 
     // Check access
@@ -268,6 +277,16 @@ router.post('/petty-cash', authenticateToken, [
       charged_to = ''
     } = req.body;
 
+    // Validate transaction date
+    if (!transaction_date) {
+      return res.status(400).json({ error: 'Transaction date is required' });
+    }
+
+    const transDate = new Date(transaction_date);
+    if (isNaN(transDate.getTime())) {
+      return res.status(400).json({ error: 'Invalid transaction date format' });
+    }
+
     // Validate that at least one amount is provided
     const deposit = parseFloat(amount_deposit) || 0;
     const withdrawal = parseFloat(amount_withdrawal) || 0;
@@ -278,23 +297,34 @@ router.post('/petty-cash', authenticateToken, [
     if (deposit > 0 && withdrawal > 0) {
       return res.status(400).json({ error: 'Cannot have both deposit and withdrawal in the same transaction' });
     }
+    if (deposit < 0 || withdrawal < 0) {
+      return res.status(400).json({ error: 'Amounts cannot be negative' });
+    }
 
     // Validate custodian - can be staff or department head
+    if (!petty_cash_custodian_id) {
+      return res.status(400).json({ error: 'Petty cash custodian is required' });
+    }
+
     let custodianUser = null;
-    const staff = await db.get('SELECT user_id FROM staff WHERE id = ? OR user_id = ?', [petty_cash_custodian_id, petty_cash_custodian_id]);
-    if (staff) {
-      custodianUser = await db.get('SELECT id FROM users WHERE id = ?', [staff.user_id]);
-    } else {
-      custodianUser = await db.get('SELECT id FROM users WHERE id = ? AND (role = ? OR role = ?)', 
-        [petty_cash_custodian_id, 'DepartmentHead', 'Admin']);
+    try {
+      const staff = await db.get('SELECT user_id FROM staff WHERE id = ? OR user_id = ?', [petty_cash_custodian_id, petty_cash_custodian_id]);
+      if (staff) {
+        custodianUser = await db.get('SELECT id FROM users WHERE id = ? AND is_active = 1', [staff.user_id]);
+      } else {
+        custodianUser = await db.get('SELECT id FROM users WHERE id = ? AND (role = ? OR role = ?) AND is_active = 1', 
+          [petty_cash_custodian_id, 'DepartmentHead', 'Admin']);
+      }
+    } catch (dbError) {
+      console.error('Error validating custodian:', dbError);
+      return res.status(500).json({ error: 'Failed to validate custodian' });
     }
 
     if (!custodianUser) {
-      return res.status(400).json({ error: 'Invalid custodian. Must be a valid staff member or department head.' });
+      return res.status(400).json({ error: 'Invalid custodian. Must be a valid active staff member or department head.' });
     }
 
     // Get or create ledger for the month/year of transaction
-    const transDate = new Date(transaction_date);
     const month = transDate.getMonth() + 1;
     const year = transDate.getFullYear();
 
@@ -413,23 +443,30 @@ router.post('/petty-cash', authenticateToken, [
   }
 });
 
-// Update petty cash entry (Assistant Finance Officer, Finance Department Head, and Admin)
+    // Update petty cash entry (Assistant Finance Officer, Finance Department Head, and Admin)
 router.put('/petty-cash/:id', authenticateToken, [
-  body('transaction_date').optional().isISO8601(),
-  body('amount_deposit').optional().isFloat({ min: 0 }),
-  body('amount_withdrawal').optional().isFloat({ min: 0 }),
+  body('transaction_date').optional().isISO8601().withMessage('Valid transaction date and time required'),
+  body('amount_deposit').optional().isFloat({ min: 0 }).withMessage('Amount deposit must be a non-negative number'),
+  body('amount_withdrawal').optional().isFloat({ min: 0 }).withMessage('Amount withdrawal must be a non-negative number'),
   body('description').optional().trim(),
   body('charged_to').optional().trim()
 ], async (req, res) => {
   try {
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
-      return res.status(400).json({ errors: errors.array() });
+      return res.status(400).json({ 
+        error: 'Validation failed',
+        errors: errors.array() 
+      });
     }
 
     // Check access
     if (!(await canManagePettyCash(req.user))) {
-      return res.status(403).json({ error: 'Access denied' });
+      return res.status(403).json({ error: 'Access denied. Only Finance staff and Admin can update petty cash entries.' });
+    }
+
+    if (!req.params.id || isNaN(parseInt(req.params.id))) {
+      return res.status(400).json({ error: 'Invalid transaction ID' });
     }
 
     const transaction = await db.get(
@@ -445,17 +482,51 @@ router.put('/petty-cash/:id', authenticateToken, [
     const updateFields = [];
     const params = [];
 
+    // Validate transaction date if provided
     if (updates.transaction_date) {
+      const transDate = new Date(updates.transaction_date);
+      if (isNaN(transDate.getTime())) {
+        return res.status(400).json({ error: 'Invalid transaction date format' });
+      }
       updateFields.push('transaction_date = ?');
       params.push(updates.transaction_date);
     }
+
+    // Validate amounts - ensure both are not provided
+    const deposit = updates.amount_deposit !== undefined ? parseFloat(updates.amount_deposit) || 0 : undefined;
+    const withdrawal = updates.amount_withdrawal !== undefined ? parseFloat(updates.amount_withdrawal) || 0 : undefined;
+    
+    if (deposit !== undefined && deposit < 0) {
+      return res.status(400).json({ error: 'Amount deposit cannot be negative' });
+    }
+    if (withdrawal !== undefined && withdrawal < 0) {
+      return res.status(400).json({ error: 'Amount withdrawal cannot be negative' });
+    }
+
+    // Get existing amounts
+    const existingDeposit = parseFloat(transaction.amount_deposited) || 0;
+    const existingWithdrawal = parseFloat(transaction.amount_withdrawn) || 0;
+    
+    // Determine final values
+    const finalDeposit = deposit !== undefined ? deposit : existingDeposit;
+    const finalWithdrawal = withdrawal !== undefined ? withdrawal : existingWithdrawal;
+    
+    // Check if both are provided and both are > 0
+    if (finalDeposit > 0 && finalWithdrawal > 0) {
+      return res.status(400).json({ error: 'Cannot have both deposit and withdrawal in the same transaction' });
+    }
+    // Check if both are zero
+    if (finalDeposit === 0 && finalWithdrawal === 0) {
+      return res.status(400).json({ error: 'Either deposit or withdrawal amount must be greater than zero' });
+    }
+
     if (updates.amount_deposit !== undefined) {
       updateFields.push('amount_deposited = ?');
-      params.push(parseFloat(updates.amount_deposit) || 0);
+      params.push(deposit);
     }
     if (updates.amount_withdrawal !== undefined) {
       updateFields.push('amount_withdrawn = ?');
-      params.push(parseFloat(updates.amount_withdrawal) || 0);
+      params.push(withdrawal);
     }
     if (updates.description !== undefined) {
       updateFields.push('description = ?');
@@ -480,12 +551,16 @@ router.put('/petty-cash/:id', authenticateToken, [
 
     // Recalculate balances for all transactions in this ledger
     const ledger = await db.get('SELECT * FROM petty_cash_ledgers WHERE id = ?', [transaction.ledger_id]);
+    if (!ledger) {
+      return res.status(404).json({ error: 'Ledger not found for this transaction' });
+    }
+
     const allTransactions = await db.all(
       'SELECT * FROM petty_cash_transactions WHERE ledger_id = ? ORDER BY transaction_date, id',
       [transaction.ledger_id]
     );
 
-    let runningBalance = ledger.starting_balance;
+    let runningBalance = ledger.starting_balance || 0;
     for (const t of allTransactions) {
       runningBalance = runningBalance + (parseFloat(t.amount_deposited) || 0) - (parseFloat(t.amount_withdrawn) || 0);
       await db.run('UPDATE petty_cash_transactions SET balance = ? WHERE id = ?', [runningBalance, t.id]);
@@ -532,12 +607,16 @@ router.delete('/petty-cash/:id', authenticateToken, async (req, res) => {
 
     // Recalculate balances for remaining transactions in this ledger
     const ledger = await db.get('SELECT * FROM petty_cash_ledgers WHERE id = ?', [transaction.ledger_id]);
+    if (!ledger) {
+      return res.status(404).json({ error: 'Ledger not found for this transaction' });
+    }
+
     const allTransactions = await db.all(
       'SELECT * FROM petty_cash_transactions WHERE ledger_id = ? ORDER BY transaction_date, id',
       [transaction.ledger_id]
     );
 
-    let runningBalance = ledger.starting_balance;
+    let runningBalance = ledger.starting_balance || 0;
     for (const t of allTransactions) {
       runningBalance = runningBalance + (parseFloat(t.amount_deposited) || 0) - (parseFloat(t.amount_withdrawn) || 0);
       await db.run('UPDATE petty_cash_transactions SET balance = ? WHERE id = ?', [runningBalance, t.id]);

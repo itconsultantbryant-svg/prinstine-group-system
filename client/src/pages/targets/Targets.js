@@ -174,16 +174,45 @@ const Targets = () => {
         setTargets(prevTargets => {
           const exists = prevTargets.some(t => t.id === data.id);
           if (exists) {
-            // Update existing target
-            return prevTargets.map(target => 
-              target.id === data.id ? { ...target, ...data } : target
-            );
+            // Update existing target with new metrics
+            return prevTargets.map(target => {
+              if (target.id === data.id) {
+                // Merge all metrics if provided, otherwise keep existing
+                return {
+                  ...target,
+                  net_amount: data.net_amount !== undefined ? parseFloat(data.net_amount) : target.net_amount,
+                  progress_percentage: data.progress_percentage !== undefined ? data.progress_percentage : target.progress_percentage,
+                  remaining_amount: data.remaining_amount !== undefined ? parseFloat(data.remaining_amount) : target.remaining_amount,
+                  total_progress: data.total_progress !== undefined ? parseFloat(data.total_progress) : target.total_progress,
+                  shared_in: data.shared_in !== undefined ? parseFloat(data.shared_in) : target.shared_in,
+                  shared_out: data.shared_out !== undefined ? parseFloat(data.shared_out) : target.shared_out,
+                  target_amount: data.target_amount !== undefined ? parseFloat(data.target_amount) : target.target_amount,
+                  status: data.status !== undefined ? data.status : target.status,
+                  _lastUpdate: Date.now()
+                };
+              }
+              return target;
+            });
           } else {
             // New target, fetch all
             debouncedFetchTargets();
             return prevTargets;
           }
         });
+        
+        // Update selected target if viewing it
+        const currentSelected = selectedTargetRef.current;
+        if (currentSelected && currentSelected.id === data.id) {
+          setSelectedTarget(prev => ({
+            ...prev,
+            net_amount: data.net_amount !== undefined ? parseFloat(data.net_amount) : prev.net_amount,
+            progress_percentage: data.progress_percentage !== undefined ? data.progress_percentage : prev.progress_percentage,
+            remaining_amount: data.remaining_amount !== undefined ? parseFloat(data.remaining_amount) : prev.remaining_amount,
+            total_progress: data.total_progress !== undefined ? parseFloat(data.total_progress) : prev.total_progress,
+            shared_in: data.shared_in !== undefined ? parseFloat(data.shared_in) : prev.shared_in,
+            shared_out: data.shared_out !== undefined ? parseFloat(data.shared_out) : prev.shared_out
+          }));
+        }
       } else {
         // No data, fetch all
         debouncedFetchTargets();

@@ -11,7 +11,7 @@
  * - Instructions and help text
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../../hooks/useAuth';
 import api from '../../config/api';
 import { getSocket } from '../../config/socket';
@@ -35,6 +35,16 @@ const Targets = () => {
     reason: ''
   });
   const [activeTab, setActiveTab] = useState('targets'); // 'targets' or 'sharing'
+  
+  // Refs to track current state without causing re-renders
+  const selectedTargetRef = useRef(null);
+  const showProgressModalRef = useRef(false);
+  
+  // Keep refs in sync with state
+  useEffect(() => {
+    selectedTargetRef.current = selectedTarget;
+    showProgressModalRef.current = showProgressModal;
+  }, [selectedTarget, showProgressModal]);
 
   // Form states
   const [createForm, setCreateForm] = useState({
@@ -56,25 +66,46 @@ const Targets = () => {
   });
 
   // Fetch targets
-  const fetchTargets = async () => {
+  const fetchTargets = async (silent = false) => {
     try {
-      setLoading(true);
-      setError('');
+      if (!silent) {
+        setLoading(true);
+        setError('');
+      }
       const response = await api.get('/targets');
-      setTargets(response.data.targets || []);
+      
+      // Update targets state, preserving any local updates
+      setTargets(prevTargets => {
+        const newTargets = response.data.targets || [];
+        // Merge with existing to preserve any pending socket updates
+        return newTargets.map(newTarget => {
+          const existing = prevTargets.find(t => t.id === newTarget.id);
+          // Use existing data if it's newer or if we're in the middle of a real-time update
+          if (existing && existing._lastUpdate && existing._lastUpdate > Date.now() - 1000) {
+            return existing;
+          }
+          return newTarget;
+        });
+      });
     } catch (err) {
       const isNetworkError = err.code === 'ERR_NETWORK' || 
                             err.code === 'ERR_INTERNET_DISCONNECTED' ||
                             err.code === 'ERR_CONNECTION_CLOSED';
       
       if (isNetworkError) {
-        console.warn('Network error fetching targets - will retry via real-time updates');
+        if (!silent) {
+          console.warn('Network error fetching targets - will retry via real-time updates');
+        }
       } else {
-      console.error('Error fetching targets:', err);
-        setError(err.response?.data?.error || 'Failed to load targets');
+        console.error('Error fetching targets:', err);
+        if (!silent) {
+          setError(err.response?.data?.error || 'Failed to load targets');
+        }
       }
     } finally {
-      setLoading(false);
+      if (!silent) {
+        setLoading(false);
+      }
     }
   };
 
@@ -112,9 +143,9 @@ const Targets = () => {
 
   // Initial load
   useEffect(() => {
-        fetchTargets();
+    fetchTargets();
     fetchUsers();
-        fetchSharingHistory();
+    fetchSharingHistory();
   }, []);
 
   // Real-time socket updates
@@ -124,45 +155,100 @@ const Targets = () => {
     const socket = getSocket();
     if (!socket) return;
 
+    // Debounce function to prevent excessive API calls
+    let fetchTimeout;
+    const debouncedFetchTargets = () => {
+      clearTimeout(fetchTimeout);
+      fetchTimeout = setTimeout(() => {
+        fetchTargets();
+      }, 500); // Wait 500ms before fetching
+    };
+
     const handleTargetCreated = () => {
-          fetchTargets();
+      debouncedFetchTargets();
     };
 
     const handleTargetUpdated = (data) => {
-      // Update target in state if we have the data
+      // Update target in state with new data
       if (data && data.id) {
-        setTargets(prevTargets => prevTargets.map(target => 
-          target.id === data.id ? { ...target, ...data } : target
-        ));
+        setTargets(prevTargets => {
+          const exists = prevTargets.some(t => t.id === data.id);
+          if (exists) {
+            // Update existing target
+            return prevTargets.map(target => 
+              target.id === data.id ? { ...target, ...data } : target
+            );
+          } else {
+            // New target, fetch all
+            debouncedFetchTargets();
+            return prevTargets;
+          }
+        });
+      } else {
+        // No data, fetch all
+        debouncedFetchTargets();
       }
-      fetchTargets();
     };
 
     const handleTargetDeleted = (data) => {
       if (data && data.id) {
         setTargets(prevTargets => prevTargets.filter(target => target.id !== data.id));
+        // Close modal if viewing deleted target (use ref)
+        const currentSelected = selectedTargetRef.current;
+        if (currentSelected && currentSelected.id === data.id) {
+          setShowProgressModal(false);
+          setSelectedTarget(null);
+        }
       }
-          fetchTargets();
     };
 
     const handleTargetProgressUpdated = (data) => {
       if (data && data.target_id) {
-        // Update target metrics in real-time
-        setTargets(prevTargets => prevTargets.map(target => 
-          target.id === data.target_id ? { ...target, ...data } : target
-        ));
+        // Update target metrics in real-time from socket data (no API call needed)
+        setTargets(prevTargets => {
+          return prevTargets.map(target => {
+            if (target.id === data.target_id) {
+              // Merge new metrics from socket event with timestamp
+              return {
+                ...target,
+                net_amount: data.net_amount !== undefined ? parseFloat(data.net_amount) : target.net_amount,
+                progress_percentage: data.progress_percentage !== undefined ? data.progress_percentage : target.progress_percentage,
+                remaining_amount: data.remaining_amount !== undefined ? parseFloat(data.remaining_amount) : target.remaining_amount,
+                total_progress: data.total_progress !== undefined ? parseFloat(data.total_progress) : target.total_progress,
+                shared_in: data.shared_in !== undefined ? parseFloat(data.shared_in) : target.shared_in,
+                shared_out: data.shared_out !== undefined ? parseFloat(data.shared_out) : target.shared_out,
+                _lastUpdate: Date.now() // Track when this was last updated
+              };
+            }
+            return target;
+          });
+        });
         
-        // Refresh progress if viewing this target
-        if (selectedTarget && selectedTarget.id === data.target_id) {
-          fetchTargetProgress(data.target_id);
+        // Update selected target if viewing it (use ref to get latest value)
+        const currentSelected = selectedTargetRef.current;
+        if (currentSelected && currentSelected.id === data.target_id) {
+          setSelectedTarget(prev => ({
+            ...prev,
+            net_amount: data.net_amount !== undefined ? parseFloat(data.net_amount) : prev.net_amount,
+            progress_percentage: data.progress_percentage !== undefined ? data.progress_percentage : prev.progress_percentage,
+            remaining_amount: data.remaining_amount !== undefined ? parseFloat(data.remaining_amount) : prev.remaining_amount,
+            total_progress: data.total_progress !== undefined ? parseFloat(data.total_progress) : prev.total_progress,
+            shared_in: data.shared_in !== undefined ? parseFloat(data.shared_in) : prev.shared_in,
+            shared_out: data.shared_out !== undefined ? parseFloat(data.shared_out) : prev.shared_out
+          }));
+          
+          // Refresh progress modal if viewing this target (use ref)
+          if (showProgressModalRef.current) {
+            fetchTargetProgress(data.target_id);
+          }
         }
       }
-      fetchTargets();
     };
 
     const handleFundShared = () => {
       fetchSharingHistory();
-      fetchTargets();
+      // Fund sharing affects targets, so update targets after a delay
+      debouncedFetchTargets();
     };
 
     socket.on('target_created', handleTargetCreated);
@@ -172,13 +258,14 @@ const Targets = () => {
     socket.on('fund_shared', handleFundShared);
 
     return () => {
+      clearTimeout(fetchTimeout);
       socket.off('target_created', handleTargetCreated);
       socket.off('target_updated', handleTargetUpdated);
       socket.off('target_deleted', handleTargetDeleted);
       socket.off('target_progress_updated', handleTargetProgressUpdated);
       socket.off('fund_shared', handleFundShared);
     };
-  }, [user, selectedTarget]);
+  }, [user]); // Removed selectedTarget from dependencies - it shouldn't re-setup socket listeners
 
   // Handle create target
   const handleCreate = async (e) => {
@@ -247,25 +334,41 @@ const Targets = () => {
 
   // Handle view progress
   const handleViewProgress = async (target) => {
-    setSelectedTarget(target);
-    await fetchTargetProgress(target.id);
+    // Update with latest target data from state if available
+    const latestTarget = targets.find(t => t.id === target.id) || target;
+    setSelectedTarget(latestTarget);
+    await fetchTargetProgress(latestTarget.id);
     setShowProgressModal(true);
   };
 
   // Handle approve/reject progress
   const handleApproveProgress = async (progressId, status) => {
     try {
-      await api.put(`/targets/progress/${progressId}/approve`, { status });
-      if (selectedTarget) {
-        fetchTargetProgress(selectedTarget.id);
+      const response = await api.put(`/targets/progress/${progressId}/approve`, { status });
+      
+      // Update target state immediately from response
+      if (response.data && response.data.target) {
+        setTargets(prevTargets => prevTargets.map(target => 
+          target.id === response.data.target.id 
+            ? { ...target, ...response.data.target }
+            : target
+        ));
       }
-      fetchTargets();
+      
+      // Refresh progress modal if viewing this target
+      if (selectedTarget && response.data && response.data.target) {
+        await fetchTargetProgress(response.data.target.id);
+      }
+      
+      // Don't call fetchTargets() - socket event will handle the update
     } catch (err) {
       const isNetworkError = err.code === 'ERR_NETWORK' || 
                             err.code === 'ERR_INTERNET_DISCONNECTED';
       
       if (!isNetworkError) {
         alert(err.response?.data?.error || 'Failed to update progress entry');
+        // On error, fetch to get latest state
+        fetchTargets();
       }
     }
   };

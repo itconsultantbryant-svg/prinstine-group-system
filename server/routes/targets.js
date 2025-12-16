@@ -1012,7 +1012,8 @@ router.put('/:id', authenticateToken, requireRole('Admin'), [
   body('category').optional().isIn(['Employee', 'Client for Consultancy', 'Client for Audit', 'Student', 'Others']),
   body('status').optional().isIn(['Active', 'Completed', 'Extended', 'Cancelled']),
   body('period_start').optional().isISO8601(),
-  body('period_end').optional().isISO8601()
+  body('period_end').optional().isISO8601(),
+  body('manual_net_amount_override').optional().isFloat({ min: 0 })
 ], async (req, res) => {
   try {
     const errors = validationResult(req);
@@ -1053,25 +1054,26 @@ router.put('/:id', authenticateToken, requireRole('Admin'), [
       params.push(req.body.notes);
     }
 
-    if (updates.length === 0) {
+    // Handle manual net_amount override (Admin only)
+    let manualNetAmount = null;
+    if (req.body.manual_net_amount_override !== undefined && req.body.manual_net_amount_override !== null) {
+      manualNetAmount = parseFloat(req.body.manual_net_amount_override);
+      console.log('Manual net_amount override requested:', manualNetAmount);
+    }
+
+    if (updates.length === 0 && !manualNetAmount) {
       return res.status(400).json({ error: 'No fields to update' });
     }
 
-    updates.push('updated_at = CURRENT_TIMESTAMP');
-    params.push(req.params.id);
-
-    await db.run(`UPDATE targets SET ${updates.join(', ')} WHERE id = ?`, params);
+    if (updates.length > 0) {
+      updates.push('updated_at = CURRENT_TIMESTAMP');
+      params.push(req.params.id);
+      await db.run(`UPDATE targets SET ${updates.join(', ')} WHERE id = ?`, params);
+    }
+    
     await logAction(req.user.id, 'update_target', 'targets', req.params.id, req.body, req);
 
-    // Update admin target if this target changed (only if not admin's own target)
-    const adminUser = await db.get("SELECT id FROM users WHERE role = 'Admin' LIMIT 1");
-    if (adminUser && target.user_id !== adminUser.id) {
-      updateAdminTarget(target.period_start || req.body.period_start).catch(err => 
-        console.error('Error updating admin target:', err)
-      );
-    }
-
-    // Get updated target with metrics
+    // Get current target state (after update if any)
     const updatedTarget = await db.get(
       `SELECT t.*, 
               COALESCE(u.name, 'Unknown User') as user_name,
@@ -1082,7 +1084,77 @@ router.put('/:id', authenticateToken, requireRole('Admin'), [
       [req.params.id]
     );
 
-    const metrics = await calculateTargetMetrics(updatedTarget);
+    // Calculate current metrics
+    let metrics = await calculateTargetMetrics(updatedTarget);
+
+    // If manual net_amount override is provided, adjust total_progress to achieve it
+    if (manualNetAmount !== null) {
+      // net_amount = total_progress + shared_in - shared_out
+      // So: total_progress = net_amount - shared_in + shared_out
+      const requiredTotalProgress = manualNetAmount - metrics.shared_in + metrics.shared_out;
+      const currentTotalProgress = metrics.total_progress;
+      const adjustmentNeeded = requiredTotalProgress - currentTotalProgress;
+
+      console.log('Manual net_amount adjustment:', {
+        requested_net_amount: manualNetAmount,
+        current_net_amount: metrics.net_amount,
+        current_total_progress: currentTotalProgress,
+        current_shared_in: metrics.shared_in,
+        current_shared_out: metrics.shared_out,
+        required_total_progress: requiredTotalProgress,
+        adjustment_needed: adjustmentNeeded
+      });
+
+      // Create a manual adjustment entry in target_progress
+      if (Math.abs(adjustmentNeeded) > 0.01) { // Only if adjustment is significant
+        const USE_POSTGRESQL = !!process.env.DATABASE_URL;
+        
+        // Check if target_progress table exists
+        let targetProgressExists = false;
+        if (USE_POSTGRESQL) {
+          const tpCheck = await db.get(
+            "SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'target_progress'"
+          );
+          targetProgressExists = !!tpCheck;
+        } else {
+          const tpCheck = await db.get("SELECT name FROM sqlite_master WHERE type='table' AND name='target_progress'");
+          targetProgressExists = !!tpCheck;
+        }
+
+        if (targetProgressExists) {
+          // Create manual adjustment entry
+          await db.run(
+            `INSERT INTO target_progress (target_id, user_id, amount, category, status, transaction_date, notes)
+             VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?)`,
+            [
+              updatedTarget.id,
+              updatedTarget.user_id,
+              adjustmentNeeded,
+              'Manual Adjustment',
+              'Approved',
+              `Manual net_amount override by ${req.user.name || 'Admin'}: Set to ${manualNetAmount}`
+            ]
+          );
+
+          console.log('Created manual adjustment entry:', {
+            target_id: updatedTarget.id,
+            adjustment_amount: adjustmentNeeded,
+            new_net_amount: manualNetAmount
+          });
+        }
+      }
+
+      // Recalculate metrics with the manual adjustment
+      metrics = await calculateTargetMetrics(updatedTarget);
+    }
+
+    // Update admin target if this target changed (only if not admin's own target)
+    const adminUser = await db.get("SELECT id FROM users WHERE role = 'Admin' LIMIT 1");
+    if (adminUser && target.user_id !== adminUser.id) {
+      updateAdminTarget(target.period_start || req.body.period_start).catch(err => 
+        console.error('Error updating admin target:', err)
+      );
+    }
 
     // Emit real-time update
     if (global.io) {

@@ -233,12 +233,32 @@ const Targets = () => {
 
     const handleTargetProgressUpdated = (data) => {
       if (data && data.target_id) {
-        console.log('handleTargetProgressUpdated received data:', data);
+        console.log('handleTargetProgressUpdated received data:', JSON.stringify(data, null, 2));
+        console.log('Data details:', {
+          target_id: data.target_id,
+          net_amount: data.net_amount,
+          total_progress: data.total_progress,
+          progress_percentage: data.progress_percentage,
+          remaining_amount: data.remaining_amount,
+          action: data.action
+        });
         
         // Update target metrics in real-time from socket data (no API call needed)
         setTargets(prevTargets => {
           return prevTargets.map(target => {
             if (target.id === data.target_id) {
+              // Only update if we have valid metrics data
+              const hasValidMetrics = data.net_amount !== undefined || 
+                                    data.total_progress !== undefined ||
+                                    data.remaining_amount !== undefined;
+              
+              if (!hasValidMetrics) {
+                console.warn('Socket event missing metrics data, fetching from API...');
+                // If metrics are missing, fetch from API
+                setTimeout(() => fetchTargets(), 500);
+                return target;
+              }
+              
               const updatedTarget = {
                 ...target,
                 net_amount: data.net_amount !== undefined ? parseFloat(data.net_amount) : target.net_amount,
@@ -255,7 +275,9 @@ const Targets = () => {
                 old_net_amount: target.net_amount,
                 new_net_amount: updatedTarget.net_amount,
                 old_total_progress: target.total_progress,
-                new_total_progress: updatedTarget.total_progress
+                new_total_progress: updatedTarget.total_progress,
+                old_remaining: target.remaining_amount,
+                new_remaining: updatedTarget.remaining_amount
               });
               
               return updatedTarget;
@@ -977,6 +999,37 @@ const Targets = () => {
                       onChange={(e) => setEditForm({ ...editForm, notes: e.target.value })}
                     />
                   </div>
+
+                  {/* Manual Net Amount Override (Admin only) */}
+                  {user && user.role === 'Admin' && (
+                    <>
+                      <div className="mb-3">
+                        <label className="form-label">
+                          Manual Net Amount Override 
+                          <small className="text-muted ms-2">(Optional - will recalculate progress and remaining)</small>
+                        </label>
+                        <input
+                          type="number"
+                          className="form-control"
+                          step="0.01"
+                          min="0"
+                          placeholder={selectedTarget?.net_amount || "0.00"}
+                          value={editForm.manual_net_amount !== undefined ? editForm.manual_net_amount : ''}
+                          onChange={(e) => setEditForm({ ...editForm, manual_net_amount: e.target.value || undefined })}
+                        />
+                        <small className="text-muted">
+                          Current Net Amount: {formatCurrency(selectedTarget?.net_amount || 0)} | 
+                          Current Progress: {selectedTarget?.progress_percentage || '0.00'}% | 
+                          Current Remaining: {formatCurrency(selectedTarget?.remaining_amount || 0)}
+                        </small>
+                      </div>
+                      <div className="alert alert-info">
+                        <small>
+                          <strong>Note:</strong> Setting a manual net amount will automatically recalculate the progress percentage and remaining amount based on the target amount.
+                        </small>
+                      </div>
+                    </>
+                  )}
                 </div>
                 <div className="modal-footer">
                   <button type="button" className="btn btn-secondary" onClick={() => setShowEditModal(false)}>

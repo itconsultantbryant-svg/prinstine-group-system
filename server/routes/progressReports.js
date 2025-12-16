@@ -707,24 +707,74 @@ router.put('/:id', authenticateToken, requireRole('Admin', 'DepartmentHead', 'St
               console.error('Error updating admin target after progress report edit (non-fatal):', adminUpdateError);
             }
             
-            // Emit real-time update for target progress - emit to all users
+            // Calculate full target metrics for the update
+            let fullMetrics = {
+              total_progress: parseFloat(totalProgressCheck?.total || 0),
+              shared_in: 0,
+              shared_out: 0,
+              net_amount: parseFloat(totalProgressCheck?.total || 0),
+              progress_percentage: '0.00',
+              remaining_amount: parseFloat(target.target_amount || 0)
+            };
+            
+            try {
+              const USE_POSTGRESQL = !!process.env.DATABASE_URL;
+              let fundSharingExists = false;
+              
+              if (USE_POSTGRESQL) {
+                const fsCheck = await db.get(
+                  "SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'fund_sharing'"
+                );
+                fundSharingExists = !!fsCheck;
+              } else {
+                const fsCheck = await db.get("SELECT name FROM sqlite_master WHERE type='table' AND name='fund_sharing'");
+                fundSharingExists = !!fsCheck;
+              }
+              
+              if (fundSharingExists) {
+                const sharedOutResult = await db.get(
+                  `SELECT COALESCE(SUM(CASE WHEN status = 'Active' THEN CAST(amount AS NUMERIC) ELSE 0 END), 0) as total
+                   FROM fund_sharing WHERE from_user_id = ?`,
+                  [target.user_id]
+                );
+                const sharedInResult = await db.get(
+                  `SELECT COALESCE(SUM(CASE WHEN status = 'Active' THEN CAST(amount AS NUMERIC) ELSE 0 END), 0) as total
+                   FROM fund_sharing WHERE to_user_id = ?`,
+                  [target.user_id]
+                );
+                
+                fullMetrics.shared_out = parseFloat(sharedOutResult?.total || 0) || 0;
+                fullMetrics.shared_in = parseFloat(sharedInResult?.total || 0) || 0;
+              }
+              
+              const targetAmount = parseFloat(target.target_amount || 0) || 0;
+              fullMetrics.net_amount = fullMetrics.total_progress + fullMetrics.shared_in - fullMetrics.shared_out;
+              fullMetrics.progress_percentage = targetAmount > 0 
+                ? ((fullMetrics.net_amount / targetAmount) * 100).toFixed(2) 
+                : '0.00';
+              fullMetrics.remaining_amount = Math.max(0, targetAmount - fullMetrics.net_amount);
+            } catch (metricsError) {
+              console.error('Error calculating full target metrics in progressReports update:', metricsError);
+            }
+            
+            // Emit real-time update for target progress - emit to all users with full metrics
             if (global.io) {
               global.io.emit('target_progress_updated', {
                 target_id: target.id,
                 user_id: updatedReport.created_by,
-                amount: updatedReport.amount || 0,
                 progress_report_id: req.params.id,
-                total_progress: totalProgressCheck?.total || 0,
-                action: 'progress_updated'
+                action: 'progress_updated',
+                ...fullMetrics
               });
               
-              // Also emit target_updated to force a full refresh
+              // Also emit target_updated with full metrics
               global.io.emit('target_updated', {
                 id: target.id,
                 updated_by: req.user.name || 'Admin',
-                reason: 'progress_report_updated'
+                reason: 'progress_report_updated',
+                ...fullMetrics
               });
-              console.log('Emitted target_progress_updated and target_updated events to all users');
+              console.log('Emitted target_progress_updated and target_updated events with full metrics');
             }
           }
         }
@@ -993,17 +1043,80 @@ router.put('/:id/approve', authenticateToken, requireRole('Admin'), [
                 progress_id: progressId
               };
               
-              global.io.emit('target_progress_updated', updateData);
-              console.log('Emitted target_progress_updated event:', updateData);
+              // Calculate full target metrics
+              let fullMetrics = {
+                total_progress: parseFloat(totalProgressCheck?.total || 0),
+                shared_in: 0,
+                shared_out: 0,
+                net_amount: parseFloat(totalProgressCheck?.total || 0),
+                progress_percentage: '0.00',
+                remaining_amount: 0
+              };
               
-              // Also emit target_updated to force a full refresh
+              try {
+                const USE_POSTGRESQL = !!process.env.DATABASE_URL;
+                let fundSharingExists = false;
+                
+                if (USE_POSTGRESQL) {
+                  const fsCheck = await db.get(
+                    "SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'fund_sharing'"
+                  );
+                  fundSharingExists = !!fsCheck;
+                } else {
+                  const fsCheck = await db.get("SELECT name FROM sqlite_master WHERE type='table' AND name='fund_sharing'");
+                  fundSharingExists = !!fsCheck;
+                }
+                
+                if (fundSharingExists) {
+                  const sharedOutResult = await db.get(
+                    `SELECT COALESCE(SUM(CASE WHEN status = 'Active' THEN CAST(amount AS NUMERIC) ELSE 0 END), 0) as total
+                     FROM fund_sharing WHERE from_user_id = ?`,
+                    [userIdInt]
+                  );
+                  const sharedInResult = await db.get(
+                    `SELECT COALESCE(SUM(CASE WHEN status = 'Active' THEN CAST(amount AS NUMERIC) ELSE 0 END), 0) as total
+                     FROM fund_sharing WHERE to_user_id = ?`,
+                    [userIdInt]
+                  );
+                  
+                  fullMetrics.shared_out = parseFloat(sharedOutResult?.total || 0) || 0;
+                  fullMetrics.shared_in = parseFloat(sharedInResult?.total || 0) || 0;
+                }
+                
+                // Get target amount
+                const targetInfo = await db.get('SELECT target_amount FROM targets WHERE id = ?', [targetIdInt]);
+                const targetAmount = parseFloat(targetInfo?.target_amount || 0) || 0;
+                
+                // Calculate net amount
+                fullMetrics.net_amount = fullMetrics.total_progress + fullMetrics.shared_in - fullMetrics.shared_out;
+                
+                // Calculate progress percentage
+                fullMetrics.progress_percentage = targetAmount > 0 
+                  ? ((fullMetrics.net_amount / targetAmount) * 100).toFixed(2) 
+                  : '0.00';
+                
+                // Calculate remaining amount
+                fullMetrics.remaining_amount = Math.max(0, targetAmount - fullMetrics.net_amount);
+              } catch (metricsError) {
+                console.error('Error calculating full target metrics in progressReports:', metricsError);
+              }
+              
+              // Emit with full metrics
+              global.io.emit('target_progress_updated', {
+                ...updateData,
+                ...fullMetrics
+              });
+              console.log('Emitted target_progress_updated event with full metrics:', { ...updateData, ...fullMetrics });
+              
+              // Also emit target_updated with full metrics
               global.io.emit('target_updated', {
                 id: targetIdInt,
                 updated_by: req.user.name || 'Admin',
                 reason: 'progress_report_approved',
-                progress_added: true
+                progress_added: true,
+                ...fullMetrics
               });
-              console.log('Emitted target_updated event for target:', targetIdInt);
+              console.log('Emitted target_updated event for target with full metrics:', targetIdInt);
             }
           } else {
             // Update existing progress record - when progress report is approved, set status to Approved
@@ -1051,25 +1164,84 @@ router.put('/:id/approve', authenticateToken, requireRole('Admin'), [
               console.error('Error updating admin target after progress approval (non-fatal):', adminUpdateError);
             }
             
-            // Emit real-time update - emit to ALL users
+            // Calculate full target metrics using the same function as targets route
+            let fullMetrics = {
+              total_progress: parseFloat(totalProgressCheck?.total || 0),
+              shared_in: 0,
+              shared_out: 0,
+              net_amount: parseFloat(totalProgressCheck?.total || 0),
+              progress_percentage: '0.00',
+              remaining_amount: parseFloat(target.target_amount || 0)
+            };
+            
+            try {
+              // Try to get full metrics by calling calculateTargetMetrics via targets route helper
+              // For now, calculate shared_in and shared_out manually
+              const USE_POSTGRESQL = !!process.env.DATABASE_URL;
+              let fundSharingExists = false;
+              
+              if (USE_POSTGRESQL) {
+                const fsCheck = await db.get(
+                  "SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'fund_sharing'"
+                );
+                fundSharingExists = !!fsCheck;
+              } else {
+                const fsCheck = await db.get("SELECT name FROM sqlite_master WHERE type='table' AND name='fund_sharing'");
+                fundSharingExists = !!fsCheck;
+              }
+              
+              if (fundSharingExists) {
+                const sharedOutResult = await db.get(
+                  `SELECT COALESCE(SUM(CASE WHEN status = 'Active' THEN CAST(amount AS NUMERIC) ELSE 0 END), 0) as total
+                   FROM fund_sharing WHERE from_user_id = ?`,
+                  [target.user_id]
+                );
+                const sharedInResult = await db.get(
+                  `SELECT COALESCE(SUM(CASE WHEN status = 'Active' THEN CAST(amount AS NUMERIC) ELSE 0 END), 0) as total
+                   FROM fund_sharing WHERE to_user_id = ?`,
+                  [target.user_id]
+                );
+                
+                fullMetrics.shared_out = parseFloat(sharedOutResult?.total || 0) || 0;
+                fullMetrics.shared_in = parseFloat(sharedInResult?.total || 0) || 0;
+              }
+              
+              // Calculate net amount
+              fullMetrics.net_amount = fullMetrics.total_progress + fullMetrics.shared_in - fullMetrics.shared_out;
+              
+              // Calculate progress percentage
+              const targetAmount = parseFloat(target.target_amount || 0) || 0;
+              fullMetrics.progress_percentage = targetAmount > 0 
+                ? ((fullMetrics.net_amount / targetAmount) * 100).toFixed(2) 
+                : '0.00';
+              
+              // Calculate remaining amount
+              fullMetrics.remaining_amount = Math.max(0, targetAmount - fullMetrics.net_amount);
+            } catch (metricsError) {
+              console.error('Error calculating full target metrics in progressReports:', metricsError);
+              // Use partial metrics as fallback
+            }
+            
+            // Emit real-time update - emit to ALL users with full metrics
             if (global.io) {
               global.io.emit('target_progress_updated', {
                 target_id: target.id,
                 user_id: report.created_by,
-                amount: parseFloat(report.amount),
                 progress_report_id: req.params.id,
-                total_progress: totalProgressCheck?.total || 0,
-                action: 'progress_updated'
+                action: 'progress_approved',
+                status: normalizedStatus,
+                ...fullMetrics
               });
               
-              // Also emit target_updated to force a full refresh
+              // Also emit target_updated with full metrics
               global.io.emit('target_updated', {
                 id: target.id,
                 updated_by: req.user.name || 'Admin',
-                reason: 'progress_report_approved'
+                reason: 'progress_report_approved',
+                ...fullMetrics
               });
               
-              console.log('Emitted target_progress_updated and target_updated events');
+              console.log('Emitted target_progress_updated and target_updated events with full metrics');
             }
           }
         } else {

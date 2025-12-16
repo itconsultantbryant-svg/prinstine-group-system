@@ -395,23 +395,44 @@ const PettyCash = () => {
     <div className="container-fluid mt-4">
       <div className="d-flex justify-content-between align-items-center mb-4">
         <h2>Petty Cash Management</h2>
-        <button 
-          className="btn btn-primary"
-          onClick={() => {
-            setShowForm(true);
-            setEditingTransaction(null);
-            setFormData({
-              transaction_date: new Date().toISOString().slice(0, 16),
-              petty_cash_custodian_id: '',
-              amount_deposit: '',
-              amount_withdrawal: '',
-              description: '',
-              charged_to: ''
-            });
-          }}
-        >
-          <i className="bi bi-plus-circle me-2"></i>Add Petty Cash Entry
-        </button>
+        <div className="d-flex gap-2">
+          {user?.role === 'Admin' && (
+            <button 
+              className="btn btn-warning"
+              onClick={async () => {
+                if (!window.confirm('Are you sure you want to reset all petty cash balances to zero? This will recalculate all balances from scratch. This action cannot be undone.')) {
+                  return;
+                }
+                try {
+                  await api.post('/finance/petty-cash/reset-all-balances');
+                  setSuccess('All petty cash balances have been reset to zero');
+                  fetchTransactions();
+                } catch (error) {
+                  setError(error.response?.data?.error || 'Failed to reset balances');
+                }
+              }}
+            >
+              <i className="bi bi-arrow-counterclockwise me-2"></i>Reset All Balances
+            </button>
+          )}
+          <button 
+            className="btn btn-primary"
+            onClick={() => {
+              setShowForm(true);
+              setEditingTransaction(null);
+              setFormData({
+                transaction_date: new Date().toISOString().slice(0, 16),
+                petty_cash_custodian_id: '',
+                amount_deposit: '',
+                amount_withdrawal: '',
+                description: '',
+                charged_to: ''
+              });
+            }}
+          >
+            <i className="bi bi-plus-circle me-2"></i>Add Petty Cash Entry
+          </button>
+        </div>
       </div>
 
       {error && <div className="alert alert-danger">{error}</div>}

@@ -604,6 +604,43 @@ router.put('/petty-cash/:id', authenticateToken, [
   }
 });
 
+// Reset all petty cash balances (Admin only - for fresh start)
+router.post('/petty-cash/reset-all-balances', authenticateToken, requireRole('Admin'), async (req, res) => {
+  try {
+    // Reset all transaction balances to 0
+    await db.run('UPDATE petty_cash_transactions SET balance = 0');
+    
+    // Reset all ledger starting balances to 0
+    await db.run('UPDATE petty_cash_ledgers SET starting_balance = 0');
+    
+    // Recalculate balances from scratch starting from 0
+    const ledgers = await db.all('SELECT id FROM petty_cash_ledgers ORDER BY year, month');
+    
+    for (const ledger of ledgers) {
+      const transactions = await db.all(
+        'SELECT * FROM petty_cash_transactions WHERE ledger_id = ? ORDER BY transaction_date, id',
+        [ledger.id]
+      );
+      
+      let runningBalance = 0; // Start fresh from 0
+      for (const t of transactions) {
+        runningBalance = runningBalance + (parseFloat(t.amount_deposited) || 0) - (parseFloat(t.amount_withdrawn) || 0);
+        await db.run('UPDATE petty_cash_transactions SET balance = ? WHERE id = ?', [runningBalance, t.id]);
+      }
+      
+      // Update ledger starting balance to 0
+      await db.run('UPDATE petty_cash_ledgers SET starting_balance = 0 WHERE id = ?', [ledger.id]);
+    }
+    
+    await logAction(req.user.id, 'reset_all_petty_cash_balances', 'finance', null, {}, req);
+    
+    res.json({ message: 'All petty cash balances have been reset to zero and recalculated from scratch' });
+  } catch (error) {
+    console.error('Reset petty cash balances error:', error);
+    res.status(500).json({ error: 'Failed to reset balances: ' + error.message });
+  }
+});
+
 // Delete petty cash entry (Assistant Finance Officer and Finance Department Head only)
 router.delete('/petty-cash/:id', authenticateToken, async (req, res) => {
   try {

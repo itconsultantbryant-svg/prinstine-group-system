@@ -150,6 +150,7 @@ const Sidebar = () => {
     { path: '/attendance', label: 'Attendance', icon: 'bi-clock-history', roles: ['*'], section: 'communications' },
     { path: '/requisitions', label: 'Requisitions', icon: 'bi-file-earmark-text', roles: ['*'], section: 'communications' },
     { path: '/targets', label: 'Targets', icon: 'bi-bullseye', roles: ['*'], section: 'communications' },
+    { path: '/appraisals', label: 'Appraisals', icon: 'bi-star-fill', roles: ['*'], section: 'communications' },
     
     // Management Section (Admin)
     { path: '/notifications', label: 'Send Notifications', icon: 'bi-bell', roles: ['Admin'], section: 'management' },

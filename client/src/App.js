@@ -47,6 +47,8 @@ import ArchivedDocuments from './pages/archivedDocuments/ArchivedDocuments';
 import AttendanceHistory from './pages/attendance/AttendanceHistory';
 import RequisitionHistory from './pages/requisitions/RequisitionHistory';
 import Targets from './pages/targets/Targets';
+import PettyCash from './pages/finance/PettyCash';
+import Appraisals from './pages/appraisals/Appraisals';
 import './App.css';
 
 function App() {
@@ -87,8 +89,10 @@ function App() {
                           <Route path="/academy/instructors/view/:id" element={<InstructorView />} />
                           <Route path="/academy/courses/view/:id" element={<CourseView />} />
                           <Route path="/certificates" element={<PrivateRoute requiredRole="Admin"><CertificateManagement /></PrivateRoute>} />
-                          <Route path="/finance/petty-cash" element={<FinanceRoute><PettyCashLedger /></FinanceRoute>} />
+                          <Route path="/finance/petty-cash" element={<FinanceRoute><PettyCash /></FinanceRoute>} />
+                          <Route path="/finance/petty-cash-ledger" element={<FinanceRoute><PettyCashLedger /></FinanceRoute>} />
                           <Route path="/finance/assets" element={<FinanceRoute><AssetRegistry /></FinanceRoute>} />
+                          <Route path="/appraisals" element={<Appraisals />} />
                           <Route path="/reports" element={<ReportsManagement />} />
                           <Route path="/my-reports-history" element={<MyReportsHistory />} />
                 <Route path="/department-dashboard" element={<PrivateRoute requiredRole="DepartmentHead"><DepartmentHeadDashboard /></PrivateRoute>} />

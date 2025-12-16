@@ -1127,15 +1127,26 @@ router.delete('/petty-cash/transactions/:id', authenticateToken, async (req, res
 
     // Recalculate balances
     const ledger = await db.get('SELECT * FROM petty_cash_ledgers WHERE id = ?', [transaction.ledger_id]);
+    if (!ledger) {
+      return res.status(404).json({ error: 'Ledger not found for this transaction' });
+    }
+
     const allTransactions = await db.all(
       'SELECT * FROM petty_cash_transactions WHERE ledger_id = ? ORDER BY transaction_date, id',
       [transaction.ledger_id]
     );
 
-    let runningBalance = ledger.starting_balance;
-    for (const t of allTransactions) {
-      runningBalance = runningBalance + (parseFloat(t.amount_deposited) || 0) - (parseFloat(t.amount_withdrawn) || 0);
-      await db.run('UPDATE petty_cash_transactions SET balance = ? WHERE id = ?', [runningBalance, t.id]);
+    // If no transactions remain, reset starting balance to 0
+    if (allTransactions.length === 0) {
+      await db.run('UPDATE petty_cash_ledgers SET starting_balance = 0 WHERE id = ?', [transaction.ledger_id]);
+      console.log(`[PettyCash] Reset starting balance to 0 for ledger ${transaction.ledger_id} after deleting all transactions`);
+    } else {
+      // Recalculate balances for remaining transactions
+      let runningBalance = ledger.starting_balance || 0;
+      for (const t of allTransactions) {
+        runningBalance = runningBalance + (parseFloat(t.amount_deposited) || 0) - (parseFloat(t.amount_withdrawn) || 0);
+        await db.run('UPDATE petty_cash_transactions SET balance = ? WHERE id = ?', [runningBalance, t.id]);
+      }
     }
 
     await logAction(req.user.id, 'delete_petty_cash_transaction', 'finance', req.params.id, {}, req);

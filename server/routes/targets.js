@@ -646,12 +646,11 @@ router.post('/fund-sharing', authenticateToken, requireRole('Staff', 'Department
       recipientMetrics = await calculateTargetMetrics(updatedRecipientTarget);
     }
 
-    // Update admin target
-    if (senderTarget.period_start) {
-      updateAdminTarget(senderTarget.period_start).catch(err => 
-        console.error('Error updating admin target:', err)
-      );
-    }
+    // IMPORTANT: Do NOT update admin target when funds are shared
+    // Fund sharing between staff should NOT affect admin target calculations
+    // Admin target only reflects actual progress (approved entries), not fund transfers
+    // So we skip updating admin target here
+    console.log('[Fund Sharing] Skipping admin target update - fund sharing does not affect admin target');
 
     // Emit real-time updates
     if (global.io) {

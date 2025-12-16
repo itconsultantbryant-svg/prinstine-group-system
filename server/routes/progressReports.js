@@ -1288,22 +1288,6 @@ router.put('/:id/approve', authenticateToken, requireRole('Admin'), [
             );
             console.log('ALL progress entries for target', target.id, 'after update:', JSON.stringify(allProgressEntries, null, 2));
             
-            // Update admin target in database when staff/dept head target progress changes
-            try {
-              // Get the target's period_start to update the correct admin target
-              const targetInfo = await db.get('SELECT period_start FROM targets WHERE id = ?', [target.id]);
-              if (targetInfo && targetInfo.period_start) {
-                // Dynamically require the function to avoid circular dependency
-                const targetsModule = require('./targets');
-                if (targetsModule && typeof targetsModule.updateAdminTargetInDatabase === 'function') {
-                  await targetsModule.updateAdminTargetInDatabase(targetInfo.period_start);
-                  console.log('Admin target updated after progress report approval (update case)');
-                }
-              }
-            } catch (adminUpdateError) {
-              console.error('Error updating admin target after progress approval (non-fatal):', adminUpdateError);
-            }
-            
             // Use calculateTargetMetrics from targets route for consistent calculations
             let fullMetrics;
             try {
@@ -1329,27 +1313,47 @@ router.put('/:id/approve', authenticateToken, requireRole('Admin'), [
               };
             }
             
-            // Emit real-time update - emit to ALL users with full metrics
+            // Emit real-time update for INDIVIDUAL target FIRST - emit to ALL users with full metrics
             if (global.io) {
-              global.io.emit('target_progress_updated', {
+              const individualTargetEvent = {
                 target_id: target.id,
                 user_id: report.created_by,
                 progress_report_id: req.params.id,
                 action: 'progress_approved',
                 status: normalizedStatus,
                 ...fullMetrics
-              });
+              };
+              
+              global.io.emit('target_progress_updated', individualTargetEvent);
+              console.log('Emitted target_progress_updated event for INDIVIDUAL target:', individualTargetEvent);
               
               // Also emit target_updated with full metrics
-              global.io.emit('target_updated', {
+              const targetUpdatedEvent = {
                 id: target.id,
                 updated_by: req.user.name || 'Admin',
                 reason: 'progress_report_approved',
                 ...fullMetrics
-              });
-              
-              console.log('Emitted target_progress_updated and target_updated events with full metrics');
+              };
+              global.io.emit('target_updated', targetUpdatedEvent);
+              console.log('Emitted target_updated event for INDIVIDUAL target:', targetUpdatedEvent);
             }
+            
+            // Update admin target AFTER individual target event (run in background to not block)
+            setImmediate(async () => {
+              try {
+                // Get the target's period_start to update the correct admin target
+                const targetInfo = await db.get('SELECT period_start FROM targets WHERE id = ?', [target.id]);
+                if (targetInfo) {
+                  const targetsModule = require('./targets');
+                  if (targetsModule && typeof targetsModule.updateAdminTarget === 'function') {
+                    await targetsModule.updateAdminTarget(targetInfo.period_start);
+                    console.log('Admin target updated after progress report approval (update case)');
+                  }
+                }
+              } catch (adminUpdateError) {
+                console.error('Error updating admin target after progress approval (non-fatal):', adminUpdateError);
+              }
+            });
           }
         } else {
           console.log('No active target found for user:', report.created_by);

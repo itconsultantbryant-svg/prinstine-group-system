@@ -229,13 +229,19 @@ router.get('/download', authenticateToken, (req, res) => {
   
   try {
     const filePath = req.query.path;
+    const userId = req.user?.id;
+    const userName = req.user?.name || 'Unknown';
+    
+    console.log(`[Download Request] User: ${userName} (${userId}), Path: ${filePath}`);
     
     if (!filePath) {
+      console.error('[Download Error] No file path provided');
       return res.status(400).json({ error: 'File path is required' });
     }
 
     // Security: Ensure path is within uploads directory
     if (!filePath.startsWith('/uploads/')) {
+      console.error('[Download Error] Invalid file path (does not start with /uploads/):', filePath);
       return res.status(403).json({ error: 'Invalid file path' });
     }
 
@@ -247,11 +253,16 @@ router.get('/download', authenticateToken, (req, res) => {
     const uploadsBaseDir = path.normalize(path.join(__dirname, '../../uploads'));
     
     if (!normalizedPath.startsWith(uploadsBaseDir)) {
+      console.error('[Download Error] Access denied - path outside uploads directory:', {
+        normalizedPath,
+        uploadsBaseDir
+      });
       return res.status(403).json({ error: 'Access denied' });
     }
 
     // Check if file exists
     if (!fs.existsSync(normalizedPath)) {
+      console.error('[Download Error] File not found:', normalizedPath);
       return res.status(404).json({ error: 'File not found. The file may have been deleted or moved.' });
     }
 
@@ -259,12 +270,14 @@ router.get('/download', authenticateToken, (req, res) => {
     let stats;
     try {
       stats = fs.statSync(normalizedPath);
+      console.log(`[Download] File found: ${normalizedPath}, Size: ${stats.size} bytes`);
     } catch (statError) {
-      console.error('Error getting file stats:', statError);
+      console.error('[Download Error] Error getting file stats:', statError);
       return res.status(500).json({ error: 'Unable to access file' });
     }
     
     if (!stats.isFile()) {
+      console.error('[Download Error] Path is not a file:', normalizedPath);
       return res.status(400).json({ error: 'Path is not a file' });
     }
 
@@ -283,12 +296,15 @@ router.get('/download', authenticateToken, (req, res) => {
       '.png': 'image/png',
       '.gif': 'image/gif',
       '.txt': 'text/plain',
+      '.csv': 'text/csv',
       '.zip': 'application/zip',
       '.rar': 'application/x-rar-compressed'
     };
 
     const contentType = contentTypeMap[ext] || 'application/octet-stream';
     const filename = path.basename(normalizedPath);
+
+    console.log(`[Download] Serving file: ${filename}, Content-Type: ${contentType}, Size: ${stats.size} bytes`);
 
     // Set headers for permanent file download
     res.setHeader('Content-Type', contentType);
@@ -298,13 +314,19 @@ router.get('/download', authenticateToken, (req, res) => {
     res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
     res.setHeader('Pragma', 'no-cache');
     res.setHeader('Expires', '0');
+    // Allow CORS for file downloads
+    res.setHeader('Access-Control-Expose-Headers', 'Content-Disposition, Content-Type, Content-Length');
 
     // Stream the file - this ensures the file is served directly from disk
     fileStream = fs.createReadStream(normalizedPath);
     
     // Handle stream errors
     fileStream.on('error', (streamError) => {
-      console.error('File stream error:', streamError);
+      console.error('[Download Error] File stream error:', {
+        error: streamError.message,
+        code: streamError.code,
+        path: normalizedPath
+      });
       if (!res.headersSent) {
         res.status(500).json({ error: 'Failed to read file. The file may be corrupted or inaccessible.' });
       } else {
@@ -313,8 +335,19 @@ router.get('/download', authenticateToken, (req, res) => {
       }
     });
     
+    // Track download progress
+    let bytesSent = 0;
+    fileStream.on('data', (chunk) => {
+      bytesSent += chunk.length;
+    });
+    
+    fileStream.on('end', () => {
+      console.log(`[Download] File sent successfully: ${filename}, ${bytesSent} bytes`);
+    });
+    
     // Handle client disconnect
     req.on('close', () => {
+      console.log(`[Download] Client disconnected during download: ${filename}`);
       if (fileStream && !fileStream.destroyed) {
         fileStream.destroy();
       }
@@ -324,7 +357,12 @@ router.get('/download', authenticateToken, (req, res) => {
     fileStream.pipe(res);
 
   } catch (error) {
-    console.error('Download error:', error);
+    console.error('[Download Error] Unexpected error:', {
+      error: error.message,
+      code: error.code,
+      stack: error.stack,
+      filePath: req.query.path
+    });
     
     // Clean up file stream if it exists
     if (fileStream && !fileStream.destroyed) {
@@ -334,7 +372,7 @@ router.get('/download', authenticateToken, (req, res) => {
     if (!res.headersSent) {
       // Provide specific error messages for common issues
       if (error.code === 'ENOENT') {
-        res.status(404).json({ error: 'File not found' });
+        res.status(404).json({ error: 'File not found. The file may have been deleted or moved.' });
       } else if (error.code === 'EACCES') {
         res.status(403).json({ error: 'Access denied to file' });
       } else {
@@ -347,15 +385,23 @@ router.get('/download', authenticateToken, (req, res) => {
 // View file endpoint (authenticated) - opens file in browser instead of downloading
 // Usage: /api/upload/view?path=/uploads/communications/filename.pdf
 router.get('/view', authenticateToken, (req, res) => {
+  let fileStream = null;
+  
   try {
     const filePath = req.query.path;
+    const userId = req.user?.id;
+    const userName = req.user?.name || 'Unknown';
+    
+    console.log(`[View Request] User: ${userName} (${userId}), Path: ${filePath}`);
     
     if (!filePath) {
+      console.error('[View Error] No file path provided');
       return res.status(400).json({ error: 'File path is required' });
     }
 
     // Security: Ensure path is within uploads directory
     if (!filePath.startsWith('/uploads/')) {
+      console.error('[View Error] Invalid file path (does not start with /uploads/):', filePath);
       return res.status(403).json({ error: 'Invalid file path' });
     }
 
@@ -367,24 +413,31 @@ router.get('/view', authenticateToken, (req, res) => {
     const uploadsBaseDir = path.normalize(path.join(__dirname, '../../uploads'));
     
     if (!normalizedPath.startsWith(uploadsBaseDir)) {
+      console.error('[View Error] Access denied - path outside uploads directory:', {
+        normalizedPath,
+        uploadsBaseDir
+      });
       return res.status(403).json({ error: 'Access denied' });
     }
 
     // Check if file exists
     if (!fs.existsSync(normalizedPath)) {
-      return res.status(404).json({ error: 'File not found' });
+      console.error('[View Error] File not found:', normalizedPath);
+      return res.status(404).json({ error: 'File not found. The file may have been deleted or moved.' });
     }
 
     // Get file stats with error handling
     let stats;
     try {
       stats = fs.statSync(normalizedPath);
+      console.log(`[View] File found: ${normalizedPath}, Size: ${stats.size} bytes`);
     } catch (statError) {
-      console.error('Error getting file stats:', statError);
+      console.error('[View Error] Error getting file stats:', statError);
       return res.status(500).json({ error: 'Unable to access file' });
     }
     
     if (!stats.isFile()) {
+      console.error('[View Error] Path is not a file:', normalizedPath);
       return res.status(400).json({ error: 'Path is not a file' });
     }
 
@@ -403,12 +456,15 @@ router.get('/view', authenticateToken, (req, res) => {
       '.png': 'image/png',
       '.gif': 'image/gif',
       '.txt': 'text/plain',
+      '.csv': 'text/csv',
       '.zip': 'application/zip',
       '.rar': 'application/x-rar-compressed'
     };
 
     const contentType = contentTypeMap[ext] || 'application/octet-stream';
     const filename = path.basename(normalizedPath);
+
+    console.log(`[View] Serving file inline: ${filename}, Content-Type: ${contentType}`);
 
     // Set headers for viewing (inline instead of attachment)
     res.setHeader('Content-Type', contentType);
@@ -417,13 +473,19 @@ router.get('/view', authenticateToken, (req, res) => {
     // Cache control for production
     res.setHeader('Cache-Control', 'private, max-age=3600');
     res.setHeader('ETag', `"${stats.mtime.getTime()}-${stats.size}"`);
+    // Allow CORS for file viewing
+    res.setHeader('Access-Control-Expose-Headers', 'Content-Disposition, Content-Type, Content-Length');
 
     // Stream the file
-    let fileStream = fs.createReadStream(normalizedPath);
+    fileStream = fs.createReadStream(normalizedPath);
     
     // Handle stream errors
     fileStream.on('error', (streamError) => {
-      console.error('File stream error:', streamError);
+      console.error('[View Error] File stream error:', {
+        error: streamError.message,
+        code: streamError.code,
+        path: normalizedPath
+      });
       if (!res.headersSent) {
         res.status(500).json({ error: 'Failed to read file' });
       } else {
@@ -433,6 +495,7 @@ router.get('/view', authenticateToken, (req, res) => {
     
     // Handle client disconnect
     req.on('close', () => {
+      console.log(`[View] Client disconnected during view: ${filename}`);
       if (fileStream && !fileStream.destroyed) {
         fileStream.destroy();
       }
@@ -442,10 +505,21 @@ router.get('/view', authenticateToken, (req, res) => {
     fileStream.pipe(res);
 
   } catch (error) {
-    console.error('View file error:', error);
+    console.error('[View Error] Unexpected error:', {
+      error: error.message,
+      code: error.code,
+      stack: error.stack,
+      filePath: req.query.path
+    });
+    
+    // Clean up file stream if it exists
+    if (fileStream && !fileStream.destroyed) {
+      fileStream.destroy();
+    }
+    
     if (!res.headersSent) {
       if (error.code === 'ENOENT') {
-        res.status(404).json({ error: 'File not found' });
+        res.status(404).json({ error: 'File not found. The file may have been deleted or moved.' });
       } else if (error.code === 'EACCES') {
         res.status(403).json({ error: 'Access denied to file' });
       } else {

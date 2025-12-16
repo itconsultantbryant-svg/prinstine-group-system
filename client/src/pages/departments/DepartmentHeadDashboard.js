@@ -1107,6 +1107,96 @@ const DepartmentHeadDashboard = () => {
         </div>
       </div>
 
+      {/* Clients Management Section - Marketing Department Head Only */}
+      {isMarketingDeptHead && (
+        <div className="card mt-4">
+          <div className="card-header d-flex justify-content-between align-items-center bg-primary text-white">
+            <h5 className="mb-0">
+              <i className="bi bi-people-fill me-2"></i>Clients Management
+            </h5>
+            <div className="d-flex align-items-center gap-2">
+              <span className="badge bg-light text-dark">{clients.length} Clients</span>
+              <button
+                className="btn btn-sm btn-light"
+                onClick={() => navigate('/clients')}
+                title="View All Clients"
+              >
+                <i className="bi bi-arrow-right"></i> View All
+              </button>
+            </div>
+          </div>
+          <div className="card-body">
+            {clientsLoading ? (
+              <div className="text-center py-4">
+                <div className="spinner-border spinner-border-sm text-primary" role="status">
+                  <span className="visually-hidden">Loading...</span>
+                </div>
+              </div>
+            ) : clients.length === 0 ? (
+              <div className="text-center py-4">
+                <i className="bi bi-people text-muted" style={{ fontSize: '2rem' }}></i>
+                <p className="text-muted mt-2">No clients found</p>
+              </div>
+            ) : (
+              <div className="table-responsive">
+                <table className="table table-hover">
+                  <thead className="table-light">
+                    <tr>
+                      <th>Client ID</th>
+                      <th>Name</th>
+                      <th>Email</th>
+                      <th>Phone</th>
+                      <th>Company</th>
+                      <th>Type</th>
+                      <th>Status</th>
+                      <th>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {clients.slice(0, 10).map((client) => (
+                      <tr key={client.id}>
+                        <td><strong>{client.client_id || 'N/A'}</strong></td>
+                        <td>{client.name || 'N/A'}</td>
+                        <td>{client.email || 'N/A'}</td>
+                        <td>{client.phone || 'N/A'}</td>
+                        <td>{client.company || 'N/A'}</td>
+                        <td>
+                          <span className="badge bg-info">{client.type || 'N/A'}</span>
+                        </td>
+                        <td>
+                          <span className={`badge bg-${client.status === 'Active' ? 'success' : 'secondary'}`}>
+                            {client.status || 'N/A'}
+                          </span>
+                        </td>
+                        <td>
+                          <button
+                            className="btn btn-sm btn-outline-primary"
+                            onClick={() => navigate(`/clients/view/${client.id}`)}
+                            title="View Client"
+                          >
+                            <i className="bi bi-eye"></i>
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                {clients.length > 10 && (
+                  <div className="card-footer bg-light text-center">
+                    <button
+                      className="btn btn-outline-primary"
+                      onClick={() => navigate('/clients')}
+                    >
+                      View All {clients.length} Clients <i className="bi bi-arrow-right ms-1"></i>
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Staff Client Reports Section - Marketing Department Head Only */}
       {isMarketingDeptHead && (
         <div className="card mt-4">

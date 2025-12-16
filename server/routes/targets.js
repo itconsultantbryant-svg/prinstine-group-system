@@ -1272,4 +1272,7 @@ router.delete('/:id', authenticateToken, requireRole('Admin'), async (req, res) 
   }
 });
 
+// Export helper functions for use in other modules
 module.exports = router;
+module.exports.calculateTargetMetrics = calculateTargetMetrics;
+module.exports.updateAdminTarget = updateAdminTarget;

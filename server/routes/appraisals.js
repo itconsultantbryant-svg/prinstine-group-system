@@ -178,50 +178,51 @@ router.get('/staff', authenticateToken, async (req, res) => {
       ORDER BY u.name
     `);
 
-    // Get all Department Head users - they may or may not have staff records
-    // First, get dept heads who have staff records
-    const deptHeadsWithStaff = await db.all(`
-      SELECT DISTINCT u.id as user_id, u.name, u.email, u.role,
-             s.id as staff_id, s.department,
-             d.id as department_id, d.name as department_name
-      FROM users u
-      INNER JOIN departments d ON d.manager_id = u.id
-      LEFT JOIN staff s ON u.id = s.user_id
-      LEFT JOIN departments d2 ON s.department_id = d2.id
-      WHERE u.role = 'DepartmentHead'
-        AND u.is_active = 1
-      ORDER BY u.name
-    `);
+    console.log(`[Appraisals] Found ${staffUsers.length} staff users`);
 
-    // Get dept heads who don't have staff records
-    const deptHeadsWithoutStaff = await db.all(`
-      SELECT DISTINCT u.id as user_id, u.name, u.email, u.role,
+    // Get all Department Head users - get from departments table
+    const deptHeadUsers = await db.all(`
+      SELECT DISTINCT u.id as user_id, u.name, u.email, 'DepartmentHead' as role,
              NULL as staff_id, NULL as department,
              d.id as department_id, d.name as department_name
       FROM users u
       INNER JOIN departments d ON d.manager_id = u.id
-      LEFT JOIN staff s ON u.id = s.user_id
       WHERE u.role = 'DepartmentHead'
         AND u.is_active = 1
-        AND s.id IS NULL
       ORDER BY u.name
     `);
 
-    // Combine all results
-    const allUsers = [...staffUsers, ...deptHeadsWithStaff, ...deptHeadsWithoutStaff];
+    console.log(`[Appraisals] Found ${deptHeadUsers.length} department head users`);
+
+    // Combine all results - staff users first, then department heads
+    const allUsers = [...staffUsers, ...deptHeadUsers];
     
     // Remove duplicates by user_id (in case a dept head also has a staff record)
+    // Keep the staff record version if user exists in both lists
     const uniqueUsers = [];
     const seenUserIds = new Set();
     
-    allUsers.forEach(user => {
+    // First add all staff users
+    staffUsers.forEach(user => {
       if (!seenUserIds.has(user.user_id)) {
         seenUserIds.add(user.user_id);
-        // If user is both staff and dept head, prioritize showing dept head info
-        if (user.role === 'DepartmentHead' || deptHeadsWithStaff.find(dh => dh.user_id === user.user_id)) {
-          user.role = 'DepartmentHead';
-        }
         uniqueUsers.push(user);
+      }
+    });
+    
+    // Then add department heads (skip if already added as staff)
+    deptHeadUsers.forEach(user => {
+      if (!seenUserIds.has(user.user_id)) {
+        seenUserIds.add(user.user_id);
+        uniqueUsers.push(user);
+      } else {
+        // If user is already in list as staff, update role to show both
+        const existing = uniqueUsers.find(u => u.user_id === user.user_id);
+        if (existing) {
+          existing.role = 'DepartmentHead/Staff'; // Show they are both
+          existing.department_id = user.department_id || existing.department_id;
+          existing.department_name = user.department_name || existing.department_name;
+        }
       }
     });
 
@@ -232,7 +233,9 @@ router.get('/staff', authenticateToken, async (req, res) => {
       return nameA.localeCompare(nameB);
     });
 
-    console.log(`[Appraisals] Fetched ${uniqueUsers.length} staff/department heads for appraisal form`);
+    console.log(`[Appraisals] Returning ${uniqueUsers.length} total staff/department heads for appraisal form`);
+    console.log(`[Appraisals] Breakdown: ${staffUsers.length} staff, ${deptHeadUsers.length} dept heads`);
+    
     res.json({ staff: uniqueUsers });
   } catch (error) {
     console.error('Get staff for appraisal error:', error);

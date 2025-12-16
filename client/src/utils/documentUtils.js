@@ -64,6 +64,11 @@ export const handleViewDocument = (filePath) => {
  * @param {string} filename - Optional filename for download
  */
 export const handleDownloadDocument = async (filePath, filename = null) => {
+  if (!filePath) {
+    alert('No file path provided');
+    return;
+  }
+  
   try {
     const url = getAuthenticatedFileUrl(filePath, 'download');
     
@@ -71,25 +76,63 @@ export const handleDownloadDocument = async (filePath, filename = null) => {
     if (!filename) {
       const pathParts = filePath.split('/');
       filename = pathParts[pathParts.length - 1] || 'document';
+      // Decode filename if it's URL encoded
+      try {
+        filename = decodeURIComponent(filename);
+      } catch (e) {
+        // If decode fails, use as-is
+      }
     }
     
-    // Method 1: Try using fetch with blob for better control and error handling
+    console.log('Starting download:', { filePath, filename, url });
+    
+    // Method 1: Try using axios (more reliable with authentication)
     try {
       const token = localStorage.getItem('token');
-      const response = await fetch(url, {
-        method: 'GET',
+      if (!token) {
+        throw new Error('No authentication token found. Please log in again.');
+      }
+      
+      const response = await api.get(url, {
+        responseType: 'blob',
+        timeout: 120000, // 2 minutes timeout for large files
         headers: {
           'Authorization': `Bearer ${token}`
         }
       });
       
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
+      // Check if response is actually a blob (success) or error JSON
+      let blob = response.data;
+      
+      // If blob is very small, it might be an error JSON
+      if (blob instanceof Blob && blob.size < 500) {
+        try {
+          const text = await blob.text();
+          const json = JSON.parse(text);
+          if (json.error) {
+            throw new Error(json.error);
+          }
+          // If not error JSON, recreate blob from text
+          blob = new Blob([text], { type: response.headers['content-type'] || 'application/octet-stream' });
+        } catch (e) {
+          // Not JSON, use blob as-is
+        }
       }
       
-      // Get content type from response
-      const contentType = response.headers.get('content-type') || 'application/octet-stream';
-      const blob = await response.blob();
+      // Get content type from response headers
+      const contentType = response.headers['content-type'] || response.headers['Content-Type'] || 'application/octet-stream';
+      
+      // Ensure blob has correct type
+      if (blob instanceof Blob) {
+        if (blob.type !== contentType && contentType !== 'application/octet-stream') {
+          const arrayBuffer = await blob.arrayBuffer();
+          blob = new Blob([arrayBuffer], { type: contentType });
+        }
+      } else {
+        // Convert to blob if not already
+        const arrayBuffer = await blob.arrayBuffer();
+        blob = new Blob([arrayBuffer], { type: contentType });
+      }
       
       // Create blob URL and trigger download
       const blobUrl = window.URL.createObjectURL(blob);
@@ -98,109 +141,157 @@ export const handleDownloadDocument = async (filePath, filename = null) => {
       link.download = filename;
       link.style.display = 'none';
       
-      // Add to DOM, click, then remove
       document.body.appendChild(link);
       link.click();
       
-      // Don't revoke immediately - wait longer to ensure download completes
-      // Blob URLs will be cleaned up when the page is closed
+      console.log('Download initiated successfully');
+      
+      // Cleanup: Remove link and revoke blob URL after delay
       setTimeout(() => {
         try {
           document.body.removeChild(link);
-          // Only revoke after a longer delay to ensure download started
           setTimeout(() => {
             window.URL.revokeObjectURL(blobUrl);
-          }, 10000); // 10 seconds - plenty of time for download to start
+          }, 15000); // 15 seconds - plenty of time for download to start
         } catch (e) {
           // Link might already be removed, ignore
         }
-      }, 1000); // Wait 1 second before attempting cleanup
+      }, 1000);
       
-      return; // Success, exit function
-    } catch (fetchError) {
-      console.warn('Fetch download method failed, trying axios fallback:', fetchError);
-      // Fall through to axios method
-    }
-    
-    // Method 2: Fallback to axios (original method)
-    const response = await api.get(url, {
-      responseType: 'blob',
-      timeout: 60000 // 60 second timeout for large files
-    });
-    
-    // Get content type from response headers
-    const contentType = response.headers['content-type'] || response.headers['Content-Type'] || 'application/octet-stream';
-    let blob = response.data;
-    
-    // Ensure blob has correct type
-    if (blob instanceof Blob && blob.type !== contentType && contentType !== 'application/octet-stream') {
-      const arrayBuffer = await blob.arrayBuffer();
-      blob = new Blob([arrayBuffer], { type: contentType });
-    }
-    
-    // Create blob URL and trigger download
-    const blobUrl = window.URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = blobUrl;
-    link.download = filename;
-    link.style.display = 'none';
-    
-    document.body.appendChild(link);
-    link.click();
-    
-    // Don't revoke immediately - wait longer to ensure download completes
-    setTimeout(() => {
-      try {
-        document.body.removeChild(link);
-        // Only revoke after a longer delay
-        setTimeout(() => {
-          window.URL.revokeObjectURL(blobUrl);
-        }, 10000); // 10 seconds
-      } catch (e) {
-        // Link might already be removed, ignore
+      return; // Success
+    } catch (axiosError) {
+      console.warn('Axios download failed, trying fetch fallback:', axiosError);
+      
+      // Method 2: Fallback to fetch
+      const token = localStorage.getItem('token');
+      const response = await fetch(url, {
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Accept': '*/*'
+        }
+      });
+      
+      // Check if response is OK
+      if (!response.ok) {
+        // Try to get error message from response
+        let errorText = `HTTP error! status: ${response.status}`;
+        try {
+          const errorData = await response.text();
+          try {
+            const errorJson = JSON.parse(errorData);
+            errorText = errorJson.error || errorText;
+          } catch (e) {
+            errorText = errorData || errorText;
+          }
+        } catch (e) {
+          // Couldn't parse error, use status
+        }
+        throw new Error(errorText);
       }
-    }, 1000); // Wait 1 second before attempting cleanup
+      
+      // Get blob from response
+      const blob = await response.blob();
+      
+      // Check if blob is actually an error JSON (small size)
+      if (blob.size < 500) {
+        try {
+          const text = await blob.text();
+          const json = JSON.parse(text);
+          if (json.error) {
+            throw new Error(json.error);
+          }
+        } catch (e) {
+          // Not JSON error, continue with download
+        }
+      }
+      
+      // Create blob URL and trigger download
+      const blobUrl = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = blobUrl;
+      link.download = filename;
+      link.style.display = 'none';
+      
+      document.body.appendChild(link);
+      link.click();
+      
+      console.log('Download initiated successfully (fetch method)');
+      
+      // Cleanup
+      setTimeout(() => {
+        try {
+          document.body.removeChild(link);
+          setTimeout(() => {
+            window.URL.revokeObjectURL(blobUrl);
+          }, 15000);
+        } catch (e) {
+          // Ignore
+        }
+      }, 1000);
+      
+      return; // Success
+    }
     
   } catch (error) {
     console.error('Download error:', error);
     
-    // Try to extract error message from blob response if available
+    // Extract meaningful error message
     let errorMessage = 'Failed to download document. Please try again.';
     
-    if (error.response?.data instanceof Blob) {
-      try {
-        const text = await error.response.data.text();
-        const json = JSON.parse(text);
-        errorMessage = json.error || errorMessage;
-      } catch (e) {
-        // If parsing fails, check status code
-        if (error.response?.status === 404) {
-          errorMessage = 'Document not found. It may have been deleted.';
-        } else if (error.response?.status === 403) {
-          errorMessage = 'You do not have permission to download this document.';
-        } else if (error.response?.status === 401) {
-          errorMessage = 'Your session has expired. Please log in again.';
+    // Check response status
+    if (error.response) {
+      const status = error.response.status;
+      const data = error.response.data;
+      
+      if (status === 404) {
+        errorMessage = 'Document not found. It may have been deleted or moved.';
+      } else if (status === 403) {
+        errorMessage = 'You do not have permission to download this document.';
+      } else if (status === 401) {
+        errorMessage = 'Your session has expired. Please log in again.';
+      } else if (status >= 500) {
+        errorMessage = 'Server error. Please try again later.';
+      } else if (data) {
+        // Try to extract error from response data
+        if (data instanceof Blob) {
+          try {
+            const text = await data.text();
+            const json = JSON.parse(text);
+            errorMessage = json.error || errorMessage;
+          } catch (e) {
+            // Couldn't parse, use default
+          }
+        } else if (typeof data === 'object' && data.error) {
+          errorMessage = data.error;
+        } else if (typeof data === 'string') {
+          errorMessage = data;
         }
       }
-    } else if (error.response?.data?.error) {
-      errorMessage = error.response.data.error;
     } else if (error.message) {
-      if (error.message.includes('timeout')) {
+      // Use error message if available
+      if (error.message.includes('timeout') || error.message.includes('TIMEOUT')) {
         errorMessage = 'Download timed out. The file may be too large. Please try again.';
-      } else if (error.message.includes('Network Error')) {
+      } else if (error.message.includes('Network Error') || error.message.includes('Failed to fetch')) {
         errorMessage = 'Network error. Please check your connection and try again.';
+      } else if (error.message.includes('token')) {
+        errorMessage = 'Authentication error. Please log in again.';
       } else {
         errorMessage = error.message;
       }
     }
     
-    // For production: Show user-friendly error message
+    // Show user-friendly error message
     alert(errorMessage);
     
-    // Also log full error for debugging (only in development)
-    if (process.env.NODE_ENV === 'development') {
-      console.error('Full error details:', error);
-    }
+    // Log full error for debugging
+    console.error('Full download error details:', {
+      error,
+      message: error.message,
+      response: error.response,
+      filePath,
+      filename
+    });
   }
 };
 

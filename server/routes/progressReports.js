@@ -1279,7 +1279,7 @@ router.put('/:id/approve', authenticateToken, requireRole('Admin'), [
             const normalizedStatus = status === 'Approved' ? 'Approved' : 'Rejected';
             await db.run(
               `UPDATE target_progress 
-               SET amount = ?, category = ?, status = ?, transaction_date = ?, updated_at = CURRENT_TIMESTAMP
+               SET amount = ?, category = ?, status = ?, transaction_date = ?
                WHERE progress_report_id = ?`,
               [
                 parseFloat(report.amount || 0),
@@ -1290,7 +1290,39 @@ router.put('/:id/approve', authenticateToken, requireRole('Admin'), [
               ]
             );
             
-            console.log('Target progress updated successfully for progress report:', req.params.id);
+            // Wait a moment for database commit (especially for PostgreSQL)
+            await new Promise(resolve => setTimeout(resolve, 200));
+            
+            // Verify the update was successful
+            const verifyUpdatedProgress = await db.get(
+              'SELECT id, amount, status FROM target_progress WHERE progress_report_id = ?',
+              [req.params.id]
+            );
+            
+            console.log('Target progress updated successfully for progress report:', {
+              progress_report_id: req.params.id,
+              target_progress_id: verifyUpdatedProgress?.id,
+              amount: verifyUpdatedProgress?.amount,
+              status: verifyUpdatedProgress?.status,
+              status_type: typeof verifyUpdatedProgress?.status,
+              expected_status: normalizedStatus
+            });
+            
+            // Check status match
+            const statusMatchCheck = await db.get(
+              `SELECT 
+                 CASE 
+                   WHEN status = 'Approved' THEN 'MATCH_APPROVED'
+                   WHEN UPPER(TRIM(COALESCE(status, ''))) = 'APPROVED' THEN 'MATCH_NORMALIZED'
+                   WHEN status IS NULL THEN 'MATCH_NULL'
+                   WHEN status = '' THEN 'MATCH_EMPTY'
+                   ELSE 'NO_MATCH'
+                 END as match_type,
+                 status as raw_status
+               FROM target_progress WHERE progress_report_id = ?`,
+              [req.params.id]
+            );
+            console.log('Status match check for updated progress entry:', statusMatchCheck);
             
             // Verify the updated progress (only Approved entries, same as GET /targets)
             // Check for status = 'Approved' first, then normalized
@@ -1299,12 +1331,31 @@ router.put('/:id/approve', authenticateToken, requireRole('Admin'), [
                  WHEN status = 'Approved' OR UPPER(TRIM(COALESCE(status, ''))) = 'APPROVED' OR status IS NULL OR status = ''
                  THEN COALESCE(CAST(amount AS NUMERIC), CAST(progress_amount AS NUMERIC), 0)
                  ELSE 0
-               END), 0) as total 
+               END), 0) as total,
+               COUNT(CASE 
+                 WHEN status = 'Approved' OR UPPER(TRIM(COALESCE(status, ''))) = 'APPROVED' OR status IS NULL OR status = ''
+                 THEN 1
+               END) as count 
                FROM target_progress 
                WHERE CAST(target_id AS INTEGER) = CAST(? AS INTEGER)`,
               [target.id]
             );
-            console.log('Total progress after update for target', target.id, ':', totalProgressCheck?.total || 0);
+            console.log('Total progress after update for target', target.id, ':', {
+              total: totalProgressCheck?.total || 0,
+              count: totalProgressCheck?.count || 0,
+              expected_amount: parseFloat(report.amount || 0)
+            });
+            
+            // Get all entries for debugging
+            const allProgressEntries = await db.all(
+              `SELECT id, amount, status, 
+                      UPPER(TRIM(COALESCE(status, ''))) as normalized_status
+               FROM target_progress
+               WHERE target_id = ?
+               ORDER BY id`,
+              [target.id]
+            );
+            console.log('ALL progress entries for target', target.id, 'after update:', JSON.stringify(allProgressEntries, null, 2));
             
             // Update admin target in database when staff/dept head target progress changes
             try {

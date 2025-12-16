@@ -1230,8 +1230,16 @@ router.put('/:id/approve', authenticateToken, requireRole('Admin'), [
             }
           } else {
             // Update existing progress record - when progress report is approved, set status to Approved
-            // Normalize status: capitalize first letter, lowercase rest
+            // Ensure status is exactly 'Approved' (capitalized)
             const normalizedStatus = status === 'Approved' ? 'Approved' : 'Rejected';
+            
+            console.log('Updating target_progress entry with:', {
+              progress_report_id: req.params.id,
+              amount: parseFloat(report.amount || 0),
+              status: normalizedStatus,
+              category: report.category
+            });
+            
             await db.run(
               `UPDATE target_progress 
                SET amount = ?, category = ?, status = ?, transaction_date = ?
@@ -1239,7 +1247,7 @@ router.put('/:id/approve', authenticateToken, requireRole('Admin'), [
               [
                 parseFloat(report.amount || 0),
                 report.category,
-                normalizedStatus, // Use normalized 'Approved' or 'Rejected' status
+                normalizedStatus, // Use exactly 'Approved' or 'Rejected'
                 report.date,
                 req.params.id
               ]

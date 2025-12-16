@@ -1340,62 +1340,29 @@ router.put('/:id/approve', authenticateToken, requireRole('Admin'), [
               console.error('Error updating admin target after progress approval (non-fatal):', adminUpdateError);
             }
             
-            // Calculate full target metrics using the same function as targets route
-            let fullMetrics = {
-              total_progress: parseFloat(totalProgressCheck?.total || 0),
-              shared_in: 0,
-              shared_out: 0,
-              net_amount: parseFloat(totalProgressCheck?.total || 0),
-              progress_percentage: '0.00',
-              remaining_amount: parseFloat(target.target_amount || 0)
-            };
-            
+            // Use calculateTargetMetrics from targets route for consistent calculations
+            let fullMetrics;
             try {
-              // Try to get full metrics by calling calculateTargetMetrics via targets route helper
-              // For now, calculate shared_in and shared_out manually
-              const USE_POSTGRESQL = !!process.env.DATABASE_URL;
-              let fundSharingExists = false;
-              
-              if (USE_POSTGRESQL) {
-                const fsCheck = await db.get(
-                  "SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'fund_sharing'"
-                );
-                fundSharingExists = !!fsCheck;
+              const targetsModule = require('./targets');
+              // Get fresh target data after progress entry update
+              const freshTarget = await db.get('SELECT * FROM targets WHERE id = ?', [target.id]);
+              if (freshTarget && targetsModule.calculateTargetMetrics) {
+                fullMetrics = await targetsModule.calculateTargetMetrics(freshTarget);
+                console.log('Calculated metrics using calculateTargetMetrics for target', target.id, ':', fullMetrics);
               } else {
-                const fsCheck = await db.get("SELECT name FROM sqlite_master WHERE type='table' AND name='fund_sharing'");
-                fundSharingExists = !!fsCheck;
+                throw new Error('calculateTargetMetrics not available');
               }
-              
-              if (fundSharingExists) {
-                const sharedOutResult = await db.get(
-                  `SELECT COALESCE(SUM(CASE WHEN status = 'Active' THEN CAST(amount AS NUMERIC) ELSE 0 END), 0) as total
-                   FROM fund_sharing WHERE from_user_id = ?`,
-                  [target.user_id]
-                );
-                const sharedInResult = await db.get(
-                  `SELECT COALESCE(SUM(CASE WHEN status = 'Active' THEN CAST(amount AS NUMERIC) ELSE 0 END), 0) as total
-                   FROM fund_sharing WHERE to_user_id = ?`,
-                  [target.user_id]
-                );
-                
-                fullMetrics.shared_out = parseFloat(sharedOutResult?.total || 0) || 0;
-                fullMetrics.shared_in = parseFloat(sharedInResult?.total || 0) || 0;
-              }
-              
-              // Calculate net amount
-              fullMetrics.net_amount = fullMetrics.total_progress + fullMetrics.shared_in - fullMetrics.shared_out;
-              
-              // Calculate progress percentage
-              const targetAmount = parseFloat(target.target_amount || 0) || 0;
-              fullMetrics.progress_percentage = targetAmount > 0 
-                ? ((fullMetrics.net_amount / targetAmount) * 100).toFixed(2) 
-                : '0.00';
-              
-              // Calculate remaining amount
-              fullMetrics.remaining_amount = Math.max(0, targetAmount - fullMetrics.net_amount);
             } catch (metricsError) {
-              console.error('Error calculating full target metrics in progressReports:', metricsError);
-              // Use partial metrics as fallback
+              console.error('Error using calculateTargetMetrics, falling back to manual:', metricsError);
+              // Fallback
+              fullMetrics = {
+                total_progress: parseFloat(totalProgressCheck?.total || 0),
+                shared_in: 0,
+                shared_out: 0,
+                net_amount: parseFloat(totalProgressCheck?.total || 0),
+                progress_percentage: '0.00',
+                remaining_amount: parseFloat(target.target_amount || 0)
+              };
             }
             
             // Emit real-time update - emit to ALL users with full metrics

@@ -360,7 +360,8 @@ const Targets = () => {
       period_start: target.period_start,
       period_end: target.period_end || '',
       status: target.status || 'Active',
-      notes: target.notes || ''
+      notes: target.notes || '',
+      manual_net_amount: undefined // Reset manual override
     });
     setShowEditModal(true);
   };
@@ -371,10 +372,29 @@ const Targets = () => {
     setError('');
 
     try {
-      await api.put(`/targets/${selectedTarget.id}`, editForm);
+      const updateData = { ...editForm };
+      
+      // If manual net_amount is set, include it for manual override
+      if (updateData.manual_net_amount !== undefined && updateData.manual_net_amount !== '') {
+        updateData.manual_net_amount_override = parseFloat(updateData.manual_net_amount);
+        delete updateData.manual_net_amount; // Remove the form field
+      }
+      
+      const response = await api.put(`/targets/${selectedTarget.id}`, updateData);
+      
+      // If manual override was used, the response should include updated metrics
+      if (response.data && response.data.target) {
+        // Update state immediately from response
+        setTargets(prevTargets => prevTargets.map(target => 
+          target.id === selectedTarget.id ? { ...target, ...response.data.target } : target
+        ));
+      }
+      
       setShowEditModal(false);
       setSelectedTarget(null);
-      fetchTargets();
+      
+      // Refresh to ensure all metrics are up to date
+      setTimeout(() => fetchTargets(), 300);
     } catch (err) {
       setError(err.response?.data?.error || 'Failed to update target');
     }

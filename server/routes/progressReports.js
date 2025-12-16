@@ -1103,8 +1103,8 @@ router.put('/:id/approve', authenticateToken, requireRole('Admin'), [
               result: progressResult
             });
             
-            // Wait a moment for database commit (especially for PostgreSQL)
-            await new Promise(resolve => setTimeout(resolve, 100));
+            // Wait longer for database commit (especially for PostgreSQL)
+            await new Promise(resolve => setTimeout(resolve, 300));
             
             // Verify the record was created and can be found
             const verifyProgress = await db.get(
@@ -1116,45 +1116,8 @@ router.put('/:id/approve', authenticateToken, requireRole('Admin'), [
               id: verifyProgress?.id,
               target_id: verifyProgress?.target_id,
               amount: verifyProgress?.amount,
+              status: verifyProgress?.status,
               progress_report_id: verifyProgress?.progress_report_id
-            });
-            
-            // Verify the total progress for this target using the same query as GET /targets (only Approved entries)
-            const totalProgressCheck = await db.get(
-              `SELECT COALESCE(SUM(CASE 
-                 WHEN status = 'Approved' OR UPPER(TRIM(COALESCE(status, ''))) = 'APPROVED' OR status IS NULL OR status = ''
-                 THEN COALESCE(CAST(amount AS NUMERIC), CAST(progress_amount AS NUMERIC), 0)
-                 ELSE 0
-               END), 0) as total,
-               COUNT(CASE 
-                 WHEN status = 'Approved' OR UPPER(TRIM(COALESCE(status, ''))) = 'APPROVED' OR status IS NULL OR status = ''
-                 THEN 1
-               END) as count 
-               FROM target_progress 
-               WHERE CAST(target_id AS INTEGER) = CAST(? AS INTEGER)`,
-              [targetIdInt]
-            );
-            console.log('Total progress for target', targetIdInt, ':', {
-              total: totalProgressCheck?.total || 0,
-              count: totalProgressCheck?.count || 0,
-              expected_amount: amountFloat,
-              match: (totalProgressCheck?.total || 0) >= amountFloat
-            });
-            
-            // Also verify using the exact subquery from GET /targets (only Approved entries)
-            const subqueryCheck = await db.get(
-              `SELECT COALESCE(SUM(CASE 
-                 WHEN tp.status = 'Approved' OR UPPER(TRIM(COALESCE(tp.status, ''))) = 'APPROVED' OR tp.status IS NULL OR tp.status = ''
-                 THEN COALESCE(CAST(tp.amount AS NUMERIC), CAST(tp.progress_amount AS NUMERIC), 0)
-                 ELSE 0
-               END), 0) as total_progress
-               FROM target_progress tp 
-               WHERE CAST(tp.target_id AS INTEGER) = CAST(? AS INTEGER)`,
-              [targetIdInt]
-            );
-            console.log('Subquery check (same as GET /targets - only Approved entries):', {
-              total_progress: subqueryCheck?.total_progress || 0,
-              matches_direct_query: (subqueryCheck?.total_progress || 0) === (totalProgressCheck?.total || 0)
             });
             
             // Log the actual status value saved
@@ -1167,7 +1130,8 @@ router.put('/:id/approve', authenticateToken, requireRole('Admin'), [
               amount: savedProgress?.amount,
               status: savedProgress?.status,
               status_type: typeof savedProgress?.status,
-              status_length: savedProgress?.status?.length
+              status_length: savedProgress?.status?.length,
+              expected_status: progressStatus
             });
             
             // Update admin target in database when staff/dept head target progress changes

@@ -26,7 +26,7 @@ const storage = multer.diskStorage({
 
 const upload = multer({ storage, limits: { fileSize: 10 * 1024 * 1024 } }); // 10MB limit
 
-// Helper function to check if user is Finance staff
+// Helper function to check if user is Finance staff (Assistant Finance Officer, Finance Department Head, or Admin)
 async function isFinanceStaff(user) {
   if (user.role === 'Admin') return true;
   if (user.role === 'DepartmentHead') {
@@ -36,10 +36,20 @@ async function isFinanceStaff(user) {
     );
     return dept && dept.name.toLowerCase().includes('finance');
   }
-  // Assistant Finance Officer role check - we'll check by email or a role field
-  // For now, Staff role with Finance department access
+  // Assistant Finance Officer - Staff role with Finance department access
   const staff = await db.get('SELECT department FROM staff WHERE user_id = ?', [user.id]);
   return staff && staff.department && staff.department.toLowerCase().includes('finance');
+}
+
+// Helper function to check if user can manage petty cash (view/edit)
+async function canManagePettyCash(user) {
+  return await isFinanceStaff(user);
+}
+
+// Helper function to check if user can delete petty cash (Assistant Finance Officer and Finance Department Head only)
+async function canDeletePettyCash(user) {
+  if (user.role === 'Admin') return false; // Admin cannot delete
+  return await isFinanceStaff(user); // Only Assistant Finance Officer and Finance Department Head
 }
 
 // Helper function to check if user is Assistant Finance Officer (Staff in Finance)
@@ -81,32 +91,512 @@ function generateAssetId(category) {
 }
 
 // ==========================================
-// PETTY CASH LEDGER ROUTES
+// PETTY CASH ROUTES (Simplified - No Approval Flow)
 // ==========================================
 
-// Get all petty cash ledgers
-router.get('/petty-cash/ledgers', authenticateToken, async (req, res) => {
+// Get all petty cash entries (Assistant Finance Officer, Finance Department Head, and Admin can see each other's history)
+router.get('/petty-cash', authenticateToken, async (req, res) => {
   try {
-    const { year, month, status } = req.query;
+    const { from_date, to_date } = req.query;
+    
+    // Check if user has access
+    if (!(await canManagePettyCash(req.user))) {
+      return res.status(403).json({ error: 'Access denied. Only Finance staff and Admin can view petty cash.' });
+    }
+    
     let query = `
-      SELECT pcl.*,
-             cust.name as custodian_name, cust_staff.staff_id as custodian_staff_id,
-             approver.name as approved_by_name,
-             creator.name as created_by_name,
-             counter.name as counted_by_name,
-             witness.name as witnessed_by_name
-      FROM petty_cash_ledgers pcl
+      SELECT pct.*,
+             pcl.month, pcl.year,
+             cust.name as custodian_name,
+             cust_staff.staff_id as custodian_staff_id,
+             creator.name as created_by_name
+      FROM petty_cash_transactions pct
+      JOIN petty_cash_ledgers pcl ON pct.ledger_id = pcl.id
       LEFT JOIN staff cust_staff ON pcl.petty_cash_custodian_id = cust_staff.id
       LEFT JOIN users cust ON cust_staff.user_id = cust.id
-      LEFT JOIN users approver ON pcl.approved_by_id = approver.id
-      LEFT JOIN users creator ON pcl.created_by = creator.id
-      LEFT JOIN staff counter_staff ON pcl.counted_by_id = counter_staff.id
-      LEFT JOIN users counter ON counter_staff.user_id = counter.id
-      LEFT JOIN staff witness_staff ON pcl.witnessed_by_id = witness_staff.id
-      LEFT JOIN users witness ON witness_staff.user_id = witness.id
+      LEFT JOIN users cust_direct ON pcl.petty_cash_custodian_id = cust_direct.id AND cust_staff.id IS NULL
+      LEFT JOIN users creator ON pct.approved_by_id = creator.id
       WHERE 1=1
     `;
     const params = [];
+
+    // Date range filter
+    if (from_date) {
+      query += ' AND DATE(pct.transaction_date) >= ?';
+      params.push(from_date);
+    }
+    if (to_date) {
+      query += ' AND DATE(pct.transaction_date) <= ?';
+      params.push(to_date);
+    }
+
+    query += ' ORDER BY pct.transaction_date DESC, pct.id DESC';
+
+    const transactions = await db.all(query, params);
+
+    // Calculate Period, Total Deposited, Total Withdrawn, Closing Balance
+    const summary = transactions.reduce((acc, t) => {
+      acc.total_deposited += parseFloat(t.amount_deposited || 0);
+      acc.total_withdrawn += parseFloat(t.amount_withdrawn || 0);
+      return acc;
+    }, { total_deposited: 0, total_withdrawn: 0 });
+
+    // Group by period (month/year)
+    const byPeriod = {};
+    transactions.forEach(t => {
+      const period = `${months[t.month - 1]} ${t.year}`;
+      if (!byPeriod[period]) {
+        byPeriod[period] = {
+          period,
+          transactions: [],
+          total_deposited: 0,
+          total_withdrawn: 0,
+          starting_balance: 0,
+          closing_balance: 0
+        };
+      }
+      byPeriod[period].transactions.push(t);
+      byPeriod[period].total_deposited += parseFloat(t.amount_deposited || 0);
+      byPeriod[period].total_withdrawn += parseFloat(t.amount_withdrawn || 0);
+    });
+
+    // Calculate closing balance for each period
+    Object.values(byPeriod).forEach(period => {
+      const ledger = transactions.find(t => `${months[t.month - 1]} ${t.year}` === period.period);
+      if (ledger) {
+        const ledgerData = db.get(
+          'SELECT starting_balance FROM petty_cash_ledgers WHERE year = ? AND month = ?',
+          [ledger.year, ledger.month]
+        );
+        period.starting_balance = ledgerData?.starting_balance || 0;
+      }
+      period.closing_balance = period.starting_balance + period.total_deposited - period.total_withdrawn;
+    });
+
+    res.json({ 
+      transactions,
+      summary: {
+        ...summary,
+        closing_balance: summary.total_deposited - summary.total_withdrawn
+      },
+      by_period: Object.values(byPeriod)
+    });
+  } catch (error) {
+    console.error('Get petty cash error:', error);
+    res.status(500).json({ error: 'Failed to fetch petty cash: ' + error.message });
+  }
+});
+
+// Get all staff and department heads for custodian selection
+router.get('/petty-cash/custodians', authenticateToken, async (req, res) => {
+  try {
+    if (!(await canManagePettyCash(req.user))) {
+      return res.status(403).json({ error: 'Access denied' });
+    }
+
+    // Get all staff
+    const staff = await db.all(`
+      SELECT s.id, s.staff_id, u.id as user_id, u.name, u.email, 'Staff' as role_type
+      FROM staff s
+      JOIN users u ON s.user_id = u.id
+      WHERE u.is_active = 1
+      ORDER BY u.name
+    `);
+
+    // Get all department heads
+    const deptHeads = await db.all(`
+      SELECT d.manager_id as id, u.id as user_id, u.name, u.email, 'DepartmentHead' as role_type
+      FROM departments d
+      JOIN users u ON d.manager_id = u.id
+      WHERE u.is_active = 1
+      GROUP BY d.manager_id, u.id, u.name, u.email
+      ORDER BY u.name
+    `);
+
+    // Combine and format
+    const custodians = [
+      ...staff.map(s => ({
+        id: s.id,
+        user_id: s.user_id,
+        name: s.name,
+        email: s.email,
+        staff_id: s.staff_id,
+        role_type: s.role_type
+      })),
+      ...deptHeads.map(d => ({
+        id: d.id,
+        user_id: d.user_id,
+        name: d.name,
+        email: d.email,
+        role_type: d.role_type
+      }))
+    ];
+
+    res.json({ custodians });
+  } catch (error) {
+    console.error('Get custodians error:', error);
+    res.status(500).json({ error: 'Failed to fetch custodians' });
+  }
+});
+
+// Create petty cash entry (simplified - no approval flow)
+router.post('/petty-cash', authenticateToken, [
+  body('transaction_date').isISO8601().withMessage('Valid transaction date and time required'),
+  body('petty_cash_custodian_id').notEmpty().withMessage('Petty cash custodian is required'),
+  body('amount_deposit').optional().isFloat({ min: 0 }),
+  body('amount_withdrawal').optional().isFloat({ min: 0 }),
+  body('description').optional().trim(),
+  body('charged_to').optional().trim()
+], async (req, res) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({ errors: errors.array() });
+    }
+
+    // Check access
+    if (!(await canManagePettyCash(req.user))) {
+      return res.status(403).json({ error: 'Access denied. Only Finance staff and Admin can create petty cash entries.' });
+    }
+
+    const { 
+      transaction_date, 
+      petty_cash_custodian_id, 
+      amount_deposit = 0, 
+      amount_withdrawal = 0,
+      description = '',
+      charged_to = ''
+    } = req.body;
+
+    // Validate that at least one amount is provided
+    const deposit = parseFloat(amount_deposit) || 0;
+    const withdrawal = parseFloat(amount_withdrawal) || 0;
+    
+    if (deposit === 0 && withdrawal === 0) {
+      return res.status(400).json({ error: 'Either deposit or withdrawal amount is required' });
+    }
+    if (deposit > 0 && withdrawal > 0) {
+      return res.status(400).json({ error: 'Cannot have both deposit and withdrawal in the same transaction' });
+    }
+
+    // Validate custodian - can be staff or department head
+    let custodianUser = null;
+    const staff = await db.get('SELECT user_id FROM staff WHERE id = ? OR user_id = ?', [petty_cash_custodian_id, petty_cash_custodian_id]);
+    if (staff) {
+      custodianUser = await db.get('SELECT id FROM users WHERE id = ?', [staff.user_id]);
+    } else {
+      custodianUser = await db.get('SELECT id FROM users WHERE id = ? AND (role = ? OR role = ?)', 
+        [petty_cash_custodian_id, 'DepartmentHead', 'Admin']);
+    }
+
+    if (!custodianUser) {
+      return res.status(400).json({ error: 'Invalid custodian. Must be a valid staff member or department head.' });
+    }
+
+    // Get or create ledger for the month/year of transaction
+    const transDate = new Date(transaction_date);
+    const month = transDate.getMonth() + 1;
+    const year = transDate.getFullYear();
+
+    let ledger = await db.get(
+      'SELECT * FROM petty_cash_ledgers WHERE year = ? AND month = ?',
+      [year, month]
+    );
+
+    if (!ledger) {
+      // Create new ledger for this month/year
+      const prevMonth = month === 1 ? 12 : month - 1;
+      const prevYear = month === 1 ? year - 1 : year;
+      const prevLedger = await db.get(
+        'SELECT id FROM petty_cash_ledgers WHERE year = ? AND month = ?',
+        [prevYear, prevMonth]
+      );
+      
+      let startingBalance = 0;
+      if (prevLedger) {
+        const prevTransactions = await db.all(
+          'SELECT amount_deposited, amount_withdrawn FROM petty_cash_transactions WHERE ledger_id = ?',
+          [prevLedger.id]
+        );
+        const prevLedgerData = await db.get(
+          'SELECT starting_balance FROM petty_cash_ledgers WHERE id = ?',
+          [prevLedger.id]
+        );
+        const prevDeposited = prevTransactions.reduce((sum, t) => sum + (parseFloat(t.amount_deposited) || 0), 0);
+        const prevWithdrawn = prevTransactions.reduce((sum, t) => sum + (parseFloat(t.amount_withdrawn) || 0), 0);
+        startingBalance = (prevLedgerData?.starting_balance || 0) + prevDeposited - prevWithdrawn;
+      }
+
+      const ledgerResult = await db.run(
+        `INSERT INTO petty_cash_ledgers 
+         (month, year, starting_balance, petty_cash_custodian_id, created_by, approval_status)
+         VALUES (?, ?, ?, ?, ?, 'Approved')`,
+        [month, year, startingBalance, petty_cash_custodian_id, req.user.id]
+      );
+      
+      ledger = await db.get('SELECT * FROM petty_cash_ledgers WHERE id = ?', [ledgerResult.lastID]);
+    }
+
+    // Get last transaction balance for this ledger
+    const lastTransaction = await db.get(
+      'SELECT balance FROM petty_cash_transactions WHERE ledger_id = ? ORDER BY transaction_date DESC, id DESC LIMIT 1',
+      [ledger.id]
+    );
+    const previousBalance = lastTransaction ? lastTransaction.balance : ledger.starting_balance;
+    const newBalance = previousBalance + deposit - withdrawal;
+
+    // Generate slip number
+    const transactionCount = await db.get(
+      'SELECT COUNT(*) as count FROM petty_cash_transactions WHERE ledger_id = ?',
+      [ledger.id]
+    );
+    const slipNo = `PC-${ledger.year}-${String(ledger.month).padStart(2, '0')}-${String((transactionCount.count || 0) + 1).padStart(3, '0')}`;
+
+    // Create transaction
+    const result = await db.run(
+      `INSERT INTO petty_cash_transactions 
+       (ledger_id, transaction_date, petty_cash_slip_no, description, amount_deposited, 
+        amount_withdrawn, balance, charged_to, approved_by_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [ledger.id, transaction_date, slipNo, description || 'Petty cash transaction', 
+       deposit, withdrawal, newBalance, charged_to || null, req.user.id]
+    );
+
+    await logAction(req.user.id, 'create_petty_cash', 'finance', result.lastID, { 
+      ledger_id: ledger.id, 
+      amount_deposit: deposit, 
+      amount_withdrawal: withdrawal 
+    }, req);
+
+    // Calculate totals for ledger
+    const allTransactions = await db.all(
+      'SELECT amount_deposited, amount_withdrawn FROM petty_cash_transactions WHERE ledger_id = ?',
+      [ledger.id]
+    );
+    const totalDeposited = allTransactions.reduce((sum, t) => sum + (parseFloat(t.amount_deposited) || 0), 0);
+    const totalWithdrawn = allTransactions.reduce((sum, t) => sum + (parseFloat(t.amount_withdrawn) || 0), 0);
+    const closingBalance = ledger.starting_balance + totalDeposited - totalWithdrawn;
+
+    // Emit real-time event
+    if (global.io) {
+      global.io.emit('petty_cash_created', {
+        id: result.lastID,
+        ledger_id: ledger.id,
+        transaction_date,
+        custodian_id: petty_cash_custodian_id,
+        amount_deposit: deposit,
+        amount_withdrawal: withdrawal,
+        balance: newBalance,
+        period: `${months[month - 1]} ${year}`,
+        total_deposited: totalDeposited,
+        total_withdrawn: totalWithdrawn,
+        closing_balance: closingBalance,
+        created_by: req.user.id
+      });
+    }
+
+    res.status(201).json({
+      message: 'Petty cash entry created successfully',
+      transaction: { 
+        id: result.lastID, 
+        balance: newBalance, 
+        slip_no: slipNo,
+        period: `${months[month - 1]} ${year}`,
+        total_deposited: totalDeposited,
+        total_withdrawn: totalWithdrawn,
+        closing_balance: closingBalance
+      }
+    });
+  } catch (error) {
+    console.error('Create petty cash error:', error);
+    res.status(500).json({ error: 'Failed to create petty cash entry: ' + error.message });
+  }
+});
+
+// Update petty cash entry (Assistant Finance Officer, Finance Department Head, and Admin)
+router.put('/petty-cash/:id', authenticateToken, [
+  body('transaction_date').optional().isISO8601(),
+  body('amount_deposit').optional().isFloat({ min: 0 }),
+  body('amount_withdrawal').optional().isFloat({ min: 0 }),
+  body('description').optional().trim(),
+  body('charged_to').optional().trim()
+], async (req, res) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({ errors: errors.array() });
+    }
+
+    // Check access
+    if (!(await canManagePettyCash(req.user))) {
+      return res.status(403).json({ error: 'Access denied' });
+    }
+
+    const transaction = await db.get(
+      'SELECT * FROM petty_cash_transactions WHERE id = ?',
+      [req.params.id]
+    );
+
+    if (!transaction) {
+      return res.status(404).json({ error: 'Petty cash entry not found' });
+    }
+
+    const updates = req.body;
+    const updateFields = [];
+    const params = [];
+
+    if (updates.transaction_date) {
+      updateFields.push('transaction_date = ?');
+      params.push(updates.transaction_date);
+    }
+    if (updates.amount_deposit !== undefined) {
+      updateFields.push('amount_deposited = ?');
+      params.push(parseFloat(updates.amount_deposit) || 0);
+    }
+    if (updates.amount_withdrawal !== undefined) {
+      updateFields.push('amount_withdrawn = ?');
+      params.push(parseFloat(updates.amount_withdrawal) || 0);
+    }
+    if (updates.description !== undefined) {
+      updateFields.push('description = ?');
+      params.push(updates.description);
+    }
+    if (updates.charged_to !== undefined) {
+      updateFields.push('charged_to = ?');
+      params.push(updates.charged_to);
+    }
+
+    if (updateFields.length === 0) {
+      return res.status(400).json({ error: 'No fields to update' });
+    }
+
+    params.push(req.params.id);
+    await db.run(
+      `UPDATE petty_cash_transactions 
+       SET ${updateFields.join(', ')}, updated_at = CURRENT_TIMESTAMP
+       WHERE id = ?`,
+      params
+    );
+
+    // Recalculate balances for all transactions in this ledger
+    const ledger = await db.get('SELECT * FROM petty_cash_ledgers WHERE id = ?', [transaction.ledger_id]);
+    const allTransactions = await db.all(
+      'SELECT * FROM petty_cash_transactions WHERE ledger_id = ? ORDER BY transaction_date, id',
+      [transaction.ledger_id]
+    );
+
+    let runningBalance = ledger.starting_balance;
+    for (const t of allTransactions) {
+      runningBalance = runningBalance + (parseFloat(t.amount_deposited) || 0) - (parseFloat(t.amount_withdrawn) || 0);
+      await db.run('UPDATE petty_cash_transactions SET balance = ? WHERE id = ?', [runningBalance, t.id]);
+    }
+
+    await logAction(req.user.id, 'update_petty_cash', 'finance', req.params.id, updates, req);
+
+    // Emit real-time event
+    if (global.io) {
+      global.io.emit('petty_cash_updated', {
+        id: req.params.id,
+        ledger_id: transaction.ledger_id,
+        ...updates,
+        updated_by: req.user.id
+      });
+    }
+
+    res.json({ message: 'Petty cash entry updated successfully' });
+  } catch (error) {
+    console.error('Update petty cash error:', error);
+    res.status(500).json({ error: 'Failed to update petty cash entry: ' + error.message });
+  }
+});
+
+// Delete petty cash entry (Assistant Finance Officer and Finance Department Head only)
+router.delete('/petty-cash/:id', authenticateToken, async (req, res) => {
+  try {
+    // Check delete permission
+    if (!(await canDeletePettyCash(req.user))) {
+      return res.status(403).json({ error: 'Access denied. Only Assistant Finance Officer and Finance Department Head can delete petty cash entries.' });
+    }
+
+    const transaction = await db.get(
+      'SELECT * FROM petty_cash_transactions WHERE id = ?',
+      [req.params.id]
+    );
+
+    if (!transaction) {
+      return res.status(404).json({ error: 'Petty cash entry not found' });
+    }
+
+    // Delete the transaction
+    await db.run('DELETE FROM petty_cash_transactions WHERE id = ?', [req.params.id]);
+
+    // Recalculate balances for remaining transactions in this ledger
+    const ledger = await db.get('SELECT * FROM petty_cash_ledgers WHERE id = ?', [transaction.ledger_id]);
+    const allTransactions = await db.all(
+      'SELECT * FROM petty_cash_transactions WHERE ledger_id = ? ORDER BY transaction_date, id',
+      [transaction.ledger_id]
+    );
+
+    let runningBalance = ledger.starting_balance;
+    for (const t of allTransactions) {
+      runningBalance = runningBalance + (parseFloat(t.amount_deposited) || 0) - (parseFloat(t.amount_withdrawn) || 0);
+      await db.run('UPDATE petty_cash_transactions SET balance = ? WHERE id = ?', [runningBalance, t.id]);
+    }
+
+    await logAction(req.user.id, 'delete_petty_cash', 'finance', req.params.id, {}, req);
+
+    // Emit real-time event
+    if (global.io) {
+      global.io.emit('petty_cash_deleted', {
+        id: req.params.id,
+        ledger_id: transaction.ledger_id,
+        deleted_by: req.user.id
+      });
+    }
+
+    res.json({ message: 'Petty cash entry deleted successfully' });
+  } catch (error) {
+    console.error('Delete petty cash error:', error);
+    res.status(500).json({ error: 'Failed to delete petty cash entry: ' + error.message });
+  }
+});
+
+// ==========================================
+// LEGACY PETTY CASH LEDGER ROUTES (Keep for backward compatibility)
+// ==========================================
+
+// Get all petty cash ledgers (Assistant Finance Officer, Finance Department Head, and Admin can see each other's history)
+router.get('/petty-cash/ledgers', authenticateToken, async (req, res) => {
+  try {
+    const { year, month, status, from_date, to_date } = req.query;
+    
+    // Check if user has access
+    if (!(await canManagePettyCash(req.user))) {
+      return res.status(403).json({ error: 'Access denied. Only Finance staff and Admin can view petty cash.' });
+    }
+    
+    let query = `
+      SELECT pcl.*,
+             cust.name as custodian_name, cust_staff.staff_id as custodian_staff_id,
+             creator.name as created_by_name
+      FROM petty_cash_ledgers pcl
+      LEFT JOIN staff cust_staff ON pcl.petty_cash_custodian_id = cust_staff.id
+      LEFT JOIN users cust ON cust_staff.user_id = cust.id
+      LEFT JOIN users cust_direct ON pcl.petty_cash_custodian_id = cust_direct.id AND cust_staff.id IS NULL
+      LEFT JOIN users creator ON pcl.created_by = creator.id
+      WHERE 1=1
+    `;
+    const params = [];
+
+    // Date range filter
+    if (from_date) {
+      query += ' AND DATE(pcl.created_at) >= ?';
+      params.push(from_date);
+    }
+    if (to_date) {
+      query += ' AND DATE(pcl.created_at) <= ?';
+      params.push(to_date);
+    }
 
     if (year) {
       query += ' AND pcl.year = ?';
@@ -121,23 +611,27 @@ router.get('/petty-cash/ledgers', authenticateToken, async (req, res) => {
       params.push(status);
     }
 
-    // Role-based access
-    if (req.user.role === 'Staff' && !(await isFinanceStaff(req.user))) {
-      return res.status(403).json({ error: 'Access denied' });
-    }
-
-    query += ' ORDER BY pcl.year DESC, pcl.month DESC';
+    query += ' ORDER BY pcl.created_at DESC, pcl.year DESC, pcl.month DESC';
 
     const ledgers = await db.all(query, params);
 
-    // Calculate totals for each ledger
+    // Calculate totals for each ledger (Period, Total Deposited, Total Withdrawn, Closing Balance)
     for (const ledger of ledgers) {
+      // Determine period from date_from and date_to, or from month/year
+      if (ledger.date_from && ledger.date_to) {
+        ledger.period = `${new Date(ledger.date_from).toLocaleDateString()} - ${new Date(ledger.date_to).toLocaleDateString()}`;
+      } else {
+        ledger.period = `${months[ledger.month - 1]} ${ledger.year}`;
+      }
+      
+      // Get all transactions for this ledger
       const transactions = await db.all(
-        'SELECT amount_deposited, amount_withdrawn FROM petty_cash_transactions WHERE ledger_id = ?',
+        'SELECT amount_deposited, amount_withdrawn, transaction_date FROM petty_cash_transactions WHERE ledger_id = ? ORDER BY transaction_date, id',
         [ledger.id]
       );
-      ledger.total_deposited = transactions.reduce((sum, t) => sum + (t.amount_deposited || 0), 0);
-      ledger.total_withdrawn = transactions.reduce((sum, t) => sum + (t.amount_withdrawn || 0), 0);
+      
+      ledger.total_deposited = transactions.reduce((sum, t) => sum + (parseFloat(t.amount_deposited) || 0), 0);
+      ledger.total_withdrawn = transactions.reduce((sum, t) => sum + (parseFloat(t.amount_withdrawn) || 0), 0);
       ledger.closing_balance = ledger.starting_balance + ledger.total_deposited - ledger.total_withdrawn;
     }
 
@@ -151,6 +645,10 @@ router.get('/petty-cash/ledgers', authenticateToken, async (req, res) => {
 // Get single petty cash ledger with transactions
 router.get('/petty-cash/ledgers/:id', authenticateToken, async (req, res) => {
   try {
+    if (!(await canManagePettyCash(req.user))) {
+      return res.status(403).json({ error: 'Access denied' });
+    }
+
     const ledger = await db.get(
       `SELECT pcl.*,
               COALESCE(cust.name, cust_direct.name) as custodian_name, 
@@ -183,10 +681,17 @@ router.get('/petty-cash/ledgers/:id', authenticateToken, async (req, res) => {
     );
 
     const totals = transactions.reduce((acc, t) => {
-      acc.deposited += t.amount_deposited || 0;
-      acc.withdrawn += t.amount_withdrawn || 0;
+      acc.deposited += parseFloat(t.amount_deposited || 0);
+      acc.withdrawn += parseFloat(t.amount_withdrawn || 0);
       return acc;
     }, { deposited: 0, withdrawn: 0 });
+
+    // Determine period
+    if (ledger.date_from && ledger.date_to) {
+      ledger.period = `${new Date(ledger.date_from).toLocaleDateString()} - ${new Date(ledger.date_to).toLocaleDateString()}`;
+    } else {
+      ledger.period = `${months[ledger.month - 1]} ${ledger.year}`;
+    }
 
     ledger.transactions = transactions;
     ledger.total_deposited = totals.deposited;
@@ -200,7 +705,7 @@ router.get('/petty-cash/ledgers/:id', authenticateToken, async (req, res) => {
   }
 });
 
-// Create petty cash ledger
+// Create petty cash ledger (Legacy - kept for backward compatibility)
 router.post('/petty-cash/ledgers', authenticateToken, [
   body('month').isInt({ min: 1, max: 12 }).withMessage('Month must be 1-12'),
   body('year').isInt({ min: 2020, max: 2100 }).withMessage('Year must be valid'),
@@ -215,27 +720,21 @@ router.post('/petty-cash/ledgers', authenticateToken, [
       return res.status(400).json({ errors: errors.array() });
     }
 
-    if (!(await isFinanceStaff(req.user)) && req.user.role !== 'Admin') {
+    if (!(await canManagePettyCash(req.user))) {
       return res.status(403).json({ error: 'Only Finance staff can create ledgers' });
     }
 
     const { month, year, starting_balance, petty_cash_custodian_id, date_from, date_to } = req.body;
 
     // Validate custodian exists (can be staff, dept head, or admin user)
-    // For backward compatibility, try staff first, then user
     let custodianExists = false;
-    let custodianIsUser = false;
-    
-    // Check if it's a staff member
     const staff = await db.get('SELECT id, user_id FROM staff WHERE id = ?', [petty_cash_custodian_id]);
     if (staff) {
       custodianExists = true;
     } else {
-      // Check if it's a user (dept head or admin without staff record)
       const user = await db.get('SELECT id FROM users WHERE id = ?', [petty_cash_custodian_id]);
       if (user) {
         custodianExists = true;
-        custodianIsUser = true;
       }
     }
     
@@ -276,138 +775,28 @@ router.post('/petty-cash/ledgers', authenticateToken, [
       }
     }
 
-    // Determine initial approval status based on user role
-    // Assistant Finance Officer → Pending_DeptHead
-    // Finance Department Head or Admin → can be Draft or directly Approved
-    let initialStatus = 'Draft';
-    let deptHeadStatus = null;
+    // No approval flow - set status directly to 'Approved'
+    const insertColumns = ['month', 'year', 'starting_balance', 'petty_cash_custodian_id', 'created_by', 'approval_status'];
+    const insertValues = [month, year, actualStartingBalance, petty_cash_custodian_id, req.user.id, 'Approved'];
     
-    if (await isAssistantFinanceOfficer(req.user)) {
-      initialStatus = 'Pending_DeptHead';
-      deptHeadStatus = 'Pending';
+    if (date_from) {
+      insertColumns.push('date_from');
+      insertValues.push(date_from);
     }
-
-    // Handle constraint violation for approval_status
-    let result;
-    try {
-      // Build INSERT query dynamically to handle optional date_from and date_to
-      const insertColumns = ['month', 'year', 'starting_balance', 'petty_cash_custodian_id', 'created_by', 'approval_status', 'dept_head_status'];
-      const insertValues = [month, year, actualStartingBalance, petty_cash_custodian_id, req.user.id, initialStatus, deptHeadStatus];
-      
-      if (date_from) {
-        insertColumns.push('date_from');
-        insertValues.push(date_from);
-      }
-      if (date_to) {
-        insertColumns.push('date_to');
-        insertValues.push(date_to);
-      }
-      
-      const placeholders = insertColumns.map(() => '?').join(', ');
-      result = await db.run(
-        `INSERT INTO petty_cash_ledgers 
-         (${insertColumns.join(', ')})
-         VALUES (${placeholders})`,
-        insertValues
-      );
-    } catch (insertError) {
-      // If constraint violation, try to fix the constraint and retry
-      if (insertError.message && insertError.message.includes('check constraint') && insertError.message.includes('petty_cash_ledgers_approval_status_check')) {
-        console.log('Constraint violation detected, attempting to update constraint...');
-        const USE_POSTGRESQL = !!process.env.DATABASE_URL;
-        
-        if (USE_POSTGRESQL) {
-          try {
-            // Find and drop the existing constraint
-            const constraint = await db.get(`
-              SELECT constraint_name 
-              FROM information_schema.table_constraints 
-              WHERE table_name = 'petty_cash_ledgers' 
-              AND constraint_type = 'CHECK'
-              AND constraint_name LIKE '%approval_status%'
-            `);
-            
-            if (constraint) {
-              await db.run(`ALTER TABLE petty_cash_ledgers DROP CONSTRAINT ${constraint.constraint_name}`);
-            } else {
-              // Try common constraint names
-              const constraintNames = ['petty_cash_ledgers_approval_status_check', 'petty_cash_ledgers_approval_status_chk', 'check_approval_status'];
-              for (const constraintName of constraintNames) {
-                try {
-                  await db.run(`ALTER TABLE petty_cash_ledgers DROP CONSTRAINT IF EXISTS ${constraintName}`);
-                } catch (e) {
-                  // Ignore if doesn't exist
-                }
-              }
-            }
-            
-            // Add new constraint with all status values including workflow statuses
-            await db.run(`
-              ALTER TABLE petty_cash_ledgers 
-              ADD CONSTRAINT petty_cash_ledgers_approval_status_check 
-              CHECK (approval_status IN ('Draft', 'Pending Review', 'Pending Approval', 'Approved', 'Locked', 'Pending_DeptHead', 'Pending_Admin', 'Rejected'))
-            `);
-            console.log('✓ Updated petty_cash_ledgers approval_status constraint to include workflow statuses');
-            
-            // Retry the insert with same dynamic columns
-            const insertColumns2 = ['month', 'year', 'starting_balance', 'petty_cash_custodian_id', 'created_by', 'approval_status', 'dept_head_status'];
-            const insertValues2 = [month, year, actualStartingBalance, petty_cash_custodian_id, req.user.id, initialStatus, deptHeadStatus];
-            
-            if (date_from) {
-              insertColumns2.push('date_from');
-              insertValues2.push(date_from);
-            }
-            if (date_to) {
-              insertColumns2.push('date_to');
-              insertValues2.push(date_to);
-            }
-            
-            const placeholders2 = insertColumns2.map(() => '?').join(', ');
-            result = await db.run(
+    if (date_to) {
+      insertColumns.push('date_to');
+      insertValues.push(date_to);
+    }
+    
+    const placeholders = insertColumns.map(() => '?').join(', ');
+    const result = await db.run(
               `INSERT INTO petty_cash_ledgers 
-               (${insertColumns2.join(', ')})
-               VALUES (${placeholders2})`,
-              insertValues2
-            );
-          } catch (constraintError) {
-            console.error('Error updating constraint:', constraintError);
-            throw insertError; // Re-throw original error
-          }
-        } else {
-          // SQLite doesn't support ALTER TABLE to modify CHECK constraints
-          console.error('SQLite constraint violation - cannot modify CHECK constraint dynamically');
-          throw insertError;
-        }
-      } else {
-        throw insertError;
-      }
-    }
+       (${insertColumns.join(', ')})
+       VALUES (${placeholders})`,
+      insertValues
+    );
 
     await logAction(req.user.id, 'create_petty_cash_ledger', 'finance', result.lastID, { month, year }, req);
-
-    // Send notification to Finance Department Head if submitted by Assistant Finance Officer
-    if (initialStatus === 'Pending_DeptHead') {
-      try {
-        // Get Finance Department Head
-        const financeDept = await db.get(
-          'SELECT manager_id, head_email FROM departments WHERE LOWER(name) LIKE ?',
-          ['%finance%']
-        );
-        if (financeDept && financeDept.manager_id) {
-          await createNotification(
-            financeDept.manager_id,
-            'Petty Cash Ledger Pending Approval',
-            `A new petty cash ledger for ${months[month - 1]} ${year} has been submitted and requires your approval.`,
-            'warning',
-            `/finance/petty-cash/ledgers/${result.lastID}`,
-            req.user.id
-          );
-        }
-      } catch (notifError) {
-        console.error('Error sending notification:', notifError);
-        // Don't fail the request if notification fails
-      }
-    }
 
     res.status(201).json({
       message: 'Petty cash ledger created successfully',
@@ -419,11 +808,11 @@ router.post('/petty-cash/ledgers', authenticateToken, [
   }
 });
 
-// Add transaction to petty cash ledger
+// Add transaction to petty cash ledger (Updated)
 router.post('/petty-cash/ledgers/:id/transactions', authenticateToken, upload.single('attachment'), [
   body('transaction_date').isISO8601().withMessage('Valid transaction date required'),
-  body('description').trim().notEmpty().withMessage('Description is required'),
-  body('charged_to').trim().notEmpty().withMessage('Expense category is required')
+  body('description').optional().trim(),
+  body('charged_to').optional().trim()
 ], async (req, res) => {
   try {
     const errors = validationResult(req);
@@ -431,16 +820,13 @@ router.post('/petty-cash/ledgers/:id/transactions', authenticateToken, upload.si
       return res.status(400).json({ errors: errors.array() });
     }
 
-    if (!(await isFinanceStaff(req.user)) && req.user.role !== 'Admin') {
+    if (!(await canManagePettyCash(req.user))) {
       return res.status(403).json({ error: 'Access denied' });
     }
 
     const ledger = await db.get('SELECT * FROM petty_cash_ledgers WHERE id = ?', [req.params.id]);
     if (!ledger) {
       return res.status(404).json({ error: 'Ledger not found' });
-    }
-    if (ledger.locked) {
-      return res.status(400).json({ error: 'Ledger is locked and cannot be modified' });
     }
 
     const {
@@ -460,7 +846,7 @@ router.post('/petty-cash/ledgers/:id/transactions', authenticateToken, upload.si
 
     // Get last transaction balance
     const lastTransaction = await db.get(
-      'SELECT balance FROM petty_cash_transactions WHERE ledger_id = ? ORDER BY id DESC LIMIT 1',
+      'SELECT balance FROM petty_cash_transactions WHERE ledger_id = ? ORDER BY transaction_date DESC, id DESC LIMIT 1',
       [req.params.id]
     );
     const previousBalance = lastTransaction ? lastTransaction.balance : ledger.starting_balance;
@@ -481,16 +867,47 @@ router.post('/petty-cash/ledgers/:id/transactions', authenticateToken, upload.si
         amount_withdrawn, balance, charged_to, received_by_type, received_by_staff_id, 
         received_by_name, approved_by_id, attachment_path)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [req.params.id, transaction_date, slipNo, description, deposited, withdrawn, newBalance,
-       charged_to, received_by_type, received_by_staff_id || null, received_by_name || null,
+      [req.params.id, transaction_date, slipNo, description || 'Petty cash transaction', deposited, withdrawn, newBalance,
+       charged_to || null, received_by_type || null, received_by_staff_id || null, received_by_name || null,
        req.user.id, attachmentPath]
     );
 
     await logAction(req.user.id, 'add_petty_cash_transaction', 'finance', result.lastID, { ledger_id: req.params.id }, req);
 
+    // Calculate totals
+    const allTransactions = await db.all(
+      'SELECT amount_deposited, amount_withdrawn FROM petty_cash_transactions WHERE ledger_id = ?',
+      [req.params.id]
+    );
+    const totalDeposited = allTransactions.reduce((sum, t) => sum + (parseFloat(t.amount_deposited) || 0), 0);
+    const totalWithdrawn = allTransactions.reduce((sum, t) => sum + (parseFloat(t.amount_withdrawn) || 0), 0);
+    const closingBalance = ledger.starting_balance + totalDeposited - totalWithdrawn;
+
+    // Emit real-time event
+    if (global.io) {
+      global.io.emit('petty_cash_transaction_added', {
+        id: result.lastID,
+        ledger_id: req.params.id,
+        transaction_date,
+        amount_deposited: deposited,
+        amount_withdrawn: withdrawn,
+        balance: newBalance,
+        total_deposited: totalDeposited,
+        total_withdrawn: totalWithdrawn,
+        closing_balance: closingBalance
+      });
+    }
+
     res.status(201).json({
       message: 'Transaction added successfully',
-      transaction: { id: result.lastID, balance: newBalance, slip_no: slipNo }
+      transaction: { 
+        id: result.lastID, 
+        balance: newBalance, 
+        slip_no: slipNo,
+        total_deposited: totalDeposited,
+        total_withdrawn: totalWithdrawn,
+        closing_balance: closingBalance
+      }
     });
   } catch (error) {
     console.error('Add transaction error:', error);
@@ -498,9 +915,13 @@ router.post('/petty-cash/ledgers/:id/transactions', authenticateToken, upload.si
   }
 });
 
-// Approve petty cash ledger (two-stage: DeptHead → Admin)
-router.put('/petty-cash/ledgers/:id/approve', authenticateToken, [
-  body('approved').isBoolean().withMessage('Approval status required')
+// Update petty cash transaction
+router.put('/petty-cash/transactions/:id', authenticateToken, [
+  body('transaction_date').optional().isISO8601(),
+  body('amount_deposited').optional().isFloat({ min: 0 }),
+  body('amount_withdrawn').optional().isFloat({ min: 0 }),
+  body('description').optional().trim(),
+  body('charged_to').optional().trim()
 ], async (req, res) => {
   try {
     const errors = validationResult(req);
@@ -508,161 +929,125 @@ router.put('/petty-cash/ledgers/:id/approve', authenticateToken, [
       return res.status(400).json({ errors: errors.array() });
     }
 
-    const ledger = await db.get('SELECT * FROM petty_cash_ledgers WHERE id = ?', [req.params.id]);
-    if (!ledger) {
-      return res.status(404).json({ error: 'Ledger not found' });
+    if (!(await canManagePettyCash(req.user))) {
+      return res.status(403).json({ error: 'Access denied' });
     }
 
-    const { approved } = req.body;
-    const isDeptHead = await isFinanceDepartmentHead(req.user);
-    const isAdmin = req.user.role === 'Admin';
+    const transaction = await db.get('SELECT * FROM petty_cash_transactions WHERE id = ?', [req.params.id]);
+    if (!transaction) {
+      return res.status(404).json({ error: 'Transaction not found' });
+    }
 
-    // Determine which stage of approval
-    if (isDeptHead && ledger.approval_status === 'Pending_DeptHead') {
-      // Department Head approving/rejecting
-      if (approved) {
+    const updates = req.body;
+    const updateFields = [];
+    const params = [];
+
+    if (updates.transaction_date) {
+      updateFields.push('transaction_date = ?');
+      params.push(updates.transaction_date);
+    }
+    if (updates.amount_deposited !== undefined) {
+      updateFields.push('amount_deposited = ?');
+      params.push(parseFloat(updates.amount_deposited) || 0);
+    }
+    if (updates.amount_withdrawn !== undefined) {
+      updateFields.push('amount_withdrawn = ?');
+      params.push(parseFloat(updates.amount_withdrawn) || 0);
+    }
+    if (updates.description !== undefined) {
+      updateFields.push('description = ?');
+      params.push(updates.description);
+    }
+    if (updates.charged_to !== undefined) {
+      updateFields.push('charged_to = ?');
+      params.push(updates.charged_to);
+    }
+
+    if (updateFields.length === 0) {
+      return res.status(400).json({ error: 'No fields to update' });
+    }
+
+    params.push(req.params.id);
         await db.run(
-          `UPDATE petty_cash_ledgers 
-           SET approval_status = 'Pending_Admin',
-               dept_head_status = 'Approved',
-               dept_head_approved_by = ?,
-               dept_head_approved_at = CURRENT_TIMESTAMP,
-               admin_status = 'Pending'
+      `UPDATE petty_cash_transactions 
+       SET ${updateFields.join(', ')}, updated_at = CURRENT_TIMESTAMP
            WHERE id = ?`,
-          [req.user.id, req.params.id]
-        );
-        await logAction(req.user.id, 'approve_petty_cash_ledger_depthead', 'finance', req.params.id, { approved }, req);
-        
-        // Notify Admin
-        try {
-          await sendNotificationToRole(
-            'Admin',
-            'Petty Cash Ledger Pending Admin Approval',
-            `Petty cash ledger for ${months[ledger.month - 1]} ${ledger.year} has been approved by Finance Department Head and requires your approval.`,
-            'info',
-            `/finance/petty-cash/ledgers/${req.params.id}`,
-            req.user.id
-          );
-        } catch (notifError) {
-          console.error('Error sending notification:', notifError);
-        }
-      } else {
-        await db.run(
-          `UPDATE petty_cash_ledgers 
-           SET approval_status = 'Rejected',
-               dept_head_status = 'Rejected',
-               dept_head_approved_by = ?,
-               dept_head_approved_at = CURRENT_TIMESTAMP
-           WHERE id = ?`,
-          [req.user.id, req.params.id]
-        );
-        await logAction(req.user.id, 'reject_petty_cash_ledger_depthead', 'finance', req.params.id, { approved }, req);
-        
-        // Notify creator
-        try {
-          if (ledger.created_by) {
-            await createNotification(
-              ledger.created_by,
-              'Petty Cash Ledger Rejected',
-              `Your petty cash ledger for ${months[ledger.month - 1]} ${ledger.year} has been rejected by Finance Department Head.`,
-              'error',
-              `/finance/petty-cash/ledgers/${req.params.id}`,
-              req.user.id
-            );
-          }
-        } catch (notifError) {
-          console.error('Error sending notification:', notifError);
-        }
-      }
-    } else if (isAdmin && ledger.approval_status === 'Pending_Admin') {
-      // Admin approving/rejecting
-      if (approved) {
-        await db.run(
-          `UPDATE petty_cash_ledgers 
-           SET approval_status = 'Approved',
-               admin_status = 'Approved',
-               admin_approved_by = ?,
-               admin_approved_at = CURRENT_TIMESTAMP,
-               locked = 1,
-               date_signed = CURRENT_TIMESTAMP
-           WHERE id = ?`,
-          [req.user.id, req.params.id]
-        );
-        await logAction(req.user.id, 'approve_petty_cash_ledger_admin', 'finance', req.params.id, { approved }, req);
-        
-        // Notify creator and dept head
-        try {
-          if (ledger.created_by) {
-            await createNotification(
-              ledger.created_by,
-              'Petty Cash Ledger Approved',
-              `Your petty cash ledger for ${months[ledger.month - 1]} ${ledger.year} has been fully approved.`,
-              'success',
-              `/finance/petty-cash/ledgers/${req.params.id}`,
-              req.user.id
-            );
-          }
-          if (ledger.dept_head_approved_by) {
-            await createNotification(
-              ledger.dept_head_approved_by,
-              'Petty Cash Ledger Approved by Admin',
-              `The petty cash ledger for ${months[ledger.month - 1]} ${ledger.year} that you approved has been approved by Admin.`,
-              'success',
-              `/finance/petty-cash/ledgers/${req.params.id}`,
-              req.user.id
-            );
-          }
-        } catch (notifError) {
-          console.error('Error sending notification:', notifError);
-        }
-      } else {
-        await db.run(
-          `UPDATE petty_cash_ledgers 
-           SET approval_status = 'Rejected',
-               admin_status = 'Rejected',
-               admin_approved_by = ?,
-               admin_approved_at = CURRENT_TIMESTAMP
-           WHERE id = ?`,
-          [req.user.id, req.params.id]
-        );
-        await logAction(req.user.id, 'reject_petty_cash_ledger_admin', 'finance', req.params.id, { approved }, req);
-        
-        // Notify creator and dept head
-        try {
-          if (ledger.created_by) {
-            await createNotification(
-              ledger.created_by,
-              'Petty Cash Ledger Rejected',
-              `Your petty cash ledger for ${months[ledger.month - 1]} ${ledger.year} has been rejected by Admin.`,
-              'error',
-              `/finance/petty-cash/ledgers/${req.params.id}`,
-              req.user.id
-            );
-          }
-          if (ledger.dept_head_approved_by) {
-            await createNotification(
-              ledger.dept_head_approved_by,
-              'Petty Cash Ledger Rejected by Admin',
-              `The petty cash ledger for ${months[ledger.month - 1]} ${ledger.year} that you approved has been rejected by Admin.`,
-              'error',
-              `/finance/petty-cash/ledgers/${req.params.id}`,
-              req.user.id
-            );
-          }
-        } catch (notifError) {
-          console.error('Error sending notification:', notifError);
-        }
-      }
-    } else {
-      return res.status(403).json({ 
-        error: 'You do not have permission to approve this ledger at this stage' 
+      params
+    );
+
+    // Recalculate balances
+    const ledger = await db.get('SELECT * FROM petty_cash_ledgers WHERE id = ?', [transaction.ledger_id]);
+    const allTransactions = await db.all(
+      'SELECT * FROM petty_cash_transactions WHERE ledger_id = ? ORDER BY transaction_date, id',
+      [transaction.ledger_id]
+    );
+
+    let runningBalance = ledger.starting_balance;
+    for (const t of allTransactions) {
+      runningBalance = runningBalance + (parseFloat(t.amount_deposited) || 0) - (parseFloat(t.amount_withdrawn) || 0);
+      await db.run('UPDATE petty_cash_transactions SET balance = ? WHERE id = ?', [runningBalance, t.id]);
+    }
+
+    await logAction(req.user.id, 'update_petty_cash_transaction', 'finance', req.params.id, updates, req);
+
+    // Emit real-time event
+    if (global.io) {
+      global.io.emit('petty_cash_transaction_updated', {
+        id: req.params.id,
+        ledger_id: transaction.ledger_id,
+        ...updates
       });
     }
 
-    res.json({ message: `Ledger ${approved ? 'approved' : 'rejected'} successfully` });
+    res.json({ message: 'Transaction updated successfully' });
   } catch (error) {
-    console.error('Approve ledger error:', error);
-    res.status(500).json({ error: 'Failed to approve ledger: ' + error.message });
+    console.error('Update transaction error:', error);
+    res.status(500).json({ error: 'Failed to update transaction: ' + error.message });
+  }
+});
+
+// Delete petty cash transaction (Assistant Finance Officer and Finance Department Head only)
+router.delete('/petty-cash/transactions/:id', authenticateToken, async (req, res) => {
+  try {
+    if (!(await canDeletePettyCash(req.user))) {
+      return res.status(403).json({ error: 'Access denied. Only Assistant Finance Officer and Finance Department Head can delete transactions.' });
+    }
+
+    const transaction = await db.get('SELECT * FROM petty_cash_transactions WHERE id = ?', [req.params.id]);
+    if (!transaction) {
+      return res.status(404).json({ error: 'Transaction not found' });
+    }
+
+    await db.run('DELETE FROM petty_cash_transactions WHERE id = ?', [req.params.id]);
+
+    // Recalculate balances
+    const ledger = await db.get('SELECT * FROM petty_cash_ledgers WHERE id = ?', [transaction.ledger_id]);
+    const allTransactions = await db.all(
+      'SELECT * FROM petty_cash_transactions WHERE ledger_id = ? ORDER BY transaction_date, id',
+      [transaction.ledger_id]
+    );
+
+    let runningBalance = ledger.starting_balance;
+    for (const t of allTransactions) {
+      runningBalance = runningBalance + (parseFloat(t.amount_deposited) || 0) - (parseFloat(t.amount_withdrawn) || 0);
+      await db.run('UPDATE petty_cash_transactions SET balance = ? WHERE id = ?', [runningBalance, t.id]);
+    }
+
+    await logAction(req.user.id, 'delete_petty_cash_transaction', 'finance', req.params.id, {}, req);
+
+    // Emit real-time event
+    if (global.io) {
+      global.io.emit('petty_cash_transaction_deleted', {
+        id: req.params.id,
+        ledger_id: transaction.ledger_id,
+        deleted_by: req.user.id
+      });
+    }
+
+    res.json({ message: 'Transaction deleted successfully' });
+  } catch (error) {
+    console.error('Delete transaction error:', error);
+    res.status(500).json({ error: 'Failed to delete transaction: ' + error.message });
   }
 });
 
@@ -834,15 +1219,13 @@ router.post('/assets', authenticateToken, upload.single('attachment'), [
 
     const attachmentPath = req.file ? `/uploads/finance/${req.file.filename}` : null;
 
-    // Determine initial approval status based on user role
-    // Assistant Finance Officer → Pending_DeptHead
-    // Finance Department Head or Admin → can be Draft or directly Approved
-    let initialStatus = 'Draft';
+    // No approval flow - set status directly to 'Approved'
+    let initialStatus = 'Approved';
     let deptHeadStatus = null;
     
     if (await isAssistantFinanceOfficer(req.user)) {
-      initialStatus = 'Pending_DeptHead';
-      deptHeadStatus = 'Pending';
+      initialStatus = 'Approved'; // No approval needed
+      deptHeadStatus = null;
     }
 
     const result = await db.run(
@@ -863,30 +1246,6 @@ router.post('/assets', authenticateToken, upload.single('attachment'), [
 
     await logAction(req.user.id, 'create_asset', 'finance', result.lastID, { asset_id: finalAssetId }, req);
 
-    // Send notification to Finance Department Head if submitted by Assistant Finance Officer
-    if (initialStatus === 'Pending_DeptHead') {
-      try {
-        // Get Finance Department Head
-        const financeDept = await db.get(
-          'SELECT manager_id, head_email FROM departments WHERE LOWER(name) LIKE ?',
-          ['%finance%']
-        );
-        if (financeDept && financeDept.manager_id) {
-          await createNotification(
-            financeDept.manager_id,
-            'Asset Pending Approval',
-            `A new asset "${asset_description}" (${finalAssetId}) has been submitted and requires your approval.`,
-            'warning',
-            `/finance/assets/${result.lastID}`,
-            req.user.id
-          );
-        }
-      } catch (notifError) {
-        console.error('Error sending notification:', notifError);
-        // Don't fail the request if notification fails
-      }
-    }
-
     res.status(201).json({
       message: 'Asset created successfully',
       asset: { id: result.lastID, asset_id: finalAssetId }
@@ -897,7 +1256,7 @@ router.post('/assets', authenticateToken, upload.single('attachment'), [
   }
 });
 
-// Approve asset (two-stage: DeptHead → Admin)
+// Approve asset (Legacy - kept but not used since no approval flow)
 router.put('/assets/:id/approve', authenticateToken, [
   body('approved').isBoolean().withMessage('Approval status required')
 ], async (req, res) => {
@@ -912,152 +1271,8 @@ router.put('/assets/:id/approve', authenticateToken, [
       return res.status(404).json({ error: 'Asset not found' });
     }
 
-    const { approved } = req.body;
-    const isDeptHead = await isFinanceDepartmentHead(req.user);
-    const isAdmin = req.user.role === 'Admin';
-
-    // Determine which stage of approval
-    if (isDeptHead && asset.approval_status === 'Pending_DeptHead') {
-      // Department Head approving/rejecting
-      if (approved) {
-        await db.run(
-          `UPDATE assets 
-           SET approval_status = 'Pending_Admin',
-               dept_head_status = 'Approved',
-               dept_head_approved_by = ?,
-               dept_head_approved_at = CURRENT_TIMESTAMP,
-               admin_status = 'Pending'
-           WHERE id = ?`,
-          [req.user.id, req.params.id]
-        );
-        await logAction(req.user.id, 'approve_asset_depthead', 'finance', req.params.id, { approved }, req);
-        
-        // Notify Admin
-        try {
-          await sendNotificationToRole(
-            'Admin',
-            'Asset Pending Admin Approval',
-            `Asset "${asset.asset_description}" (${asset.asset_id}) has been approved by Finance Department Head and requires your approval.`,
-            'info',
-            `/finance/assets/${req.params.id}`,
-            req.user.id
-          );
-        } catch (notifError) {
-          console.error('Error sending notification:', notifError);
-        }
-      } else {
-        await db.run(
-          `UPDATE assets 
-           SET approval_status = 'Rejected',
-               dept_head_status = 'Rejected',
-               dept_head_approved_by = ?,
-               dept_head_approved_at = CURRENT_TIMESTAMP
-           WHERE id = ?`,
-          [req.user.id, req.params.id]
-        );
-        await logAction(req.user.id, 'reject_asset_depthead', 'finance', req.params.id, { approved }, req);
-        
-        // Notify creator
-        try {
-          if (asset.added_by) {
-            await createNotification(
-              asset.added_by,
-              'Asset Rejected',
-              `Your asset "${asset.asset_description}" (${asset.asset_id}) has been rejected by Finance Department Head.`,
-              'error',
-              `/finance/assets/${req.params.id}`,
-              req.user.id
-            );
-          }
-        } catch (notifError) {
-          console.error('Error sending notification:', notifError);
-        }
-      }
-    } else if (isAdmin && asset.approval_status === 'Pending_Admin') {
-      // Admin approving/rejecting
-      if (approved) {
-        await db.run(
-          `UPDATE assets 
-           SET approval_status = 'Approved',
-               admin_status = 'Approved',
-               admin_approved_by = ?,
-               admin_approved_at = CURRENT_TIMESTAMP,
-               locked = 1
-           WHERE id = ?`,
-          [req.user.id, req.params.id]
-        );
-        await logAction(req.user.id, 'approve_asset_admin', 'finance', req.params.id, { approved }, req);
-        
-        // Notify creator and dept head
-        try {
-          if (asset.added_by) {
-            await createNotification(
-              asset.added_by,
-              'Asset Approved',
-              `Your asset "${asset.asset_description}" (${asset.asset_id}) has been fully approved.`,
-              'success',
-              `/finance/assets/${req.params.id}`,
-              req.user.id
-            );
-          }
-          if (asset.dept_head_approved_by) {
-            await createNotification(
-              asset.dept_head_approved_by,
-              'Asset Approved by Admin',
-              `The asset "${asset.asset_description}" (${asset.asset_id}) that you approved has been approved by Admin.`,
-              'success',
-              `/finance/assets/${req.params.id}`,
-              req.user.id
-            );
-          }
-        } catch (notifError) {
-          console.error('Error sending notification:', notifError);
-        }
-      } else {
-        await db.run(
-          `UPDATE assets 
-           SET approval_status = 'Rejected',
-               admin_status = 'Rejected',
-               admin_approved_by = ?,
-               admin_approved_at = CURRENT_TIMESTAMP
-           WHERE id = ?`,
-          [req.user.id, req.params.id]
-        );
-        await logAction(req.user.id, 'reject_asset_admin', 'finance', req.params.id, { approved }, req);
-        
-        // Notify creator and dept head
-        try {
-          if (asset.added_by) {
-            await createNotification(
-              asset.added_by,
-              'Asset Rejected',
-              `Your asset "${asset.asset_description}" (${asset.asset_id}) has been rejected by Admin.`,
-              'error',
-              `/finance/assets/${req.params.id}`,
-              req.user.id
-            );
-          }
-          if (asset.dept_head_approved_by) {
-            await createNotification(
-              asset.dept_head_approved_by,
-              'Asset Rejected by Admin',
-              `The asset "${asset.asset_description}" (${asset.asset_id}) that you approved has been rejected by Admin.`,
-              'error',
-              `/finance/assets/${req.params.id}`,
-              req.user.id
-            );
-          }
-        } catch (notifError) {
-          console.error('Error sending notification:', notifError);
-        }
-      }
-    } else {
-      return res.status(403).json({ 
-        error: 'You do not have permission to approve this asset at this stage' 
-      });
-    }
-
-    res.json({ message: `Asset ${approved ? 'approved' : 'rejected'} successfully` });
+    // No approval flow - just return success
+    res.json({ message: 'Asset approval not required' });
   } catch (error) {
     console.error('Approve asset error:', error);
     res.status(500).json({ error: 'Failed to approve asset: ' + error.message });
@@ -1090,4 +1305,3 @@ router.get('/assets/monthly/:year/:month', authenticateToken, async (req, res) =
 });
 
 module.exports = router;
-

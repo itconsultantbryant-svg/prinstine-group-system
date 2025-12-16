@@ -2116,6 +2116,7 @@ app.use('/api/staff-client-reports', require('./routes/staffClientReports'));
 app.use('/api/payroll', require('./routes/payroll'));
 app.use('/api/student-payments', require('./routes/studentPayments'));
 app.use('/api/finance', require('./routes/finance'));
+app.use('/api/appraisals', require('./routes/appraisals'));
 
 // Root route - API information
 app.get('/', (req, res) => {

@@ -330,42 +330,23 @@ async function updateAdminTarget(periodStart = null) {
       });
     }
 
-    // Calculate aggregated shared_in and shared_out
-    let totalSharedIn = 0;
-    let totalSharedOut = 0;
-    if (fundSharingExists) {
-      // Get all user IDs that have targets for this period (excluding admin)
-      const staffTargets = await db.all(
-        'SELECT DISTINCT user_id FROM targets WHERE user_id != ? AND status = ? AND period_start = ?',
-        [adminUser.id, 'Active', periodToUse]
-      );
-      const staffUserIds = staffTargets.map(t => t.user_id);
-
-      if (staffUserIds.length > 0) {
-        // Total shared_out: funds shared FROM staff/department heads
-        const sharedOutResult = await db.get(
-          `SELECT COALESCE(SUM(CASE WHEN status = 'Active' THEN CAST(amount AS NUMERIC) ELSE 0 END), 0) as total
-           FROM fund_sharing
-           WHERE from_user_id IN (${staffUserIds.map(() => '?').join(',')})`,
-          staffUserIds
-        );
-        totalSharedOut = parseFloat(sharedOutResult?.total || 0) || 0;
-
-        // Total shared_in: funds shared TO staff/department heads
-        const sharedInResult = await db.get(
-          `SELECT COALESCE(SUM(CASE WHEN status = 'Active' THEN CAST(amount AS NUMERIC) ELSE 0 END), 0) as total
-           FROM fund_sharing
-           WHERE to_user_id IN (${staffUserIds.map(() => '?').join(',')})`,
-          staffUserIds
-        );
-        totalSharedIn = parseFloat(sharedInResult?.total || 0) || 0;
-      }
-    }
-
-    // Calculate admin net amount
-    const adminNetAmount = totalProgress + totalSharedIn - totalSharedOut;
+    // IMPORTANT: Fund sharing should NOT affect admin target calculations
+    // Admin target only reflects actual progress (approved entries), not fund transfers between staff
+    // So we skip calculating shared_in and shared_out for admin target
+    
+    // Calculate admin net amount (ONLY from actual progress, NOT from fund sharing)
+    const adminNetAmount = totalProgress; // Only use total_progress, exclude fund sharing
     const adminProgressPercentage = totalTargetAmount > 0 ? (adminNetAmount / totalTargetAmount) * 100 : 0;
     const adminRemainingAmount = Math.max(0, totalTargetAmount - adminNetAmount);
+    
+    console.log(`[updateAdminTarget] Admin target calculation (fund sharing excluded):`, {
+      total_target_amount: totalTargetAmount,
+      total_progress: totalProgress,
+      admin_net_amount: adminNetAmount,
+      admin_progress_percentage: adminProgressPercentage,
+      admin_remaining_amount: adminRemainingAmount,
+      note: 'Fund sharing between staff does NOT affect admin target'
+    });
 
     if (adminTarget) {
       // Update existing admin target

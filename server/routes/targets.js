@@ -625,43 +625,81 @@ router.put('/progress/:id/approve', authenticateToken, requireRole('Admin'), [
       return res.status(404).json({ error: 'Progress entry not found' });
     }
 
-    // Update status
-    await db.run(
-      'UPDATE target_progress SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
-      [status, req.params.id]
-    );
+    // Update status (note: target_progress table may not have updated_at column)
+    try {
+      await db.run(
+        'UPDATE target_progress SET status = ? WHERE id = ?',
+        [status, req.params.id]
+      );
+    } catch (updateError) {
+      // If column doesn't exist, try without updated_at
+      if (updateError.message && updateError.message.includes('updated_at')) {
+        await db.run(
+          'UPDATE target_progress SET status = ? WHERE id = ?',
+          [status, req.params.id]
+        );
+      } else {
+        throw updateError;
+      }
+    }
 
     await logAction(req.user.id, 'approve_target_progress', 'target_progress', req.params.id, { status }, req);
 
     // Get updated target with metrics
     const target = await db.get('SELECT * FROM targets WHERE id = ?', [progressEntry.target_id]);
-    const metrics = await calculateTargetMetrics(target);
+    if (!target) {
+      return res.status(404).json({ error: 'Target not found after progress update' });
+    }
+    
+    let metrics;
+    try {
+      metrics = await calculateTargetMetrics(target);
+    } catch (metricsError) {
+      console.error('Error calculating target metrics:', metricsError);
+      // Return basic response even if metrics calculation fails
+      metrics = {
+        total_progress: 0,
+        shared_in: 0,
+        shared_out: 0,
+        net_amount: 0,
+        progress_percentage: '0.00',
+        remaining_amount: parseFloat(target.target_amount || 0) || 0
+      };
+    }
 
-    // Update admin target if this isn't admin's own target
+    // Update admin target if this isn't admin's own target (async, non-blocking)
     const adminUser = await db.get("SELECT id FROM users WHERE role = 'Admin' LIMIT 1");
-    if (adminUser && progressEntry.target_user_id !== adminUser.id) {
-      updateAdminTarget(progressEntry.period_start).catch(err => 
-        console.error('Error updating admin target:', err)
-      );
+    if (adminUser && progressEntry.target_user_id !== adminUser.id && progressEntry.period_start) {
+      // Run in background, don't wait for it
+      setImmediate(() => {
+        updateAdminTarget(progressEntry.period_start).catch(err => 
+          console.error('Error updating admin target (non-blocking):', err.message || err)
+        );
+      });
     }
 
     // Emit real-time updates
-    if (global.io) {
-      global.io.emit('target_progress_updated', {
-        target_id: progressEntry.target_id,
-        user_id: progressEntry.target_user_id,
-        progress_id: req.params.id,
-        action: status === 'Approved' ? 'progress_approved' : 'progress_rejected',
-        status,
-        ...metrics
-      });
+    try {
+      if (global.io) {
+        global.io.emit('target_progress_updated', {
+          target_id: progressEntry.target_id,
+          user_id: progressEntry.target_user_id,
+          progress_id: req.params.id,
+          action: status === 'Approved' ? 'progress_approved' : 'progress_rejected',
+          status,
+          ...metrics
+        });
 
-      global.io.emit('target_updated', {
-        id: progressEntry.target_id,
-        updated_by: req.user.name,
-        reason: 'target_progress_' + status.toLowerCase(),
-        ...metrics
-      });
+        global.io.emit('target_updated', {
+          id: progressEntry.target_id,
+          updated_by: req.user.name,
+          reason: 'target_progress_' + status.toLowerCase(),
+          ...metrics
+        });
+      }
+    } catch (emitError) {
+      console.error('Error emitting socket events:', emitError);
+      // Don't fail the request if socket emit fails
     }
 
     res.json({
@@ -674,9 +712,11 @@ router.put('/progress/:id/approve', authenticateToken, requireRole('Admin'), [
     });
   } catch (error) {
     console.error('Approve target progress error:', error);
+    console.error('Error stack:', error.stack);
     res.status(500).json({ 
       error: 'Failed to approve target progress entry',
-      details: process.env.NODE_ENV === 'development' ? error.message : undefined
+      message: error.message,
+      details: process.env.NODE_ENV === 'development' ? error.stack : undefined
     });
   }
 });

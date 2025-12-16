@@ -17,6 +17,8 @@ const app = express();
 const server = http.createServer(app);
 const allowedSocketOrigins = [
   process.env.FRONTEND_URL,
+  'https://prinstinemanagementsystem.org',
+  'https://www.prinstinemanagementsystem.org',
   'https://prinstine-group-system-frontend.onrender.com',
   'http://localhost:3000',
   'http://localhost:3001'
@@ -25,9 +27,13 @@ const allowedSocketOrigins = [
 const io = socketIo(server, {
   cors: {
     origin: function (origin, callback) {
-      // Allow all origins for now (can be restricted later)
-      if (!origin || origin.includes('prinstine-group-system-frontend.onrender.com') || 
-          origin.includes('localhost') || allowedSocketOrigins.indexOf(origin) !== -1) {
+      // Allow production domain and other allowed origins
+      if (!origin || 
+          origin.includes('prinstinemanagementsystem.org') ||
+          origin.includes('prinstine-group-system-frontend.onrender.com') || 
+          origin.includes('localhost') || 
+          allowedSocketOrigins.indexOf(origin) !== -1 ||
+          allowedSocketOrigins.some(allowed => origin.includes(allowed.replace(/^https?:\/\//, '')))) {
         return callback(null, true);
       }
       callback(null, true); // Allow all for now
@@ -52,8 +58,24 @@ const PORT = process.env.PORT || 3006;
 // CORS configuration - Simple and permissive for now
 app.use((req, res, next) => {
   const origin = req.headers.origin;
-  // Allow all origins for now (can be restricted later)
-  res.header('Access-Control-Allow-Origin', origin || '*');
+  // Allow all origins including production domain
+  const allowedOrigins = [
+    'https://prinstinemanagementsystem.org',
+    'https://www.prinstinemanagementsystem.org',
+    'https://prinstine-group-system-frontend.onrender.com',
+    process.env.FRONTEND_URL,
+    'http://localhost:3000',
+    'http://localhost:3001'
+  ].filter(Boolean);
+  
+  if (origin && allowedOrigins.includes(origin)) {
+    res.header('Access-Control-Allow-Origin', origin);
+  } else if (!origin || allowedOrigins.some(allowed => origin.includes(allowed.replace(/^https?:\/\//, '')))) {
+    res.header('Access-Control-Allow-Origin', origin || '*');
+  } else {
+    res.header('Access-Control-Allow-Origin', '*');
+  }
+  
   res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS, PATCH');
   res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, Origin, Referer, Accept');
   res.header('Access-Control-Allow-Credentials', 'true');

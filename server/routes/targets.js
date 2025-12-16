@@ -393,6 +393,326 @@ router.get('/', authenticateToken, async (req, res) => {
 });
 
 /**
+ * GET /api/targets/fund-sharing/history
+ * Get fund sharing history - Everyone can see all sharing history
+ * MUST be before /:id routes to avoid route conflicts
+ */
+router.get('/fund-sharing/history', authenticateToken, async (req, res) => {
+  try {
+    const USE_POSTGRESQL = !!process.env.DATABASE_URL;
+    
+    // Check if fund_sharing table exists
+    let tableExists;
+    if (USE_POSTGRESQL) {
+      tableExists = await db.get(
+        "SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'fund_sharing'"
+      );
+    } else {
+      tableExists = await db.get("SELECT name FROM sqlite_master WHERE type='table' AND name='fund_sharing'");
+    }
+
+    if (!tableExists) {
+      return res.json({ history: [] });
+    }
+
+    // Everyone can see all sharing history - no filtering
+    const query = `
+      SELECT fs.*,
+             sender.name as from_user_name,
+             sender.email as from_user_email,
+             recipient.name as to_user_name,
+             recipient.email as to_user_email
+      FROM fund_sharing fs
+      LEFT JOIN users sender ON fs.from_user_id = sender.id
+      LEFT JOIN users recipient ON fs.to_user_id = recipient.id
+      ORDER BY fs.created_at DESC
+    `;
+
+    const history = await db.all(query);
+    res.json({ history });
+  } catch (error) {
+    console.error('Get fund sharing history error:', error);
+    res.status(500).json({ error: 'Failed to fetch fund sharing history' });
+  }
+});
+
+/**
+ * POST /api/targets/fund-sharing
+ * Share funds between employees/department heads
+ * User must have net_amount > share_amount
+ * MUST be before /:id routes to avoid route conflicts
+ */
+router.post('/fund-sharing', authenticateToken, requireRole('Staff', 'DepartmentHead'), [
+  body('to_user_id').isInt().withMessage('Valid recipient user ID is required'),
+  body('amount').isFloat({ min: 0.01 }).withMessage('Valid amount greater than 0 is required'),
+  body('reason').optional().trim()
+], async (req, res) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({ errors: errors.array() });
+    }
+
+    const { to_user_id, amount, reason } = req.body;
+    const from_user_id = req.user.id;
+
+    // Cannot share to oneself
+    if (from_user_id === to_user_id) {
+      return res.status(400).json({ error: 'Cannot share funds to yourself' });
+    }
+
+    // Verify recipient exists and is Staff or DepartmentHead
+    const recipient = await db.get(
+      'SELECT id, name, email, role FROM users WHERE id = ? AND role IN (?, ?)',
+      [to_user_id, 'Staff', 'DepartmentHead']
+    );
+    if (!recipient) {
+      return res.status(404).json({ error: 'Recipient not found or invalid role' });
+    }
+
+    // Get sender's active target
+    const senderTarget = await db.get(
+      'SELECT * FROM targets WHERE user_id = ? AND status = ?',
+      [from_user_id, 'Active']
+    );
+
+    if (!senderTarget) {
+      return res.status(400).json({ error: 'You do not have an active target' });
+    }
+
+    // Calculate sender's current metrics
+    const senderMetrics = await calculateTargetMetrics(senderTarget);
+    const availableAmount = senderMetrics.net_amount - parseFloat(amount);
+
+    // Validate: user must have more than what they want to share
+    if (senderMetrics.net_amount <= parseFloat(amount)) {
+      return res.status(400).json({ 
+        error: `Insufficient funds. Your net amount is ${senderMetrics.net_amount.toFixed(2)}, but you are trying to share ${parseFloat(amount).toFixed(2)}. You must have more funds than the share amount.`
+      });
+    }
+
+    // Get fund_sharing table existence
+    const USE_POSTGRESQL = !!process.env.DATABASE_URL;
+    let fundSharingExists;
+    if (USE_POSTGRESQL) {
+      fundSharingExists = await db.get(
+        "SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'fund_sharing'"
+      );
+    } else {
+      fundSharingExists = await db.get("SELECT name FROM sqlite_master WHERE type='table' AND name='fund_sharing'");
+    }
+
+    if (!fundSharingExists) {
+      return res.status(500).json({ error: 'Fund sharing table does not exist' });
+    }
+
+    // Create fund sharing record
+    const result = await db.run(
+      `INSERT INTO fund_sharing (from_user_id, to_user_id, amount, reason, status, created_by)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+      [from_user_id, to_user_id, parseFloat(amount), reason || null, 'Active', req.user.id]
+    );
+
+    const sharingId = result.lastID || result.id || (result.rows && result.rows[0] && result.rows[0].id);
+
+    await logAction(req.user.id, 'share_funds', 'fund_sharing', sharingId, { to_user_id, amount, reason }, req);
+
+    // Get updated metrics for both sender and recipient
+    const updatedSenderTarget = await db.get('SELECT * FROM targets WHERE id = ?', [senderTarget.id]);
+    const senderUpdatedMetrics = await calculateTargetMetrics(updatedSenderTarget);
+
+    const recipientTarget = await db.get(
+      'SELECT * FROM targets WHERE user_id = ? AND status = ?',
+      [to_user_id, 'Active']
+    );
+
+    let recipientMetrics = null;
+    if (recipientTarget) {
+      const updatedRecipientTarget = await db.get('SELECT * FROM targets WHERE id = ?', [recipientTarget.id]);
+      recipientMetrics = await calculateTargetMetrics(updatedRecipientTarget);
+    }
+
+    // Update admin target
+    if (senderTarget.period_start) {
+      updateAdminTarget(senderTarget.period_start).catch(err => 
+        console.error('Error updating admin target:', err)
+      );
+    }
+
+    // Emit real-time updates
+    if (global.io) {
+      global.io.emit('fund_shared', {
+        id: sharingId,
+        from_user_id,
+        from_user_name: req.user.name,
+        to_user_id,
+        to_user_name: recipient.name,
+        amount: parseFloat(amount),
+        reason
+      });
+
+      global.io.emit('target_progress_updated', {
+        target_id: senderTarget.id,
+        user_id: from_user_id,
+        action: 'fund_shared_out',
+        ...senderUpdatedMetrics
+      });
+
+      if (recipientTarget && recipientMetrics) {
+        global.io.emit('target_progress_updated', {
+          target_id: recipientTarget.id,
+          user_id: to_user_id,
+          action: 'fund_shared_in',
+          ...recipientMetrics
+        });
+      }
+    }
+
+    res.status(201).json({
+      message: 'Funds shared successfully',
+      sharing: {
+        id: sharingId,
+        from_user_id,
+        to_user_id,
+        amount: parseFloat(amount),
+        reason
+      },
+      sender_target: {
+        id: senderTarget.id,
+        ...senderUpdatedMetrics
+      },
+      recipient_target: recipientTarget && recipientMetrics ? {
+        id: recipientTarget.id,
+        ...recipientMetrics
+      } : null
+    });
+  } catch (error) {
+    console.error('Share funds error:', error);
+    res.status(500).json({ 
+      error: 'Failed to share funds',
+      details: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+});
+
+/**
+ * PUT /api/targets/progress/:id/approve
+ * Approve or reject target progress entry (Admin only)
+ * Updates admin target when progress is approved
+ * MUST be before /:id/progress route to avoid conflicts
+ */
+router.put('/progress/:id/approve', authenticateToken, requireRole('Admin'), [
+  body('status').isIn(['Approved', 'Rejected']).withMessage('Status must be Approved or Rejected')
+], async (req, res) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({ errors: errors.array() });
+    }
+
+    const { status } = req.body;
+    
+    // Get progress entry
+    const progressEntry = await db.get(
+      `SELECT tp.*, t.user_id as target_user_id, t.period_start
+       FROM target_progress tp
+       JOIN targets t ON tp.target_id = t.id
+       WHERE tp.id = ?`,
+      [req.params.id]
+    );
+
+    if (!progressEntry) {
+      return res.status(404).json({ error: 'Progress entry not found' });
+    }
+
+    // Update status
+    await db.run(
+      'UPDATE target_progress SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+      [status, req.params.id]
+    );
+
+    await logAction(req.user.id, 'approve_target_progress', 'target_progress', req.params.id, { status }, req);
+
+    // Get updated target with metrics
+    const target = await db.get('SELECT * FROM targets WHERE id = ?', [progressEntry.target_id]);
+    const metrics = await calculateTargetMetrics(target);
+
+    // Update admin target if this isn't admin's own target
+    const adminUser = await db.get("SELECT id FROM users WHERE role = 'Admin' LIMIT 1");
+    if (adminUser && progressEntry.target_user_id !== adminUser.id) {
+      updateAdminTarget(progressEntry.period_start).catch(err => 
+        console.error('Error updating admin target:', err)
+      );
+    }
+
+    // Emit real-time updates
+    if (global.io) {
+      global.io.emit('target_progress_updated', {
+        target_id: progressEntry.target_id,
+        user_id: progressEntry.target_user_id,
+        progress_id: req.params.id,
+        action: status === 'Approved' ? 'progress_approved' : 'progress_rejected',
+        status,
+        ...metrics
+      });
+
+      global.io.emit('target_updated', {
+        id: progressEntry.target_id,
+        updated_by: req.user.name,
+        reason: 'target_progress_' + status.toLowerCase(),
+        ...metrics
+      });
+    }
+
+    res.json({
+      message: `Target progress entry ${status.toLowerCase()} successfully`,
+      progress_id: req.params.id,
+      target: {
+        id: progressEntry.target_id,
+        ...metrics
+      }
+    });
+  } catch (error) {
+    console.error('Approve target progress error:', error);
+    res.status(500).json({ 
+      error: 'Failed to approve target progress entry',
+      details: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+});
+
+/**
+ * GET /api/targets/:id/progress
+ * Get target progress history - Everyone can view all progress
+ */
+router.get('/:id/progress', authenticateToken, async (req, res) => {
+  try {
+    const target = await db.get('SELECT * FROM targets WHERE id = ?', [req.params.id]);
+    if (!target) {
+      return res.status(404).json({ error: 'Target not found' });
+    }
+
+    // Everyone can view all progress - no authorization check
+
+    const progressEntries = await db.all(
+      `SELECT tp.*, 
+              pr.name as progress_report_name,
+              pr.date as progress_report_date
+       FROM target_progress tp
+       LEFT JOIN progress_reports pr ON tp.progress_report_id = pr.id
+       WHERE tp.target_id = ?
+       ORDER BY tp.transaction_date DESC, tp.created_at DESC`,
+      [req.params.id]
+    );
+
+    res.json({ progress: progressEntries });
+  } catch (error) {
+    console.error('Get target progress error:', error);
+    res.status(500).json({ error: 'Failed to fetch target progress' });
+  }
+});
+
+/**
  * GET /api/targets/:id
  * Get single target by ID - Everyone can view all targets
  */
@@ -677,323 +997,6 @@ router.delete('/:id', authenticateToken, requireRole('Admin'), async (req, res) 
   } catch (error) {
     console.error('Delete target error:', error);
     res.status(500).json({ error: 'Failed to delete target' });
-  }
-});
-
-/**
- * GET /api/targets/:id/progress
- * Get target progress history - Everyone can view all progress
- */
-router.get('/:id/progress', authenticateToken, async (req, res) => {
-  try {
-    const target = await db.get('SELECT * FROM targets WHERE id = ?', [req.params.id]);
-    if (!target) {
-      return res.status(404).json({ error: 'Target not found' });
-    }
-
-    // Everyone can view all progress - no authorization check
-
-    const progressEntries = await db.all(
-      `SELECT tp.*, 
-              pr.name as progress_report_name,
-              pr.date as progress_report_date
-       FROM target_progress tp
-       LEFT JOIN progress_reports pr ON tp.progress_report_id = pr.id
-       WHERE tp.target_id = ?
-       ORDER BY tp.transaction_date DESC, tp.created_at DESC`,
-      [req.params.id]
-    );
-
-    res.json({ progress: progressEntries });
-  } catch (error) {
-    console.error('Get target progress error:', error);
-    res.status(500).json({ error: 'Failed to fetch target progress' });
-  }
-});
-
-/**
- * PUT /api/targets/progress/:id/approve
- * Approve or reject target progress entry (Admin only)
- * Updates admin target when progress is approved
- */
-router.put('/progress/:id/approve', authenticateToken, requireRole('Admin'), [
-  body('status').isIn(['Approved', 'Rejected']).withMessage('Status must be Approved or Rejected')
-], async (req, res) => {
-  try {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      return res.status(400).json({ errors: errors.array() });
-    }
-
-    const { status } = req.body;
-    
-    // Get progress entry
-    const progressEntry = await db.get(
-      `SELECT tp.*, t.user_id as target_user_id, t.period_start
-       FROM target_progress tp
-       JOIN targets t ON tp.target_id = t.id
-       WHERE tp.id = ?`,
-      [req.params.id]
-    );
-
-    if (!progressEntry) {
-      return res.status(404).json({ error: 'Progress entry not found' });
-    }
-
-    // Update status
-    await db.run(
-      'UPDATE target_progress SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
-      [status, req.params.id]
-    );
-
-    await logAction(req.user.id, 'approve_target_progress', 'target_progress', req.params.id, { status }, req);
-
-    // Get updated target with metrics
-    const target = await db.get('SELECT * FROM targets WHERE id = ?', [progressEntry.target_id]);
-    const metrics = await calculateTargetMetrics(target);
-
-    // Update admin target if this isn't admin's own target
-    const adminUser = await db.get("SELECT id FROM users WHERE role = 'Admin' LIMIT 1");
-    if (adminUser && progressEntry.target_user_id !== adminUser.id) {
-      updateAdminTarget(progressEntry.period_start).catch(err => 
-        console.error('Error updating admin target:', err)
-      );
-    }
-
-    // Emit real-time updates
-    if (global.io) {
-      global.io.emit('target_progress_updated', {
-        target_id: progressEntry.target_id,
-        user_id: progressEntry.target_user_id,
-        progress_id: req.params.id,
-        action: status === 'Approved' ? 'progress_approved' : 'progress_rejected',
-        status,
-        ...metrics
-      });
-
-      global.io.emit('target_updated', {
-        id: progressEntry.target_id,
-        updated_by: req.user.name,
-        reason: 'target_progress_' + status.toLowerCase(),
-        ...metrics
-      });
-    }
-
-    res.json({
-      message: `Target progress entry ${status.toLowerCase()} successfully`,
-      progress_id: req.params.id,
-      target: {
-        id: progressEntry.target_id,
-        ...metrics
-      }
-    });
-  } catch (error) {
-    console.error('Approve target progress error:', error);
-    res.status(500).json({ 
-      error: 'Failed to approve target progress entry',
-      details: process.env.NODE_ENV === 'development' ? error.message : undefined
-    });
-  }
-});
-
-/**
- * POST /api/targets/fund-sharing
- * Share funds between employees/department heads
- * User must have net_amount > share_amount
- */
-router.post('/fund-sharing', authenticateToken, requireRole('Staff', 'DepartmentHead'), [
-  body('to_user_id').isInt().withMessage('Valid recipient user ID is required'),
-  body('amount').isFloat({ min: 0.01 }).withMessage('Valid amount greater than 0 is required'),
-  body('reason').optional().trim()
-], async (req, res) => {
-  try {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      return res.status(400).json({ errors: errors.array() });
-    }
-
-    const { to_user_id, amount, reason } = req.body;
-    const from_user_id = req.user.id;
-
-    // Cannot share to oneself
-    if (from_user_id === to_user_id) {
-      return res.status(400).json({ error: 'Cannot share funds to yourself' });
-    }
-
-    // Verify recipient exists and is Staff or DepartmentHead
-    const recipient = await db.get(
-      'SELECT id, name, email, role FROM users WHERE id = ? AND role IN (?, ?)',
-      [to_user_id, 'Staff', 'DepartmentHead']
-    );
-    if (!recipient) {
-      return res.status(404).json({ error: 'Recipient not found or invalid role' });
-    }
-
-    // Get sender's active target
-    const senderTarget = await db.get(
-      'SELECT * FROM targets WHERE user_id = ? AND status = ?',
-      [from_user_id, 'Active']
-    );
-
-    if (!senderTarget) {
-      return res.status(400).json({ error: 'You do not have an active target' });
-    }
-
-    // Calculate sender's current metrics
-    const senderMetrics = await calculateTargetMetrics(senderTarget);
-    const availableAmount = senderMetrics.net_amount - parseFloat(amount);
-
-    // Validate: user must have more than what they want to share
-    if (senderMetrics.net_amount <= parseFloat(amount)) {
-      return res.status(400).json({ 
-        error: `Insufficient funds. Your net amount is ${senderMetrics.net_amount.toFixed(2)}, but you are trying to share ${parseFloat(amount).toFixed(2)}. You must have more funds than the share amount.`
-      });
-    }
-
-    // Get fund_sharing table existence
-    const USE_POSTGRESQL = !!process.env.DATABASE_URL;
-    let fundSharingExists;
-    if (USE_POSTGRESQL) {
-      fundSharingExists = await db.get(
-        "SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'fund_sharing'"
-      );
-    } else {
-      fundSharingExists = await db.get("SELECT name FROM sqlite_master WHERE type='table' AND name='fund_sharing'");
-    }
-
-    if (!fundSharingExists) {
-      return res.status(500).json({ error: 'Fund sharing table does not exist' });
-    }
-
-    // Create fund sharing record
-    const result = await db.run(
-      `INSERT INTO fund_sharing (from_user_id, to_user_id, amount, reason, status, created_by)
-       VALUES (?, ?, ?, ?, ?, ?)`,
-      [from_user_id, to_user_id, parseFloat(amount), reason || null, 'Active', req.user.id]
-    );
-
-    const sharingId = result.lastID || result.id || (result.rows && result.rows[0] && result.rows[0].id);
-
-    await logAction(req.user.id, 'share_funds', 'fund_sharing', sharingId, { to_user_id, amount, reason }, req);
-
-    // Get updated metrics for both sender and recipient
-    const updatedSenderTarget = await db.get('SELECT * FROM targets WHERE id = ?', [senderTarget.id]);
-    const senderUpdatedMetrics = await calculateTargetMetrics(updatedSenderTarget);
-
-    const recipientTarget = await db.get(
-      'SELECT * FROM targets WHERE user_id = ? AND status = ?',
-      [to_user_id, 'Active']
-    );
-
-    let recipientMetrics = null;
-    if (recipientTarget) {
-      const updatedRecipientTarget = await db.get('SELECT * FROM targets WHERE id = ?', [recipientTarget.id]);
-      recipientMetrics = await calculateTargetMetrics(updatedRecipientTarget);
-    }
-
-    // Update admin target
-    if (senderTarget.period_start) {
-      updateAdminTarget(senderTarget.period_start).catch(err => 
-        console.error('Error updating admin target:', err)
-      );
-    }
-
-    // Emit real-time updates
-    if (global.io) {
-      global.io.emit('fund_shared', {
-        id: sharingId,
-        from_user_id,
-        from_user_name: req.user.name,
-        to_user_id,
-        to_user_name: recipient.name,
-        amount: parseFloat(amount),
-        reason
-      });
-
-      global.io.emit('target_progress_updated', {
-        target_id: senderTarget.id,
-        user_id: from_user_id,
-        action: 'fund_shared_out',
-        ...senderUpdatedMetrics
-      });
-
-      if (recipientTarget && recipientMetrics) {
-        global.io.emit('target_progress_updated', {
-          target_id: recipientTarget.id,
-          user_id: to_user_id,
-          action: 'fund_shared_in',
-          ...recipientMetrics
-        });
-      }
-    }
-
-    res.status(201).json({
-      message: 'Funds shared successfully',
-      sharing: {
-        id: sharingId,
-        from_user_id,
-        to_user_id,
-        amount: parseFloat(amount),
-        reason
-      },
-      sender_target: {
-        id: senderTarget.id,
-        ...senderUpdatedMetrics
-      },
-      recipient_target: recipientTarget && recipientMetrics ? {
-        id: recipientTarget.id,
-        ...recipientMetrics
-      } : null
-    });
-  } catch (error) {
-    console.error('Share funds error:', error);
-    res.status(500).json({ 
-      error: 'Failed to share funds',
-      details: process.env.NODE_ENV === 'development' ? error.message : undefined
-    });
-  }
-});
-
-/**
- * GET /api/targets/fund-sharing/history
- * Get fund sharing history - Everyone can see all sharing history
- */
-router.get('/fund-sharing/history', authenticateToken, async (req, res) => {
-  try {
-    const USE_POSTGRESQL = !!process.env.DATABASE_URL;
-    
-    // Check if fund_sharing table exists
-    let tableExists;
-    if (USE_POSTGRESQL) {
-      tableExists = await db.get(
-        "SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'fund_sharing'"
-      );
-    } else {
-      tableExists = await db.get("SELECT name FROM sqlite_master WHERE type='table' AND name='fund_sharing'");
-    }
-
-    if (!tableExists) {
-      return res.json({ history: [] });
-    }
-
-    // Everyone can see all sharing history - no filtering
-    const query = `
-      SELECT fs.*,
-             sender.name as from_user_name,
-             sender.email as from_user_email,
-             recipient.name as to_user_name,
-             recipient.email as to_user_email
-      FROM fund_sharing fs
-      LEFT JOIN users sender ON fs.from_user_id = sender.id
-      LEFT JOIN users recipient ON fs.to_user_id = recipient.id
-      ORDER BY fs.created_at DESC
-    `;
-
-    const history = await db.all(query);
-    res.json({ history });
-  } catch (error) {
-    console.error('Get fund sharing history error:', error);
-    res.status(500).json({ error: 'Failed to fetch fund sharing history' });
   }
 });
 

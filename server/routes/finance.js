@@ -247,7 +247,16 @@ router.get('/petty-cash/custodians', authenticateToken, async (req, res) => {
 
 // Create petty cash entry (simplified - no approval flow)
 router.post('/petty-cash', authenticateToken, [
-  body('transaction_date').isISO8601().withMessage('Valid transaction date and time required'),
+  body('transaction_date')
+    .notEmpty().withMessage('Transaction date is required')
+    .custom((value) => {
+      // Accept ISO8601 format or datetime-local format (YYYY-MM-DDTHH:mm)
+      const date = new Date(value);
+      if (isNaN(date.getTime())) {
+        throw new Error('Invalid transaction date format');
+      }
+      return true;
+    }),
   body('petty_cash_custodian_id').notEmpty().withMessage('Petty cash custodian is required'),
   body('amount_deposit').optional().isFloat({ min: 0 }).withMessage('Amount deposit must be a non-negative number'),
   body('amount_withdrawal').optional().isFloat({ min: 0 }).withMessage('Amount withdrawal must be a non-negative number'),
@@ -445,7 +454,17 @@ router.post('/petty-cash', authenticateToken, [
 
     // Update petty cash entry (Assistant Finance Officer, Finance Department Head, and Admin)
 router.put('/petty-cash/:id', authenticateToken, [
-  body('transaction_date').optional().isISO8601().withMessage('Valid transaction date and time required'),
+  body('transaction_date')
+    .optional()
+    .custom((value) => {
+      if (!value) return true; // Optional, so empty is OK
+      // Accept ISO8601 format or datetime-local format (YYYY-MM-DDTHH:mm)
+      const date = new Date(value);
+      if (isNaN(date.getTime())) {
+        throw new Error('Invalid transaction date format');
+      }
+      return true;
+    }),
   body('amount_deposit').optional().isFloat({ min: 0 }).withMessage('Amount deposit must be a non-negative number'),
   body('amount_withdrawal').optional().isFloat({ min: 0 }).withMessage('Amount withdrawal must be a non-negative number'),
   body('description').optional().trim(),

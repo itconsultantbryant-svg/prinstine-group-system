@@ -208,8 +208,33 @@ const PettyCash = () => {
 
     setSubmitting(true);
     try {
+      // Convert datetime-local format to ISO8601 format for backend validation
+      let transactionDate = formData.transaction_date;
+      if (transactionDate && !transactionDate.includes('T')) {
+        // If it's just a date, add time
+        transactionDate = transactionDate + 'T00:00:00';
+      } else if (transactionDate && transactionDate.includes('T') && !transactionDate.includes(':')) {
+        // If missing time, add default time
+        transactionDate = transactionDate + ':00:00';
+      }
+      // Ensure it's in ISO8601 format (add seconds and Z if not present)
+      if (transactionDate && !transactionDate.includes('Z') && !transactionDate.match(/[+-]\d{2}:\d{2}$/)) {
+        // If no timezone, assume local time and convert to ISO string
+        try {
+          const date = new Date(transactionDate);
+          if (!isNaN(date.getTime())) {
+            transactionDate = date.toISOString();
+          }
+        } catch (e) {
+          // If conversion fails, try adding :00 for seconds
+          if (transactionDate.match(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/)) {
+            transactionDate = transactionDate + ':00';
+          }
+        }
+      }
+
       const payload = {
-        transaction_date: formData.transaction_date,
+        transaction_date: transactionDate,
         petty_cash_custodian_id: formData.petty_cash_custodian_id,
         amount_deposit: deposit > 0 ? deposit : 0,
         amount_withdrawal: withdrawal > 0 ? withdrawal : 0,

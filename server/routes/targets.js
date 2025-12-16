@@ -383,8 +383,16 @@ async function updateAdminTarget(periodStart = null) {
 
     // Emit real-time update for admin target
     if (global.io && adminTarget.id) {
-      const adminTargetFull = await db.get('SELECT * FROM targets WHERE id = ?', [adminTarget.id]);
-      const adminMetrics = await calculateTargetMetrics(adminTargetFull);
+      // Calculate admin metrics manually to exclude fund sharing
+      // Admin target only reflects actual progress, not fund transfers
+      const adminMetrics = {
+        total_progress: totalProgress,
+        shared_in: 0, // Fund sharing doesn't affect admin
+        shared_out: 0, // Fund sharing doesn't affect admin
+        net_amount: adminNetAmount, // Only from progress
+        progress_percentage: adminProgressPercentage.toFixed(2),
+        remaining_amount: adminRemainingAmount
+      };
 
       global.io.emit('target_updated', {
         id: adminTarget.id,

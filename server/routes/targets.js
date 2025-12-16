@@ -243,7 +243,8 @@ async function updateAdminTarget(periodStart = null) {
         entries: allProgressEntries?.slice(0, 5) // Show first 5 for debugging
       });
       
-      const progressResult = await db.get(
+      // Try query with period filter first
+      let progressResult = await db.get(
         `SELECT COALESCE(SUM(CASE 
            WHEN tp.status = 'Approved' OR UPPER(TRIM(COALESCE(tp.status, ''))) = 'APPROVED' OR tp.status IS NULL OR tp.status = ''
            THEN COALESCE(CAST(tp.amount AS NUMERIC), CAST(tp.progress_amount AS NUMERIC), 0)
@@ -257,8 +258,8 @@ async function updateAdminTarget(periodStart = null) {
          JOIN targets t ON CAST(tp.target_id AS INTEGER) = CAST(t.id AS INTEGER)
          WHERE CAST(t.user_id AS INTEGER) != CAST(? AS INTEGER)
            AND t.status = ?
-           AND (t.period_start = ? OR t.period_start IS NULL OR ? IS NULL)`,
-        [adminUser.id, 'Active', periodToUse, periodToUse]
+           AND (t.period_start = ? OR t.period_start IS NULL OR ? IS NULL OR CAST(t.period_start AS TEXT) = CAST(? AS TEXT))`,
+        [adminUser.id, 'Active', periodToUse, periodToUse, periodToUse]
       );
       
       totalProgress = parseFloat(progressResult?.total || 0) || 0;
@@ -269,21 +270,37 @@ async function updateAdminTarget(periodStart = null) {
         period_start_filter: periodToUse
       });
       
-      // If period filter returns 0, try without period filter to see if there are any entries at all
-      if (totalProgress === 0 && periodToUse) {
+      // If period filter returns 0, try without period filter to aggregate ALL approved entries
+      if (totalProgress === 0) {
         const allPeriodResult = await db.get(
           `SELECT COALESCE(SUM(CASE 
              WHEN tp.status = 'Approved' OR UPPER(TRIM(COALESCE(tp.status, ''))) = 'APPROVED' OR tp.status IS NULL OR tp.status = ''
              THEN COALESCE(CAST(tp.amount AS NUMERIC), CAST(tp.progress_amount AS NUMERIC), 0)
              ELSE 0
-           END), 0) as total
+           END), 0) as total,
+           COUNT(CASE 
+             WHEN tp.status = 'Approved' OR UPPER(TRIM(COALESCE(tp.status, ''))) = 'APPROVED' OR tp.status IS NULL OR tp.status = ''
+             THEN 1
+           END) as count
            FROM target_progress tp
            JOIN targets t ON CAST(tp.target_id AS INTEGER) = CAST(t.id AS INTEGER)
            WHERE CAST(t.user_id AS INTEGER) != CAST(? AS INTEGER)
              AND t.status = ?`,
           [adminUser.id, 'Active']
         );
-        console.log(`[updateAdminTarget] Total progress WITHOUT period filter:`, allPeriodResult?.total || 0);
+        
+        const allPeriodTotal = parseFloat(allPeriodResult?.total || 0) || 0;
+        console.log(`[updateAdminTarget] Total progress WITHOUT period filter:`, {
+          total: allPeriodTotal,
+          count: allPeriodResult?.count || 0,
+          using_fallback: allPeriodTotal > 0
+        });
+        
+        // Use the all-period total if period filter returned 0
+        if (allPeriodTotal > 0) {
+          totalProgress = allPeriodTotal;
+          console.log(`[updateAdminTarget] Using all-period total: ${totalProgress}`);
+        }
       }
     }
 

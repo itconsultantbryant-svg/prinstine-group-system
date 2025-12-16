@@ -28,6 +28,13 @@ const Targets = () => {
   const [showProgressModal, setShowProgressModal] = useState(false);
   const [users, setUsers] = useState([]);
   const [sharingHistory, setSharingHistory] = useState([]);
+  const [showShareModal, setShowShareModal] = useState(false);
+  const [shareForm, setShareForm] = useState({
+    to_user_id: '',
+    amount: '',
+    reason: ''
+  });
+  const [activeTab, setActiveTab] = useState('targets'); // 'targets' or 'sharing'
 
   // Form states
   const [createForm, setCreateForm] = useState({
@@ -71,13 +78,13 @@ const Targets = () => {
     }
   };
 
-  // Fetch users for dropdown (Admin only)
+  // Fetch users for dropdown (Admin for target creation, Staff/DeptHead for fund sharing)
   const fetchUsers = async () => {
-    if (user?.role !== 'Admin') return;
-    
     try {
       const response = await api.get('/users');
-      setUsers(response.data.users || []);
+      // Filter to Staff and DepartmentHead for fund sharing, all non-Admin/Client for target creation
+      const allUsers = response.data.users || [];
+      setUsers(allUsers);
     } catch (err) {
       console.error('Error fetching users:', err);
     }
@@ -153,16 +160,23 @@ const Targets = () => {
       fetchTargets();
     };
 
+    const handleFundShared = () => {
+      fetchSharingHistory();
+      fetchTargets();
+    };
+
     socket.on('target_created', handleTargetCreated);
     socket.on('target_updated', handleTargetUpdated);
     socket.on('target_deleted', handleTargetDeleted);
     socket.on('target_progress_updated', handleTargetProgressUpdated);
+    socket.on('fund_shared', handleFundShared);
 
     return () => {
       socket.off('target_created', handleTargetCreated);
       socket.off('target_updated', handleTargetUpdated);
       socket.off('target_deleted', handleTargetDeleted);
       socket.off('target_progress_updated', handleTargetProgressUpdated);
+      socket.off('fund_shared', handleFundShared);
     };
   }, [user, selectedTarget]);
 
@@ -256,6 +270,31 @@ const Targets = () => {
     }
   };
 
+  // Handle share funds
+  const handleShareFunds = async (e) => {
+    e.preventDefault();
+    setError('');
+
+    try {
+      await api.post('/targets/fund-sharing', shareForm);
+      setShowShareModal(false);
+      setShareForm({
+        to_user_id: '',
+        amount: '',
+        reason: ''
+      });
+      fetchTargets();
+      fetchSharingHistory();
+    } catch (err) {
+      setError(err.response?.data?.error || 'Failed to share funds');
+    }
+  };
+
+  // Get current user's target for fund sharing validation
+  const getUserTarget = () => {
+    return targets.find(t => t.user_id === user?.id && t.status === 'Active');
+  };
+
   // Format currency
   const formatCurrency = (amount) => {
     return new Intl.NumberFormat('en-US', {
@@ -285,14 +324,24 @@ const Targets = () => {
               Manage employee targets and track progress in real-time
             </p>
           </div>
-          {user?.role === 'Admin' && (
-            <button
-              className="btn btn-primary"
-              onClick={() => setShowCreateModal(true)}
-            >
-              <i className="bi bi-plus-circle me-2"></i>Create Target
-            </button>
-          )}
+          <div>
+            {(user?.role === 'Staff' || user?.role === 'DepartmentHead') && (
+              <button
+                className="btn btn-success me-2"
+                onClick={() => setShowShareModal(true)}
+              >
+                <i className="bi bi-arrow-left-right me-2"></i>Share Funds
+              </button>
+            )}
+            {user?.role === 'Admin' && (
+              <button
+                className="btn btn-primary"
+                onClick={() => setShowCreateModal(true)}
+              >
+                <i className="bi bi-plus-circle me-2"></i>Create Target
+              </button>
+            )}
+          </div>
         </div>
       </div>
 
@@ -300,11 +349,14 @@ const Targets = () => {
       <div className="alert alert-info mb-4">
         <h5><i className="bi bi-info-circle me-2"></i>How It Works</h5>
         <ul className="mb-0">
+          <li><strong>Admin Target</strong> = Sum of all employee and department head targets (auto-aggregated)</li>
           <li><strong>Net Amount</strong> = Approved Progress + Funds Shared In - Funds Shared Out</li>
           <li><strong>Progress Percentage</strong> = (Net Amount / Target Amount) × 100</li>
           <li><strong>Remaining Amount</strong> = Target Amount - Net Amount (minimum 0)</li>
           <li>Progress entries from progress reports start as <strong>Pending</strong> and require Admin approval</li>
           <li>Only <strong>Approved</strong> progress entries are counted in calculations</li>
+          <li>Fund sharing: You must have more funds than the share amount (net_amount &gt; share_amount)</li>
+          <li>Everyone can view all targets, progress history, and fund sharing history</li>
           <li>All updates are synchronized in real-time across all users</li>
         </ul>
         </div>
@@ -313,7 +365,28 @@ const Targets = () => {
         <div className="alert alert-danger">{error}</div>
       )}
 
+      {/* Tabs */}
+      <ul className="nav nav-tabs mb-4">
+        <li className="nav-item">
+          <button 
+            className={`nav-link ${activeTab === 'targets' ? 'active' : ''}`}
+            onClick={() => setActiveTab('targets')}
+          >
+            <i className="bi bi-bullseye me-2"></i>Targets
+          </button>
+        </li>
+        <li className="nav-item">
+          <button 
+            className={`nav-link ${activeTab === 'sharing' ? 'active' : ''}`}
+            onClick={() => setActiveTab('sharing')}
+          >
+            <i className="bi bi-arrow-left-right me-2"></i>Fund Sharing History
+          </button>
+        </li>
+      </ul>
+
       {/* Targets Table */}
+      {activeTab === 'targets' && (
       <div className="card">
         <div className="card-body">
             <div className="table-responsive">
@@ -407,6 +480,138 @@ const Targets = () => {
           </div>
         </div>
       </div>
+      )}
+
+      {/* Fund Sharing History */}
+      {activeTab === 'sharing' && (
+        <div className="card">
+          <div className="card-body">
+            <div className="table-responsive">
+              <table className="table table-hover">
+                <thead>
+                  <tr>
+                    <th>Date</th>
+                    <th>From</th>
+                    <th>To</th>
+                    <th>Amount</th>
+                    <th>Reason</th>
+                    <th>Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {sharingHistory.length === 0 ? (
+                    <tr>
+                      <td colSpan="6" className="text-center text-muted">
+                        No fund sharing history found
+                      </td>
+                    </tr>
+                  ) : (
+                    sharingHistory.map((share) => (
+                      <tr key={share.id}>
+                        <td>{new Date(share.created_at).toLocaleDateString()}</td>
+                        <td>{share.from_user_name || 'Unknown'}</td>
+                        <td>{share.to_user_name || 'Unknown'}</td>
+                        <td>{formatCurrency(share.amount)}</td>
+                        <td>{share.reason || 'N/A'}</td>
+                        <td>
+                          <span className={`badge bg-${
+                            share.status === 'Active' ? 'success' :
+                            share.status === 'Reversed' ? 'danger' : 'secondary'
+                          }`}>
+                            {share.status || 'Active'}
+                          </span>
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Share Funds Modal */}
+      {showShareModal && (
+        <div className="modal show d-block" tabIndex="-1" style={{ backgroundColor: 'rgba(0,0,0,0.5)' }}>
+          <div className="modal-dialog">
+            <div className="modal-content">
+              <div className="modal-header">
+                <h5 className="modal-title">Share Funds</h5>
+                <button type="button" className="btn-close" onClick={() => setShowShareModal(false)}></button>
+              </div>
+              <form onSubmit={handleShareFunds}>
+                <div className="modal-body">
+                  {error && <div className="alert alert-danger">{error}</div>}
+                  
+                  {(() => {
+                    const userTarget = getUserTarget();
+                    return userTarget && (
+                      <div className="alert alert-info">
+                        <strong>Your Current Net Amount:</strong> {formatCurrency(userTarget.net_amount)}
+                        <br />
+                        <small>You can only share funds if your net amount is greater than the share amount.</small>
+                      </div>
+                    );
+                  })()}
+
+                  <div className="mb-3">
+                    <label className="form-label">Share To *</label>
+                    <select
+                      className="form-select"
+                      value={shareForm.to_user_id}
+                      onChange={(e) => setShareForm({ ...shareForm, to_user_id: e.target.value })}
+                      required
+                    >
+                      <option value="">Select Employee/Department Head</option>
+                      {users
+                        .filter(u => u.id !== user?.id && (u.role === 'Staff' || u.role === 'DepartmentHead'))
+                        .map(u => (
+                          <option key={u.id} value={u.id}>
+                            {u.name} ({u.email}) - {u.role}
+                          </option>
+                        ))}
+                    </select>
+                  </div>
+
+                  <div className="mb-3">
+                    <label className="form-label">Amount *</label>
+                    <input
+                      type="number"
+                      className="form-control"
+                      step="0.01"
+                      min="0.01"
+                      value={shareForm.amount}
+                      onChange={(e) => setShareForm({ ...shareForm, amount: e.target.value })}
+                      required
+                    />
+                    <small className="form-text text-muted">
+                      You must have more funds than this amount to share.
+                    </small>
+                  </div>
+
+                  <div className="mb-3">
+                    <label className="form-label">Reason (Optional)</label>
+                    <textarea
+                      className="form-control"
+                      rows="3"
+                      value={shareForm.reason}
+                      onChange={(e) => setShareForm({ ...shareForm, reason: e.target.value })}
+                      placeholder="Enter reason for sharing funds..."
+                    />
+                  </div>
+                </div>
+                <div className="modal-footer">
+                  <button type="button" className="btn btn-secondary" onClick={() => setShowShareModal(false)}>
+                    Cancel
+                  </button>
+                  <button type="submit" className="btn btn-success">Share Funds</button>
+                </div>
+              </form>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Create Target Modal */}
       {showCreateModal && (

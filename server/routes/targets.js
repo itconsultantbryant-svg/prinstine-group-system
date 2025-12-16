@@ -3,13 +3,15 @@
  * 
  * Features:
  * - Target creation, update, deletion (Admin only)
+ * - Admin target aggregates all employee and department head targets
  * - Real-time progress tracking via target_progress entries
  * - Approval workflow for target progress entries
  * - Net amount calculation: total_progress (approved) + shared_in - shared_out
  * - Progress percentage and remaining amount calculations
- * - Fund sharing between targets
+ * - Fund sharing between employees/department heads
  * - Real-time Socket.IO updates
  * - Comprehensive error handling
+ * - Everyone can see all targets, progress, and fund sharing history
  */
 
 const express = require('express');
@@ -96,7 +98,7 @@ async function calculateTargetMetrics(target) {
     const remainingAmount = Math.max(0, targetAmount - netAmount);
 
     return {
-          total_progress: totalProgress,
+      total_progress: totalProgress,
       shared_in: sharedIn,
       shared_out: sharedOut,
       net_amount: netAmount,
@@ -118,8 +120,191 @@ async function calculateTargetMetrics(target) {
 }
 
 /**
+ * Helper function to update/create admin target
+ * Aggregates all employee and department head targets (excluding admin's own target)
+ */
+async function updateAdminTarget(periodStart = null) {
+  try {
+    const adminUser = await db.get("SELECT id FROM users WHERE role = 'Admin' LIMIT 1");
+    if (!adminUser) {
+      return;
+    }
+
+    // Determine which period to update
+    let periodToUse = periodStart;
+    if (!periodToUse) {
+      // Use the most recent period_start from active targets
+      const latestPeriod = await db.get(
+        "SELECT period_start FROM targets WHERE status = 'Active' ORDER BY period_start DESC LIMIT 1"
+      );
+      if (latestPeriod) {
+        periodToUse = latestPeriod.period_start;
+      } else {
+        return; // No active targets to aggregate
+      }
+    }
+
+    // Find or create admin target for this period
+    let adminTarget = await db.get(
+      'SELECT id FROM targets WHERE user_id = ? AND status = ? AND period_start = ?',
+      [adminUser.id, 'Active', periodToUse]
+    );
+
+    // Aggregate all staff and department head targets (exclude admin)
+    const USE_POSTGRESQL = !!process.env.DATABASE_URL;
+    
+    // Check if target_progress and fund_sharing tables exist
+    let targetProgressExists = false;
+    let fundSharingExists = false;
+
+    if (USE_POSTGRESQL) {
+      const tpCheck = await db.get(
+        "SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'target_progress'"
+      );
+      targetProgressExists = !!tpCheck;
+      
+      const fsCheck = await db.get(
+        "SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'fund_sharing'"
+      );
+      fundSharingExists = !!fsCheck;
+    } else {
+      const tpCheck = await db.get("SELECT name FROM sqlite_master WHERE type='table' AND name='target_progress'");
+      targetProgressExists = !!tpCheck;
+      
+      const fsCheck = await db.get("SELECT name FROM sqlite_master WHERE type='table' AND name='fund_sharing'");
+      fundSharingExists = !!fsCheck;
+    }
+
+    // Aggregate target amounts, progress, and fund sharing from all staff/department heads
+    const aggregationQuery = `
+      SELECT 
+        COALESCE(SUM(target_amount), 0) as total_target,
+        COUNT(*) as target_count
+      FROM targets
+      WHERE user_id != ?
+        AND status = ?
+        AND period_start = ?
+    `;
+
+    const aggregation = await db.get(aggregationQuery, [adminUser.id, 'Active', periodToUse]);
+    const totalTargetAmount = parseFloat(aggregation?.total_target || 0) || 0;
+
+    // Calculate aggregated total_progress from all staff/department head targets
+    let totalProgress = 0;
+    if (targetProgressExists) {
+      const progressResult = await db.get(
+        `SELECT COALESCE(SUM(COALESCE(CAST(tp.amount AS NUMERIC), CAST(tp.progress_amount AS NUMERIC), 0)), 0) as total
+         FROM target_progress tp
+         JOIN targets t ON tp.target_id = t.id
+         WHERE t.user_id != ?
+           AND t.status = ?
+           AND t.period_start = ?
+           AND (UPPER(TRIM(COALESCE(tp.status, ''))) = 'APPROVED' OR tp.status IS NULL OR tp.status = '')`,
+        [adminUser.id, 'Active', periodToUse]
+      );
+      totalProgress = parseFloat(progressResult?.total || 0) || 0;
+    }
+
+    // Calculate aggregated shared_in and shared_out
+    let totalSharedIn = 0;
+    let totalSharedOut = 0;
+    if (fundSharingExists) {
+      // Get all user IDs that have targets for this period (excluding admin)
+      const staffTargets = await db.all(
+        'SELECT DISTINCT user_id FROM targets WHERE user_id != ? AND status = ? AND period_start = ?',
+        [adminUser.id, 'Active', periodToUse]
+      );
+      const staffUserIds = staffTargets.map(t => t.user_id);
+
+      if (staffUserIds.length > 0) {
+        // Total shared_out: funds shared FROM staff/department heads
+        const sharedOutResult = await db.get(
+          `SELECT COALESCE(SUM(CASE WHEN status = 'Active' THEN CAST(amount AS NUMERIC) ELSE 0 END), 0) as total
+           FROM fund_sharing
+           WHERE from_user_id IN (${staffUserIds.map(() => '?').join(',')})`,
+          staffUserIds
+        );
+        totalSharedOut = parseFloat(sharedOutResult?.total || 0) || 0;
+
+        // Total shared_in: funds shared TO staff/department heads
+        const sharedInResult = await db.get(
+          `SELECT COALESCE(SUM(CASE WHEN status = 'Active' THEN CAST(amount AS NUMERIC) ELSE 0 END), 0) as total
+           FROM fund_sharing
+           WHERE to_user_id IN (${staffUserIds.map(() => '?').join(',')})`,
+          staffUserIds
+        );
+        totalSharedIn = parseFloat(sharedInResult?.total || 0) || 0;
+      }
+    }
+
+    // Calculate admin net amount
+    const adminNetAmount = totalProgress + totalSharedIn - totalSharedOut;
+    const adminProgressPercentage = totalTargetAmount > 0 ? (adminNetAmount / totalTargetAmount) * 100 : 0;
+    const adminRemainingAmount = Math.max(0, totalTargetAmount - adminNetAmount);
+
+    if (adminTarget) {
+      // Update existing admin target
+      await db.run(
+        `UPDATE targets 
+         SET target_amount = ?, 
+             notes = ?,
+             updated_at = CURRENT_TIMESTAMP
+         WHERE id = ?`,
+        [
+          totalTargetAmount,
+          `Auto-aggregated from ${aggregation?.target_count || 0} staff and department head targets for period ${periodToUse}`,
+          adminTarget.id
+        ]
+      );
+    } else {
+      // Create new admin target
+      const result = await db.run(
+        `INSERT INTO targets (user_id, target_amount, category, period_start, period_end, notes, created_by, status)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          adminUser.id,
+          totalTargetAmount,
+          'Employee',
+          periodToUse,
+          null,
+          `Auto-aggregated from ${aggregation?.target_count || 0} staff and department head targets`,
+          adminUser.id,
+          'Active'
+        ]
+      );
+      adminTarget = { id: result.lastID || result.id || (result.rows && result.rows[0] && result.rows[0].id) };
+    }
+
+    // Emit real-time update for admin target
+    if (global.io && adminTarget.id) {
+      const adminTargetFull = await db.get('SELECT * FROM targets WHERE id = ?', [adminTarget.id]);
+      const adminMetrics = await calculateTargetMetrics(adminTargetFull);
+
+      global.io.emit('target_updated', {
+        id: adminTarget.id,
+        updated_by: 'System',
+        reason: 'admin_target_aggregated',
+        period: periodToUse,
+        ...adminMetrics
+      });
+
+      global.io.emit('target_progress_updated', {
+        target_id: adminTarget.id,
+        action: 'admin_target_recalculated',
+        ...adminMetrics
+      });
+    }
+
+    return adminTarget.id;
+  } catch (error) {
+    console.error('Error updating admin target:', error);
+    // Don't throw - this is a background operation
+  }
+}
+
+/**
  * GET /api/targets
- * Get all targets (Admin sees all, others see their own)
+ * Get all targets - Everyone can see all targets
  */
 router.get('/', authenticateToken, async (req, res) => {
   try {
@@ -139,7 +324,7 @@ router.get('/', authenticateToken, async (req, res) => {
       return res.json({ targets: [] });
     }
 
-    // Build query
+    // Build query - Everyone can see all targets
     let query = `
       SELECT t.*, 
              COALESCE(u.name, 'Unknown User') as user_name, 
@@ -153,16 +338,16 @@ router.get('/', authenticateToken, async (req, res) => {
     `;
     const params = [];
 
-    // Role-based filtering: Non-admin users only see their own targets
-    if (req.user.role !== 'Admin') {
-      query += ' AND t.user_id = ?';
-      params.push(req.user.id);
-    }
-
     // Filter by status if provided
     if (req.query.status) {
       query += ' AND t.status = ?';
       params.push(req.query.status);
+    }
+
+    // Filter by period if provided
+    if (req.query.period_start) {
+      query += ' AND t.period_start = ?';
+      params.push(req.query.period_start);
     }
 
     query += ' ORDER BY t.created_at DESC';
@@ -174,12 +359,28 @@ router.get('/', authenticateToken, async (req, res) => {
       targets.map(async (target) => {
         const metrics = await calculateTargetMetrics(target);
         return {
-              ...target,
+          ...target,
           ...metrics,
           target_amount: parseFloat(target.target_amount || 0) || 0
         };
       })
     );
+
+    // Ensure admin target exists if there are any staff/department head targets
+    const adminUser = await db.get("SELECT id FROM users WHERE role = 'Admin' LIMIT 1");
+    if (adminUser && targetsWithMetrics.length > 0) {
+      // Check if admin target exists
+      const hasStaffTargets = targetsWithMetrics.some(t => t.user_id !== adminUser.id && t.status === 'Active');
+      if (hasStaffTargets) {
+        // Trigger admin target update in background
+        const latestPeriod = targetsWithMetrics
+          .filter(t => t.user_id !== adminUser.id && t.status === 'Active')
+          .sort((a, b) => new Date(b.period_start) - new Date(a.period_start))[0]?.period_start;
+        if (latestPeriod) {
+          updateAdminTarget(latestPeriod).catch(err => console.error('Error updating admin target on load:', err));
+        }
+      }
+    }
 
     res.json({ targets: targetsWithMetrics });
   } catch (error) {
@@ -193,19 +394,19 @@ router.get('/', authenticateToken, async (req, res) => {
 
 /**
  * GET /api/targets/:id
- * Get single target by ID
+ * Get single target by ID - Everyone can view all targets
  */
 router.get('/:id', authenticateToken, async (req, res) => {
   try {
     const target = await db.get(
       `SELECT t.*, 
-             COALESCE(u.name, 'Unknown User') as user_name, 
-             COALESCE(u.email, '') as user_email,
-             COALESCE(u.role, '') as user_role,
+              COALESCE(u.name, 'Unknown User') as user_name,
+              COALESCE(u.email, '') as user_email,
+              COALESCE(u.role, '') as user_role,
               COALESCE(creator.name, 'System') as created_by_name
-      FROM targets t
-      LEFT JOIN users u ON t.user_id = u.id
-      LEFT JOIN users creator ON t.created_by = creator.id
+       FROM targets t
+       LEFT JOIN users u ON t.user_id = u.id
+       LEFT JOIN users creator ON t.created_by = creator.id
        WHERE t.id = ?`,
       [req.params.id]
     );
@@ -214,10 +415,7 @@ router.get('/:id', authenticateToken, async (req, res) => {
       return res.status(404).json({ error: 'Target not found' });
     }
 
-    // Authorization: Non-admin users can only view their own targets
-    if (req.user.role !== 'Admin' && target.user_id !== req.user.id) {
-      return res.status(403).json({ error: 'Access denied' });
-    }
+    // Everyone can view all targets - no authorization check
 
     // Calculate metrics
     const metrics = await calculateTargetMetrics(target);
@@ -238,6 +436,7 @@ router.get('/:id', authenticateToken, async (req, res) => {
 /**
  * POST /api/targets
  * Create new target (Admin only)
+ * Auto-creates/updates admin target
  */
 router.post('/', authenticateToken, requireRole('Admin'), [
   body('user_id').isInt().withMessage('Valid user ID is required'),
@@ -258,6 +457,11 @@ router.post('/', authenticateToken, requireRole('Admin'), [
     const user = await db.get('SELECT id, name, email, role FROM users WHERE id = ?', [user_id]);
     if (!user) {
       return res.status(404).json({ error: 'User not found' });
+    }
+
+    // Don't allow creating target for admin (admin target is auto-generated)
+    if (user.role === 'Admin') {
+      return res.status(400).json({ error: 'Admin targets are automatically generated from staff and department head targets' });
     }
 
     // Check if user already has an active target
@@ -288,13 +492,16 @@ router.post('/', authenticateToken, requireRole('Admin'), [
 
     await logAction(req.user.id, 'create_target', 'targets', targetId, { user_id, target_amount, category }, req);
 
+    // Update admin target in background
+    updateAdminTarget(period_start).catch(err => console.error('Error updating admin target:', err));
+
     // Get created target with metrics
     const createdTarget = await db.get(
       `SELECT t.*, 
-             COALESCE(u.name, 'Unknown User') as user_name, 
+              COALESCE(u.name, 'Unknown User') as user_name,
               COALESCE(u.email, '') as user_email
-      FROM targets t
-      LEFT JOIN users u ON t.user_id = u.id
+       FROM targets t
+       LEFT JOIN users u ON t.user_id = u.id
        WHERE t.id = ?`,
       [targetId]
     );
@@ -331,6 +538,7 @@ router.post('/', authenticateToken, requireRole('Admin'), [
 /**
  * PUT /api/targets/:id
  * Update target (Admin only)
+ * Updates admin target if this target changed
  */
 router.put('/:id', authenticateToken, requireRole('Admin'), [
   body('target_amount').optional().isFloat({ min: 0 }),
@@ -388,30 +596,38 @@ router.put('/:id', authenticateToken, requireRole('Admin'), [
     await db.run(`UPDATE targets SET ${updates.join(', ')} WHERE id = ?`, params);
     await logAction(req.user.id, 'update_target', 'targets', req.params.id, req.body, req);
 
+    // Update admin target if this target changed (only if not admin's own target)
+    const adminUser = await db.get("SELECT id FROM users WHERE role = 'Admin' LIMIT 1");
+    if (adminUser && target.user_id !== adminUser.id) {
+      updateAdminTarget(target.period_start || req.body.period_start).catch(err => 
+        console.error('Error updating admin target:', err)
+      );
+    }
+
     // Get updated target with metrics
     const updatedTarget = await db.get(
       `SELECT t.*, 
-             COALESCE(u.name, 'Unknown User') as user_name, 
+              COALESCE(u.name, 'Unknown User') as user_name,
               COALESCE(u.email, '') as user_email
-      FROM targets t
-      LEFT JOIN users u ON t.user_id = u.id
+       FROM targets t
+       LEFT JOIN users u ON t.user_id = u.id
        WHERE t.id = ?`,
       [req.params.id]
     );
 
     const metrics = await calculateTargetMetrics(updatedTarget);
 
-      // Emit real-time update
-      if (global.io) {
-        global.io.emit('target_updated', {
-          id: req.params.id,
+    // Emit real-time update
+    if (global.io) {
+      global.io.emit('target_updated', {
+        id: req.params.id,
         updated_by: req.user.name,
         ...metrics
-        });
-      }
+      });
+    }
 
-      res.json({ 
-        message: 'Target updated successfully',
+    res.json({
+      message: 'Target updated successfully',
       target: {
         ...updatedTarget,
         ...metrics
@@ -426,6 +642,7 @@ router.put('/:id', authenticateToken, requireRole('Admin'), [
 /**
  * DELETE /api/targets/:id
  * Delete target (Admin only)
+ * Updates admin target after deletion
  */
 router.delete('/:id', authenticateToken, requireRole('Admin'), async (req, res) => {
   try {
@@ -434,8 +651,19 @@ router.delete('/:id', authenticateToken, requireRole('Admin'), async (req, res) 
       return res.status(404).json({ error: 'Target not found' });
     }
 
+    const periodStart = target.period_start;
+    const userId = target.user_id;
+
     await db.run('DELETE FROM targets WHERE id = ?', [req.params.id]);
     await logAction(req.user.id, 'delete_target', 'targets', req.params.id, {}, req);
+
+    // Update admin target if this wasn't admin's own target
+    const adminUser = await db.get("SELECT id FROM users WHERE role = 'Admin' LIMIT 1");
+    if (adminUser && userId !== adminUser.id) {
+      updateAdminTarget(periodStart).catch(err => 
+        console.error('Error updating admin target:', err)
+      );
+    }
 
     // Emit real-time update
     if (global.io) {
@@ -454,7 +682,7 @@ router.delete('/:id', authenticateToken, requireRole('Admin'), async (req, res) 
 
 /**
  * GET /api/targets/:id/progress
- * Get target progress history
+ * Get target progress history - Everyone can view all progress
  */
 router.get('/:id/progress', authenticateToken, async (req, res) => {
   try {
@@ -463,10 +691,7 @@ router.get('/:id/progress', authenticateToken, async (req, res) => {
       return res.status(404).json({ error: 'Target not found' });
     }
 
-    // Authorization
-    if (req.user.role !== 'Admin' && target.user_id !== req.user.id) {
-      return res.status(403).json({ error: 'Access denied' });
-    }
+    // Everyone can view all progress - no authorization check
 
     const progressEntries = await db.all(
       `SELECT tp.*, 
@@ -489,6 +714,7 @@ router.get('/:id/progress', authenticateToken, async (req, res) => {
 /**
  * PUT /api/targets/progress/:id/approve
  * Approve or reject target progress entry (Admin only)
+ * Updates admin target when progress is approved
  */
 router.put('/progress/:id/approve', authenticateToken, requireRole('Admin'), [
   body('status').isIn(['Approved', 'Rejected']).withMessage('Status must be Approved or Rejected')
@@ -503,7 +729,7 @@ router.put('/progress/:id/approve', authenticateToken, requireRole('Admin'), [
     
     // Get progress entry
     const progressEntry = await db.get(
-      `SELECT tp.*, t.user_id as target_user_id
+      `SELECT tp.*, t.user_id as target_user_id, t.period_start
        FROM target_progress tp
        JOIN targets t ON tp.target_id = t.id
        WHERE tp.id = ?`,
@@ -515,10 +741,10 @@ router.put('/progress/:id/approve', authenticateToken, requireRole('Admin'), [
     }
 
     // Update status
-      await db.run(
+    await db.run(
       'UPDATE target_progress SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
-        [status, req.params.id]
-      );
+      [status, req.params.id]
+    );
 
     await logAction(req.user.id, 'approve_target_progress', 'target_progress', req.params.id, { status }, req);
 
@@ -526,30 +752,38 @@ router.put('/progress/:id/approve', authenticateToken, requireRole('Admin'), [
     const target = await db.get('SELECT * FROM targets WHERE id = ?', [progressEntry.target_id]);
     const metrics = await calculateTargetMetrics(target);
 
+    // Update admin target if this isn't admin's own target
+    const adminUser = await db.get("SELECT id FROM users WHERE role = 'Admin' LIMIT 1");
+    if (adminUser && progressEntry.target_user_id !== adminUser.id) {
+      updateAdminTarget(progressEntry.period_start).catch(err => 
+        console.error('Error updating admin target:', err)
+      );
+    }
+
     // Emit real-time updates
-      if (global.io) {
-        global.io.emit('target_progress_updated', {
-          target_id: progressEntry.target_id,
+    if (global.io) {
+      global.io.emit('target_progress_updated', {
+        target_id: progressEntry.target_id,
         user_id: progressEntry.target_user_id,
         progress_id: req.params.id,
         action: status === 'Approved' ? 'progress_approved' : 'progress_rejected',
         status,
         ...metrics
-        });
+      });
 
-        global.io.emit('target_updated', {
-          id: progressEntry.target_id,
+      global.io.emit('target_updated', {
+        id: progressEntry.target_id,
         updated_by: req.user.name,
         reason: 'target_progress_' + status.toLowerCase(),
         ...metrics
       });
     }
 
-      res.json({ 
-        message: `Target progress entry ${status.toLowerCase()} successfully`,
-        progress_id: req.params.id,
-        target: {
-          id: progressEntry.target_id,
+    res.json({
+      message: `Target progress entry ${status.toLowerCase()} successfully`,
+      progress_id: req.params.id,
+      target: {
+        id: progressEntry.target_id,
         ...metrics
       }
     });
@@ -563,8 +797,166 @@ router.put('/progress/:id/approve', authenticateToken, requireRole('Admin'), [
 });
 
 /**
+ * POST /api/targets/fund-sharing
+ * Share funds between employees/department heads
+ * User must have net_amount > share_amount
+ */
+router.post('/fund-sharing', authenticateToken, requireRole('Staff', 'DepartmentHead'), [
+  body('to_user_id').isInt().withMessage('Valid recipient user ID is required'),
+  body('amount').isFloat({ min: 0.01 }).withMessage('Valid amount greater than 0 is required'),
+  body('reason').optional().trim()
+], async (req, res) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({ errors: errors.array() });
+    }
+
+    const { to_user_id, amount, reason } = req.body;
+    const from_user_id = req.user.id;
+
+    // Cannot share to oneself
+    if (from_user_id === to_user_id) {
+      return res.status(400).json({ error: 'Cannot share funds to yourself' });
+    }
+
+    // Verify recipient exists and is Staff or DepartmentHead
+    const recipient = await db.get(
+      'SELECT id, name, email, role FROM users WHERE id = ? AND role IN (?, ?)',
+      [to_user_id, 'Staff', 'DepartmentHead']
+    );
+    if (!recipient) {
+      return res.status(404).json({ error: 'Recipient not found or invalid role' });
+    }
+
+    // Get sender's active target
+    const senderTarget = await db.get(
+      'SELECT * FROM targets WHERE user_id = ? AND status = ?',
+      [from_user_id, 'Active']
+    );
+
+    if (!senderTarget) {
+      return res.status(400).json({ error: 'You do not have an active target' });
+    }
+
+    // Calculate sender's current metrics
+    const senderMetrics = await calculateTargetMetrics(senderTarget);
+    const availableAmount = senderMetrics.net_amount - parseFloat(amount);
+
+    // Validate: user must have more than what they want to share
+    if (senderMetrics.net_amount <= parseFloat(amount)) {
+      return res.status(400).json({ 
+        error: `Insufficient funds. Your net amount is ${senderMetrics.net_amount.toFixed(2)}, but you are trying to share ${parseFloat(amount).toFixed(2)}. You must have more funds than the share amount.`
+      });
+    }
+
+    // Get fund_sharing table existence
+    const USE_POSTGRESQL = !!process.env.DATABASE_URL;
+    let fundSharingExists;
+    if (USE_POSTGRESQL) {
+      fundSharingExists = await db.get(
+        "SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'fund_sharing'"
+      );
+    } else {
+      fundSharingExists = await db.get("SELECT name FROM sqlite_master WHERE type='table' AND name='fund_sharing'");
+    }
+
+    if (!fundSharingExists) {
+      return res.status(500).json({ error: 'Fund sharing table does not exist' });
+    }
+
+    // Create fund sharing record
+    const result = await db.run(
+      `INSERT INTO fund_sharing (from_user_id, to_user_id, amount, reason, status, created_by)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+      [from_user_id, to_user_id, parseFloat(amount), reason || null, 'Active', req.user.id]
+    );
+
+    const sharingId = result.lastID || result.id || (result.rows && result.rows[0] && result.rows[0].id);
+
+    await logAction(req.user.id, 'share_funds', 'fund_sharing', sharingId, { to_user_id, amount, reason }, req);
+
+    // Get updated metrics for both sender and recipient
+    const updatedSenderTarget = await db.get('SELECT * FROM targets WHERE id = ?', [senderTarget.id]);
+    const senderUpdatedMetrics = await calculateTargetMetrics(updatedSenderTarget);
+
+    const recipientTarget = await db.get(
+      'SELECT * FROM targets WHERE user_id = ? AND status = ?',
+      [to_user_id, 'Active']
+    );
+
+    let recipientMetrics = null;
+    if (recipientTarget) {
+      const updatedRecipientTarget = await db.get('SELECT * FROM targets WHERE id = ?', [recipientTarget.id]);
+      recipientMetrics = await calculateTargetMetrics(updatedRecipientTarget);
+    }
+
+    // Update admin target
+    if (senderTarget.period_start) {
+      updateAdminTarget(senderTarget.period_start).catch(err => 
+        console.error('Error updating admin target:', err)
+      );
+    }
+
+    // Emit real-time updates
+    if (global.io) {
+      global.io.emit('fund_shared', {
+        id: sharingId,
+        from_user_id,
+        from_user_name: req.user.name,
+        to_user_id,
+        to_user_name: recipient.name,
+        amount: parseFloat(amount),
+        reason
+      });
+
+      global.io.emit('target_progress_updated', {
+        target_id: senderTarget.id,
+        user_id: from_user_id,
+        action: 'fund_shared_out',
+        ...senderUpdatedMetrics
+      });
+
+      if (recipientTarget && recipientMetrics) {
+        global.io.emit('target_progress_updated', {
+          target_id: recipientTarget.id,
+          user_id: to_user_id,
+          action: 'fund_shared_in',
+          ...recipientMetrics
+        });
+      }
+    }
+
+    res.status(201).json({
+      message: 'Funds shared successfully',
+      sharing: {
+        id: sharingId,
+        from_user_id,
+        to_user_id,
+        amount: parseFloat(amount),
+        reason
+      },
+      sender_target: {
+        id: senderTarget.id,
+        ...senderUpdatedMetrics
+      },
+      recipient_target: recipientTarget && recipientMetrics ? {
+        id: recipientTarget.id,
+        ...recipientMetrics
+      } : null
+    });
+  } catch (error) {
+    console.error('Share funds error:', error);
+    res.status(500).json({ 
+      error: 'Failed to share funds',
+      details: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+});
+
+/**
  * GET /api/targets/fund-sharing/history
- * Get fund sharing history
+ * Get fund sharing history - Everyone can see all sharing history
  */
 router.get('/fund-sharing/history', authenticateToken, async (req, res) => {
   try {
@@ -584,7 +976,8 @@ router.get('/fund-sharing/history', authenticateToken, async (req, res) => {
       return res.json({ history: [] });
     }
 
-    let query = `
+    // Everyone can see all sharing history - no filtering
+    const query = `
       SELECT fs.*,
              sender.name as from_user_name,
              sender.email as from_user_email,
@@ -593,19 +986,10 @@ router.get('/fund-sharing/history', authenticateToken, async (req, res) => {
       FROM fund_sharing fs
       LEFT JOIN users sender ON fs.from_user_id = sender.id
       LEFT JOIN users recipient ON fs.to_user_id = recipient.id
-      WHERE 1=1
+      ORDER BY fs.created_at DESC
     `;
-    const params = [];
 
-    // Non-admin users only see their own sharing history
-    if (req.user.role !== 'Admin') {
-      query += ' AND (fs.from_user_id = ? OR fs.to_user_id = ?)';
-      params.push(req.user.id, req.user.id);
-    }
-
-    query += ' ORDER BY fs.created_at DESC';
-
-    const history = await db.all(query, params);
+    const history = await db.all(query);
     res.json({ history });
   } catch (error) {
     console.error('Get fund sharing history error:', error);
@@ -614,4 +998,3 @@ router.get('/fund-sharing/history', authenticateToken, async (req, res) => {
 });
 
 module.exports = router;
-

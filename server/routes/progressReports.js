@@ -1470,23 +1470,91 @@ router.put('/:id/approve', authenticateToken, requireRole('Admin'), [
   }
 });
 
-// Delete progress report (only by creator or admin)
-router.delete('/:id', authenticateToken, requireRole('Admin', 'DepartmentHead', 'Staff'), async (req, res) => {
+// Delete progress report (Admin only - deletes for everyone in the system)
+router.delete('/:id', authenticateToken, requireRole('Admin'), async (req, res) => {
   try {
     const report = await db.get('SELECT * FROM progress_reports WHERE id = ?', [req.params.id]);
     if (!report) {
       return res.status(404).json({ error: 'Progress report not found' });
     }
 
-    // Only creator or admin can delete
-    if (req.user.role !== 'Admin' && report.created_by !== req.user.id) {
-      return res.status(403).json({ error: 'Insufficient permissions' });
+    // Delete associated target_progress entry if it exists
+    try {
+      const targetProgress = await db.get(
+        'SELECT id, target_id FROM target_progress WHERE progress_report_id = ?',
+        [req.params.id]
+      );
+      
+      if (targetProgress) {
+        // Delete the target_progress entry
+        await db.run('DELETE FROM target_progress WHERE progress_report_id = ?', [req.params.id]);
+        
+        // Update the associated target metrics by recalculating
+        const target = await db.get('SELECT * FROM targets WHERE id = ?', [targetProgress.target_id]);
+        if (target) {
+          const targetsModule = require('./targets');
+          if (targetsModule && typeof targetsModule.calculateTargetMetrics === 'function') {
+            // Recalculate target metrics
+            const updatedMetrics = await targetsModule.calculateTargetMetrics(target);
+            
+            // Emit update event for the target
+            if (global.io) {
+              global.io.emit('target_progress_updated', {
+                target_id: target.id,
+                action: 'progress_report_deleted',
+                progress_report_id: req.params.id,
+                ...updatedMetrics
+              });
+              
+              global.io.emit('target_updated', {
+                id: target.id,
+                updated_by: req.user.name || 'Admin',
+                reason: 'progress_report_deleted',
+                ...updatedMetrics
+              });
+            }
+            
+            // Update admin target if this wasn't admin's own target
+            const adminUser = await db.get("SELECT id FROM users WHERE role = 'Admin' LIMIT 1");
+            if (adminUser && target.user_id !== adminUser.id && target.period_start) {
+              const { updateAdminTarget } = require('./targets');
+              if (updateAdminTarget) {
+                updateAdminTarget(target.period_start).catch(err => 
+                  console.error('Error updating admin target after progress report deletion:', err)
+                );
+              }
+            }
+          }
+        }
+      }
+    } catch (targetProgressError) {
+      console.error('Error deleting target_progress entry (non-fatal):', targetProgressError);
+      // Continue with progress report deletion even if target_progress deletion fails
     }
 
+    // Delete the progress report
     await db.run('DELETE FROM progress_reports WHERE id = ?', [req.params.id]);
-    await logAction(req.user.id, 'delete_progress_report', 'progress_reports', req.params.id, {}, req);
+    await logAction(req.user.id, 'delete_progress_report', 'progress_reports', req.params.id, {
+      report_name: report.name,
+      report_amount: report.amount,
+      created_by: report.created_by
+    }, req);
 
-    res.json({ message: 'Progress report deleted successfully' });
+    // Emit real-time event to notify all users that the progress report has been deleted
+    if (global.io) {
+      global.io.emit('progress_report_deleted', {
+        id: req.params.id,
+        name: report.name,
+        amount: report.amount,
+        created_by: report.created_by,
+        deleted_by: req.user.id,
+        deleted_by_name: req.user.name || 'Admin',
+        deleted_at: new Date().toISOString()
+      });
+      console.log('Emitted progress_report_deleted event for report:', req.params.id);
+    }
+
+    res.json({ message: 'Progress report deleted successfully. All associated data has been removed.' });
   } catch (error) {
     console.error('Delete progress report error:', error);
     res.status(500).json({ error: 'Failed to delete progress report' });

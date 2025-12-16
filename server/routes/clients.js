@@ -279,8 +279,8 @@ router.post('/', authenticateToken, requireRole('Admin', 'Staff', 'DepartmentHea
   }
 });
 
-// Update client
-router.put('/:id', authenticateToken, requireRole('Admin', 'Staff'), async (req, res) => {
+// Update client (Admin, Staff, and DepartmentHead can edit)
+router.put('/:id', authenticateToken, requireRole('Admin', 'Staff', 'DepartmentHead'), async (req, res) => {
   try {
     const clientId = req.params.id;
     const updates = req.body;
@@ -446,8 +446,8 @@ router.post('/:id/consultations', authenticateToken, requireRole('Admin', 'Staff
   }
 });
 
-// Delete client
-router.delete('/:id', authenticateToken, requireRole('Admin', 'Staff'), async (req, res) => {
+// Delete client (Admin only)
+router.delete('/:id', authenticateToken, requireRole('Admin'), async (req, res) => {
   try {
     const clientId = req.params.id;
 

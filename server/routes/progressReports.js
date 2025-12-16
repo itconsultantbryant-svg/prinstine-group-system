@@ -683,12 +683,15 @@ router.put('/:id', authenticateToken, requireRole('Admin', 'DepartmentHead', 'St
             }
             
             // Verify the total progress for this target (only Approved entries, same as GET /targets)
-            // Use case-insensitive comparison
+            // Check for status = 'Approved' first, then normalized
             const totalProgressCheck = await db.get(
-              `SELECT COALESCE(SUM(COALESCE(CAST(amount AS NUMERIC), CAST(progress_amount AS NUMERIC), 0)), 0) as total 
+              `SELECT COALESCE(SUM(CASE 
+                 WHEN status = 'Approved' OR UPPER(TRIM(COALESCE(status, ''))) = 'APPROVED' OR status IS NULL OR status = ''
+                 THEN COALESCE(CAST(amount AS NUMERIC), CAST(progress_amount AS NUMERIC), 0)
+                 ELSE 0
+               END), 0) as total 
                FROM target_progress 
-               WHERE CAST(target_id AS INTEGER) = CAST(? AS INTEGER)
-                 AND (UPPER(TRIM(COALESCE(status, ''))) = 'APPROVED' OR status IS NULL)`,
+               WHERE CAST(target_id AS INTEGER) = CAST(? AS INTEGER)`,
               [target.id]
             );
             console.log('Total progress for target', target.id, 'after update (Approved entries only):', totalProgressCheck);
@@ -1138,12 +1141,15 @@ router.put('/:id/approve', authenticateToken, requireRole('Admin'), [
             console.log('Target progress updated successfully for progress report:', req.params.id);
             
             // Verify the updated progress (only Approved entries, same as GET /targets)
-            // Use case-insensitive comparison to match the GET /targets query
+            // Check for status = 'Approved' first, then normalized
             const totalProgressCheck = await db.get(
-              `SELECT COALESCE(SUM(COALESCE(CAST(amount AS NUMERIC), CAST(progress_amount AS NUMERIC), 0)), 0) as total 
+              `SELECT COALESCE(SUM(CASE 
+                 WHEN status = 'Approved' OR UPPER(TRIM(COALESCE(status, ''))) = 'APPROVED' OR status IS NULL OR status = ''
+                 THEN COALESCE(CAST(amount AS NUMERIC), CAST(progress_amount AS NUMERIC), 0)
+                 ELSE 0
+               END), 0) as total 
                FROM target_progress 
-               WHERE CAST(target_id AS INTEGER) = CAST(? AS INTEGER)
-                 AND (UPPER(TRIM(COALESCE(status, ''))) = 'APPROVED' OR status IS NULL)`,
+               WHERE CAST(target_id AS INTEGER) = CAST(? AS INTEGER)`,
               [target.id]
             );
             console.log('Total progress after update for target', target.id, ':', totalProgressCheck?.total || 0);

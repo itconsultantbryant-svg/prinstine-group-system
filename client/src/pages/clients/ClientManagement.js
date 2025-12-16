@@ -12,10 +12,22 @@ const ClientManagement = () => {
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [editingClient, setEditingClient] = useState(null);
+  const [error, setError] = useState('');
+
+  // Check if user has access to client management
+  useEffect(() => {
+    if (user && !['Admin', 'Staff', 'DepartmentHead'].includes(user.role)) {
+      setError('You do not have permission to access client management.');
+    } else {
+      setError(''); // Clear error if user has access
+    }
+  }, [user]);
 
   useEffect(() => {
-    fetchClients();
-  }, []); // Initial fetch only
+    if (user && ['Admin', 'Staff', 'DepartmentHead'].includes(user.role)) {
+      fetchClients();
+    }
+  }, [user]); // Fetch clients when component mounts and user is available
 
   // Set up real-time socket connection for client updates
   useEffect(() => {
@@ -85,10 +97,19 @@ const ClientManagement = () => {
   const fetchClients = async () => {
     try {
       setLoading(true);
+      setError('');
+      
+      // Verify user has access before fetching
+      if (!user || !['Admin', 'Staff', 'DepartmentHead'].includes(user.role)) {
+        setError('You do not have permission to access client management.');
+        setLoading(false);
+        return;
+      }
+      
       const response = await api.get('/clients');
       console.log('Clients API response:', response.data);
       if (response.data && response.data.clients) {
-      setClients(response.data.clients);
+        setClients(response.data.clients);
       } else {
         console.warn('Unexpected response format:', response.data);
         setClients([]);
@@ -97,7 +118,13 @@ const ClientManagement = () => {
       console.error('Error fetching clients:', error);
       console.error('Error details:', error.response?.data || error.message);
       setClients([]);
-      alert('Failed to load clients. Please refresh the page.');
+      if (error.response?.status === 403) {
+        setError('You do not have permission to access client management.');
+      } else if (error.response?.status === 401) {
+        setError('Please log in to access client management.');
+      } else {
+        setError('Failed to load clients. Please refresh the page.');
+      }
     } finally {
       setLoading(false);
     }
@@ -140,6 +167,18 @@ const ClientManagement = () => {
     fetchClients();
   };
 
+  // Show error if user doesn't have access
+  if (error && !['Admin', 'Staff', 'DepartmentHead'].includes(user?.role)) {
+    return (
+      <div className="container-fluid">
+        <div className="alert alert-danger" role="alert">
+          <i className="bi bi-exclamation-triangle me-2"></i>
+          {error}
+        </div>
+      </div>
+    );
+  }
+
   if (loading) {
     return (
       <div className="d-flex justify-content-center">
@@ -152,12 +191,21 @@ const ClientManagement = () => {
 
   return (
     <div className="container-fluid">
+      {error && (
+        <div className="alert alert-warning alert-dismissible fade show" role="alert">
+          <i className="bi bi-exclamation-triangle me-2"></i>
+          {error}
+          <button type="button" className="btn-close" onClick={() => setError('')}></button>
+        </div>
+      )}
       <div className="row mb-4">
         <div className="col-12 d-flex justify-content-between align-items-center">
           <h1 className="h3 mb-0">Client Management</h1>
-          <button className="btn btn-primary" onClick={handleAdd}>
-            <i className="bi bi-plus-circle me-2"></i>Add Client
-          </button>
+          {user && ['Admin', 'Staff', 'DepartmentHead'].includes(user.role) && (
+            <button className="btn btn-primary" onClick={handleAdd}>
+              <i className="bi bi-plus-circle me-2"></i>Add Client
+            </button>
+          )}
         </div>
       </div>
 
@@ -267,9 +315,11 @@ const ClientManagement = () => {
                         <button className="btn btn-sm btn-outline-primary me-2" onClick={() => handleEdit(client)}>
                           <i className="bi bi-pencil me-1"></i>Edit
                         </button>
-                        <button className="btn btn-sm btn-outline-danger" onClick={() => handleDelete(client.id)}>
-                          <i className="bi bi-trash me-1"></i>Delete
-                        </button>
+                        {user?.role === 'Admin' && (
+                          <button className="btn btn-sm btn-outline-danger" onClick={() => handleDelete(client.id)}>
+                            <i className="bi bi-trash me-1"></i>Delete
+                          </button>
+                        )}
                       </td>
                     </tr>
                   ))

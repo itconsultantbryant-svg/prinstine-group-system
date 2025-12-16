@@ -160,15 +160,20 @@ const Navbar = () => {
     if (user?.role === 'Admin') {
       links.push(
         { path: '/staff', label: 'Staff', icon: 'bi-people', roles: ['Admin'] },
-        { path: '/clients', label: 'Clients', icon: 'bi-person-badge', roles: ['Admin', 'Staff'] },
+        { path: '/clients', label: 'Clients', icon: 'bi-person-badge', roles: ['Admin', 'Staff', 'DepartmentHead'] },
         { path: '/partners', label: 'Partners', icon: 'bi-handshake', roles: ['Admin'] },
         { path: '/academy', label: 'Academy', icon: 'bi-book', roles: ['Admin', 'Instructor', 'Student'] },
         { path: '/reports', label: 'Reports', icon: 'bi-file-text', roles: ['Admin', 'Staff'] }
       );
     } else if (user?.role === 'Staff') {
       links.push(
-        { path: '/clients', label: 'Clients', icon: 'bi-person-badge', roles: ['Admin', 'Staff'] },
+        { path: '/clients', label: 'Clients', icon: 'bi-person-badge', roles: ['Admin', 'Staff', 'DepartmentHead'] },
         { path: '/reports', label: 'Reports', icon: 'bi-file-text', roles: ['Admin', 'Staff'] }
+      );
+    } else if (user?.role === 'DepartmentHead') {
+      links.push(
+        { path: '/clients', label: 'Clients', icon: 'bi-person-badge', roles: ['Admin', 'Staff', 'DepartmentHead'] },
+        { path: '/reports', label: 'Reports', icon: 'bi-file-text', roles: ['Admin', 'Staff', 'DepartmentHead'] }
       );
     } else if (user?.role === 'Instructor') {
       links.push(

@@ -80,8 +80,8 @@ function App() {
                           <Route path="/departments/view/:id" element={<PrivateRoute requiredRole="Admin"><DepartmentView /></PrivateRoute>} />
                           <Route path="/staff" element={<PrivateRoute requiredRole="Admin"><StaffManagement /></PrivateRoute>} />
                           <Route path="/staff/view/:id" element={<PrivateRoute requiredRole="Admin"><StaffView /></PrivateRoute>} />
-                          <Route path="/clients" element={<ClientManagement />} />
-                          <Route path="/clients/view/:id" element={<ClientView />} />
+                          <Route path="/clients" element={<PrivateRoute><ClientManagement /></PrivateRoute>} />
+                          <Route path="/clients/view/:id" element={<PrivateRoute><ClientView /></PrivateRoute>} />
                           <Route path="/partners" element={<PartnerManagement />} />
                           <Route path="/partners/view/:id" element={<PartnerView />} />
                           <Route path="/academy" element={<AcademyManagement />} />

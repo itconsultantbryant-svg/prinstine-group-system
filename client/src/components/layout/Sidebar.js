@@ -157,7 +157,7 @@ const Sidebar = () => {
     { path: '/users', label: 'Users', icon: 'bi-people-fill', roles: ['Admin'], section: 'management' },
     { path: '/departments', label: 'Departments', icon: 'bi-building', roles: ['Admin'], section: 'management' },
     { path: '/staff', label: 'Staff', icon: 'bi-people', roles: ['Admin'], section: 'management' },
-    { path: '/clients', label: 'Clients', icon: 'bi-person-badge', roles: ['Admin', 'Staff'], section: 'management' },
+    { path: '/clients', label: 'Clients', icon: 'bi-person-badge', roles: ['Admin', 'Staff', 'DepartmentHead'], section: 'management' },
     { path: '/partners', label: 'Partners', icon: 'bi-handshake', roles: ['Admin'], section: 'management' },
     
     // Finance Section

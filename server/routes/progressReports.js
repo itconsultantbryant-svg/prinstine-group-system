@@ -696,19 +696,19 @@ router.put('/:id', authenticateToken, requireRole('Admin', 'DepartmentHead', 'St
             );
             console.log('Total progress for target', target.id, 'after update (Approved entries only):', totalProgressCheck);
             
-            // Update admin target in database when staff/dept head target progress changes
-            try {
-              const { updateAdminTargetInDatabase } = require('./targets');
-              if (typeof updateAdminTargetInDatabase === 'function') {
+            // Update admin target in database when staff/dept head target progress changes (background)
+            setImmediate(async () => {
+              try {
+                const targetsModule = require('./targets');
                 const targetInfo = await db.get('SELECT period_start FROM targets WHERE id = ?', [target.id]);
-                if (targetInfo && targetInfo.period_start) {
-                  await updateAdminTargetInDatabase(targetInfo.period_start);
+                if (targetInfo && targetsModule && typeof targetsModule.updateAdminTarget === 'function') {
+                  await targetsModule.updateAdminTarget(targetInfo.period_start);
                   console.log('Admin target updated after progress report edit');
                 }
+              } catch (adminUpdateError) {
+                console.error('Error updating admin target after progress report edit (non-fatal):', adminUpdateError);
               }
-            } catch (adminUpdateError) {
-              console.error('Error updating admin target after progress report edit (non-fatal):', adminUpdateError);
-            }
+            });
             
             // Calculate full target metrics for the update
             let fullMetrics = {

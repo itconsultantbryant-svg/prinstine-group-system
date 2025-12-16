@@ -1134,6 +1134,21 @@ router.put('/:id/approve', authenticateToken, requireRole('Admin'), [
               expected_status: progressStatus
             });
             
+            // Verify this entry is found by the calculation query
+            const calcTest = await db.get(
+              `SELECT 
+                 CASE 
+                   WHEN status = 'Approved' OR UPPER(TRIM(COALESCE(status, ''))) = 'APPROVED' OR status IS NULL OR status = ''
+                   THEN 'MATCH'
+                   ELSE 'NO_MATCH'
+                 END as match_result,
+                 amount as entry_amount
+               FROM target_progress
+               WHERE id = ?`,
+              [progressId]
+            );
+            console.log('Calculation query test for progress entry:', calcTest);
+            
             // Update admin target in database when staff/dept head target progress changes
             try {
               const { updateAdminTargetInDatabase } = require('./targets');

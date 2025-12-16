@@ -273,6 +273,12 @@ const Appraisals = () => {
     } catch (error) {
       setSubmitting(false);
       console.error('Error saving appraisal:', error);
+      console.error('Error details:', {
+        message: error.message,
+        response: error.response?.data,
+        status: error.response?.status,
+        code: error.code
+      });
       
       let errorMessage = 'Failed to save appraisal';
       
@@ -289,6 +295,8 @@ const Appraisals = () => {
           errorMessage = 'Staff member or appraiser not found.';
         } else if (error.response.status === 400) {
           errorMessage = error.response.data?.message || 'Invalid data provided. Please check your input.';
+        } else if (error.response.status === 500) {
+          errorMessage = error.response.data?.error || 'Server error occurred. Please try again or contact support.';
         }
       } else if (error.code === 'ERR_NETWORK' || error.message === 'Network Error') {
         errorMessage = 'Network error. Please check your connection and try again.';

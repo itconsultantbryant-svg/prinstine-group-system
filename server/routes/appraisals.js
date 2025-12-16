@@ -357,91 +357,122 @@ router.post('/', authenticateToken, [
       return res.status(400).json({ error: 'Invalid grade level (Management). Must be 1, 2, or 3.' });
     }
 
-    // Create appraisal
-    const result = await db.run(
-      `INSERT INTO appraisals 
-       (staff_id, staff_name, department_id, department_name, 
-        appraised_by_user_id, appraised_by_name, appraised_by_role,
-        grade_level_appraise, grade_level_management,
-        comment_appraise, comment_management)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [
-        staff_id,
-        staff.name,
-        department_id || null,
-        department_name,
-        appraised_by_user_id,
-        appraised_by_name,
-        appraisedBy.role,
-        parseInt(grade_level_appraise),
-        parseInt(grade_level_management),
-        comment_appraise || null,
-        comment_management || null
-      ]
-    );
-
-    const appraisalId = result.lastID || result.id;
-
-    // Update user appraisal summary for the staff member
-    await updateUserAppraisalSummary(staff_id);
-
-    await logAction(req.user.id, 'create_appraisal', 'appraisals', appraisalId, {
-      staff_id,
-      appraised_by_user_id,
-      grade_level_appraise,
-      grade_level_management
-    }, req);
-
-    // Get created appraisal with full details
-    const createdAppraisal = await db.get(`
-      SELECT a.*,
-             staff.name as staff_full_name,
-             staff.email as staff_email,
-             appraised_by.name as appraised_by_full_name,
-             appraised_by.email as appraised_by_email
-      FROM appraisals a
-      LEFT JOIN users staff ON a.staff_id = staff.id
-      LEFT JOIN users appraised_by ON a.appraised_by_user_id = appraised_by.id
-      WHERE a.id = ?
-    `, [appraisalId]);
-
-    // Emit real-time events
-    if (global.io) {
-      // Notify the staff member who received the appraisal
-      global.io.emit('appraisal_received', {
-        id: appraisalId,
-        staff_id,
-        staff_name: staff.name,
-        appraised_by_user_id,
-        appraised_by_name: appraised_by_name,
-        grade_level_appraise,
-        grade_level_management,
-        created_at: createdAppraisal.created_at
-      });
-
-      // Notify all admins
-      global.io.emit('appraisal_created', {
-        id: appraisalId,
-        ...createdAppraisal
-      });
-
-      // Notify the user who created it
-      global.io.emit('appraisal_added_to_history', {
-        id: appraisalId,
-        staff_id,
-        staff_name: staff.name,
-        appraised_by_user_id,
-        appraised_by_name: appraised_by_name
-      });
+    // Validate department_name is not empty
+    if (!department_name || department_name.trim() === '') {
+      return res.status(400).json({ error: 'Department name is required' });
     }
 
-    res.status(201).json({
-      message: 'Appraisal created successfully',
-      appraisal: createdAppraisal
-    });
+    // Validate appraised_by_name is not empty
+    if (!appraised_by_name || appraised_by_name.trim() === '') {
+      return res.status(400).json({ error: 'Appraised by name is required' });
+    }
+
+    // Validate staff.name is not empty
+    if (!staff.name || staff.name.trim() === '') {
+      return res.status(400).json({ error: 'Staff name is required' });
+    }
+
+    // Ensure appraised_by_role is set (default to Staff if not found)
+    const appraisedByRole = appraisedBy.role || 'Staff';
+
+    // Create appraisal
+    try {
+      const result = await db.run(
+        `INSERT INTO appraisals 
+         (staff_id, staff_name, department_id, department_name, 
+          appraised_by_user_id, appraised_by_name, appraised_by_role,
+          grade_level_appraise, grade_level_management,
+          comment_appraise, comment_management)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          parseInt(staff_id),
+          staff.name.trim(),
+          department_id ? parseInt(department_id) : null,
+          department_name.trim(),
+          parseInt(appraised_by_user_id),
+          appraised_by_name.trim(),
+          appraisedByRole,
+          gradeAppraise,
+          gradeManagement,
+          comment_appraise ? comment_appraise.trim() : null,
+          comment_management ? comment_management.trim() : null
+        ]
+      );
+
+      const appraisalId = result.lastID || result.id;
+
+      // Update user appraisal summary for the staff member
+      await updateUserAppraisalSummary(parseInt(staff_id));
+
+      await logAction(req.user.id, 'create_appraisal', 'appraisals', appraisalId, {
+        staff_id: parseInt(staff_id),
+        appraised_by_user_id: parseInt(appraised_by_user_id),
+        grade_level_appraise: gradeAppraise,
+        grade_level_management: gradeManagement
+      }, req);
+
+      // Get created appraisal with full details
+      const createdAppraisal = await db.get(`
+        SELECT a.*,
+               staff.name as staff_full_name,
+               staff.email as staff_email,
+               appraised_by.name as appraised_by_full_name,
+               appraised_by.email as appraised_by_email
+        FROM appraisals a
+        LEFT JOIN users staff ON a.staff_id = staff.id
+        LEFT JOIN users appraised_by ON a.appraised_by_user_id = appraised_by.id
+        WHERE a.id = ?
+      `, [appraisalId]);
+
+      // Emit real-time events
+      if (global.io) {
+        // Notify the staff member who received the appraisal
+        global.io.emit('appraisal_received', {
+          id: appraisalId,
+          staff_id: parseInt(staff_id),
+          staff_name: staff.name,
+          appraised_by_user_id: parseInt(appraised_by_user_id),
+          appraised_by_name: appraised_by_name,
+          grade_level_appraise: gradeAppraise,
+          grade_level_management: gradeManagement,
+          created_at: createdAppraisal.created_at
+        });
+
+        // Notify all admins
+        global.io.emit('appraisal_created', {
+          id: appraisalId,
+          ...createdAppraisal
+        });
+
+        // Notify the user who created it
+        global.io.emit('appraisal_added_to_history', {
+          id: appraisalId,
+          staff_id: parseInt(staff_id),
+          staff_name: staff.name,
+          appraised_by_user_id: parseInt(appraised_by_user_id),
+          appraised_by_name: appraised_by_name
+        });
+      }
+
+      res.status(201).json({
+        message: 'Appraisal created successfully',
+        appraisal: createdAppraisal
+      });
+    } catch (dbError) {
+      console.error('Database error creating appraisal:', dbError);
+      // Provide more detailed error information
+      let errorMessage = 'Failed to create appraisal';
+      if (dbError.message) {
+        errorMessage += ': ' + dbError.message;
+      }
+      if (dbError.code) {
+        errorMessage += ` (Error code: ${dbError.code})`;
+      }
+      return res.status(500).json({ error: errorMessage });
+    }
   } catch (error) {
     console.error('Create appraisal error:', error);
-    res.status(500).json({ error: 'Failed to create appraisal: ' + error.message });
+    res.status(500).json({ error: 'Failed to create appraisal: ' + (error.message || 'Unknown error') });
   }
 });
 

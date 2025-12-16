@@ -220,13 +220,16 @@ async function updateAdminTarget(periodStart = null) {
     let totalProgress = 0;
     if (targetProgressExists) {
       const progressResult = await db.get(
-        `SELECT COALESCE(SUM(COALESCE(CAST(tp.amount AS NUMERIC), CAST(tp.progress_amount AS NUMERIC), 0)), 0) as total
+        `SELECT COALESCE(SUM(CASE 
+           WHEN tp.status = 'Approved' OR UPPER(TRIM(COALESCE(tp.status, ''))) = 'APPROVED' OR tp.status IS NULL OR tp.status = ''
+           THEN COALESCE(CAST(tp.amount AS NUMERIC), CAST(tp.progress_amount AS NUMERIC), 0)
+           ELSE 0
+         END), 0) as total
          FROM target_progress tp
          JOIN targets t ON tp.target_id = t.id
          WHERE t.user_id != ?
            AND t.status = ?
-           AND t.period_start = ?
-           AND (UPPER(TRIM(COALESCE(tp.status, ''))) = 'APPROVED' OR tp.status IS NULL OR tp.status = '')`,
+           AND t.period_start = ?`,
         [adminUser.id, 'Active', periodToUse]
       );
       totalProgress = parseFloat(progressResult?.total || 0) || 0;
@@ -712,11 +715,17 @@ router.put('/progress/:id/approve', authenticateToken, requireRole('Admin'), [
     console.log('All target_progress entries for target', target.id, ':', debugQuery);
     
     const approvedSum = await db.get(
-      `SELECT COALESCE(SUM(COALESCE(CAST(amount AS NUMERIC), CAST(progress_amount AS NUMERIC), 0)), 0) as total,
-              COUNT(*) as count
+      `SELECT COALESCE(SUM(CASE 
+         WHEN status = 'Approved' OR UPPER(TRIM(COALESCE(status, ''))) = 'APPROVED' OR status IS NULL OR status = ''
+         THEN COALESCE(CAST(amount AS NUMERIC), CAST(progress_amount AS NUMERIC), 0)
+         ELSE 0
+       END), 0) as total,
+       COUNT(CASE 
+         WHEN status = 'Approved' OR UPPER(TRIM(COALESCE(status, ''))) = 'APPROVED' OR status IS NULL OR status = ''
+         THEN 1
+       END) as count
        FROM target_progress
-       WHERE target_id = ?
-         AND (UPPER(TRIM(COALESCE(status, ''))) = 'APPROVED' OR status IS NULL OR status = '')`,
+       WHERE target_id = ?`,
       [target.id]
     );
     console.log('Approved entries sum for target', target.id, ':', approvedSum);

@@ -1076,8 +1076,17 @@ router.put('/:id/approve', authenticateToken, requireRole('Admin'), [
             });
             
             // When progress report is approved, target_progress should also be 'Approved'
-            // Otherwise, set to 'Pending' for admin approval
+            // Ensure status is exactly 'Approved' (capitalized)
             const progressStatus = status === 'Approved' ? 'Approved' : 'Pending';
+            
+            console.log('Creating target_progress entry with:', {
+              target_id: targetIdInt,
+              user_id: userIdInt,
+              progress_report_id: req.params.id,
+              amount: amountFloat,
+              status: progressStatus,
+              category: report.category
+            });
             
             const progressResult = await db.run(
               `INSERT INTO target_progress (target_id, user_id, progress_report_id, amount, category, status, transaction_date)
@@ -1088,7 +1097,7 @@ router.put('/:id/approve', authenticateToken, requireRole('Admin'), [
                 req.params.id,
                 amountFloat,
                 report.category || null,
-                progressStatus,
+                progressStatus, // Use exactly 'Approved' or 'Pending'
                 report.date || null
               ]
             );
@@ -1306,7 +1315,7 @@ router.put('/:id/approve', authenticateToken, requireRole('Admin'), [
             // Use calculateTargetMetrics from targets route for consistent calculations
             let fullMetrics;
             try {
-              const targetsModule = require('./targets');
+                const targetsModule = require('./targets');
               // Get fresh target data after progress entry update
               const freshTarget = await db.get('SELECT * FROM targets WHERE id = ?', [target.id]);
               if (freshTarget && targetsModule.calculateTargetMetrics) {

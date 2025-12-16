@@ -43,7 +43,7 @@ async function calculateTargetMetrics(target) {
     // Calculate total_progress (only approved entries)
     let totalProgress = 0;
     if (targetProgressExists) {
-      // Get all entries for debugging
+      // Get all entries for debugging and manual calculation
       const allEntries = await db.all(
         `SELECT id, amount, status, 
                 UPPER(TRIM(COALESCE(status, ''))) as normalized_status
@@ -53,20 +53,70 @@ async function calculateTargetMetrics(target) {
       );
       
       if (allEntries && allEntries.length > 0) {
-        console.log(`[calculateTargetMetrics] Target ${target.id} progress entries:`, allEntries);
+        console.log(`[calculateTargetMetrics] Target ${target.id} - Found ${allEntries.length} progress entries:`, 
+          allEntries.map(e => ({ id: e.id, amount: e.amount, status: e.status, normalized: e.normalized_status }))
+        );
+        
+        // Manual calculation to verify SQL query
+        let manualTotal = 0;
+        let approvedCount = 0;
+        for (const entry of allEntries) {
+          const entryStatus = entry.status || '';
+          const normalized = entry.normalized_status || '';
+          const isApproved = entryStatus === 'Approved' || 
+                           normalized === 'APPROVED' || 
+                           !entryStatus || 
+                           entryStatus.trim() === '';
+          
+          if (isApproved) {
+            manualTotal += parseFloat(entry.amount || 0);
+            approvedCount++;
+          }
+        }
+        console.log(`[calculateTargetMetrics] Target ${target.id} - Manual calculation: approved=${approvedCount}, total=${manualTotal}`);
       }
       
-      // Calculate sum of approved entries - check for 'Approved' first, then normalized
-      // SQLite and PostgreSQL may store status differently, so check both
-      // Also ensure target_id is properly cast for comparison
+      // Multiple query strategies to ensure we find approved entries
+      // Strategy 1: Direct status match
+      let query1 = await db.get(
+        `SELECT COALESCE(SUM(CAST(amount AS NUMERIC)), 0) as total
+         FROM target_progress
+         WHERE CAST(target_id AS INTEGER) = CAST(? AS INTEGER)
+           AND status = 'Approved'`,
+        [target.id]
+      );
+      let result1 = parseFloat(query1?.total || 0) || 0;
+      
+      // Strategy 2: Normalized match
+      let query2 = await db.get(
+        `SELECT COALESCE(SUM(CAST(amount AS NUMERIC)), 0) as total
+         FROM target_progress
+         WHERE CAST(target_id AS INTEGER) = CAST(? AS INTEGER)
+           AND UPPER(TRIM(COALESCE(status, ''))) = 'APPROVED'`,
+        [target.id]
+      );
+      let result2 = parseFloat(query2?.total || 0) || 0;
+      
+      // Strategy 3: NULL or empty status (treat as approved)
+      let query3 = await db.get(
+        `SELECT COALESCE(SUM(CAST(amount AS NUMERIC)), 0) as total
+         FROM target_progress
+         WHERE CAST(target_id AS INTEGER) = CAST(? AS INTEGER)
+           AND (status IS NULL OR status = '' OR TRIM(status) = '')`,
+        [target.id]
+      );
+      let result3 = parseFloat(query3?.total || 0) || 0;
+      
+      // Strategy 4: Combined CASE query
       const progressResult = await db.get(
         `SELECT COALESCE(SUM(CASE 
-           WHEN status = 'Approved' OR UPPER(TRIM(COALESCE(status, ''))) = 'APPROVED' OR status IS NULL OR status = ''
-           THEN COALESCE(CAST(amount AS NUMERIC), CAST(progress_amount AS NUMERIC), 0)
+           WHEN status = 'Approved' THEN CAST(amount AS NUMERIC)
+           WHEN UPPER(TRIM(COALESCE(status, ''))) = 'APPROVED' THEN CAST(amount AS NUMERIC)
+           WHEN status IS NULL OR status = '' OR TRIM(status) = '' THEN CAST(amount AS NUMERIC)
            ELSE 0
          END), 0) as total,
          COUNT(CASE 
-           WHEN status = 'Approved' OR UPPER(TRIM(COALESCE(status, ''))) = 'APPROVED' OR status IS NULL OR status = ''
+           WHEN status = 'Approved' OR UPPER(TRIM(COALESCE(status, ''))) = 'APPROVED' OR status IS NULL OR status = '' OR TRIM(status) = ''
            THEN 1
          END) as count
          FROM target_progress
@@ -76,14 +126,22 @@ async function calculateTargetMetrics(target) {
       
       totalProgress = parseFloat(progressResult?.total || 0) || 0;
       
+      console.log(`[calculateTargetMetrics] Target ${target.id} - Query results:`, {
+        direct_match: result1,
+        normalized_match: result2,
+        null_empty_match: result3,
+        combined_query: totalProgress,
+        approved_count: progressResult?.count || 0,
+        using_value: totalProgress
+      });
+      
+      // Use the highest result to ensure we don't miss anything
+      totalProgress = Math.max(result1, result2, result3, totalProgress);
+      
       // If no approved entries found but we have entries, log warning
       if (allEntries && allEntries.length > 0 && totalProgress === 0) {
-        console.warn(`[calculateTargetMetrics] WARNING: Target ${target.id} has ${allEntries.length} entries but total_progress is 0!`);
-        console.warn('Entry statuses:', allEntries.map(e => ({ id: e.id, amount: e.amount, status: e.status, normalized: e.normalized_status })));
-      }
-      
-      if (allEntries && allEntries.length > 0) {
-        console.log(`[calculateTargetMetrics] Target ${target.id} - Approved count: ${progressResult?.count || 0}, Total: ${totalProgress}`);
+        console.error(`[calculateTargetMetrics] ERROR: Target ${target.id} has ${allEntries.length} entries but total_progress is 0!`);
+        console.error('Entry details:', JSON.stringify(allEntries, null, 2));
       }
     }
 

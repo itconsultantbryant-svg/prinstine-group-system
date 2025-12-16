@@ -48,7 +48,7 @@ async function calculateTargetMetrics(target) {
         `SELECT id, amount, status, 
                 UPPER(TRIM(COALESCE(status, ''))) as normalized_status
          FROM target_progress
-         WHERE target_id = ?`,
+         WHERE CAST(target_id AS INTEGER) = CAST(? AS INTEGER)`,
         [target.id]
       );
       
@@ -58,6 +58,7 @@ async function calculateTargetMetrics(target) {
       
       // Calculate sum of approved entries - check for 'Approved' first, then normalized
       // SQLite and PostgreSQL may store status differently, so check both
+      // Also ensure target_id is properly cast for comparison
       const progressResult = await db.get(
         `SELECT COALESCE(SUM(CASE 
            WHEN status = 'Approved' OR UPPER(TRIM(COALESCE(status, ''))) = 'APPROVED' OR status IS NULL OR status = ''
@@ -69,11 +70,17 @@ async function calculateTargetMetrics(target) {
            THEN 1
          END) as count
          FROM target_progress
-         WHERE target_id = ?`,
+         WHERE CAST(target_id AS INTEGER) = CAST(? AS INTEGER)`,
         [target.id]
       );
       
       totalProgress = parseFloat(progressResult?.total || 0) || 0;
+      
+      // If no approved entries found but we have entries, log warning
+      if (allEntries && allEntries.length > 0 && totalProgress === 0) {
+        console.warn(`[calculateTargetMetrics] WARNING: Target ${target.id} has ${allEntries.length} entries but total_progress is 0!`);
+        console.warn('Entry statuses:', allEntries.map(e => ({ id: e.id, amount: e.amount, status: e.status, normalized: e.normalized_status })));
+      }
       
       if (allEntries && allEntries.length > 0) {
         console.log(`[calculateTargetMetrics] Target ${target.id} - Approved count: ${progressResult?.count || 0}, Total: ${totalProgress}`);
@@ -1141,11 +1148,27 @@ router.put('/:id', authenticateToken, requireRole('Admin'), [
             adjustment_amount: adjustmentNeeded,
             new_net_amount: manualNetAmount
           });
+
+          // Wait for database commit
+          await new Promise(resolve => setTimeout(resolve, 300));
+
+          // Verify the entry was created
+          const verifyAdjustment = await db.get(
+            'SELECT id, amount, status FROM target_progress WHERE target_id = ? AND category = ? ORDER BY id DESC LIMIT 1',
+            [updatedTarget.id, 'Manual Adjustment']
+          );
+          console.log('Verified manual adjustment entry:', verifyAdjustment);
         }
       }
 
-      // Recalculate metrics with the manual adjustment
+      // Recalculate metrics with the manual adjustment (after commit)
       metrics = await calculateTargetMetrics(updatedTarget);
+      
+      console.log('Metrics after manual override:', {
+        total_progress: metrics.total_progress,
+        net_amount: metrics.net_amount,
+        expected_net_amount: manualNetAmount
+      });
     }
 
     // Update admin target if this target changed (only if not admin's own target)

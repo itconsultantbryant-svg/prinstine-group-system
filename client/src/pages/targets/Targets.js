@@ -990,12 +990,12 @@ const Targets = () => {
                     </select>
                   </div>
 
-                  <div className="mb-3">
-                    <label className="form-label">Period Start</label>
+                      <div className="mb-3">
+                        <label className="form-label">Period Start</label>
                         <input
                           type="date"
                           className="form-control"
-                          value={editForm.period_start}
+                          value={editForm.period_start ? (typeof editForm.period_start === 'string' ? editForm.period_start.split('T')[0] : new Date(editForm.period_start).toISOString().split('T')[0]) : ''}
                           onChange={(e) => setEditForm({ ...editForm, period_start: e.target.value })}
                         />
                       </div>
@@ -1005,7 +1005,7 @@ const Targets = () => {
                         <input
                           type="date"
                           className="form-control"
-                          value={editForm.period_end}
+                          value={editForm.period_end ? (typeof editForm.period_end === 'string' ? editForm.period_end.split('T')[0] : new Date(editForm.period_end).toISOString().split('T')[0]) : ''}
                           onChange={(e) => setEditForm({ ...editForm, period_end: e.target.value })}
                         />
                       </div>

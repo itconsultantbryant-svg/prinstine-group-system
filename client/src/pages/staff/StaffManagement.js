@@ -58,17 +58,26 @@ const StaffManagement = () => {
   };
 
   const handleEdit = (staffMember) => {
+    if (!staffMember || (!staffMember.id && !staffMember.staff_id)) {
+      alert('Error: Invalid staff member data');
+      return;
+    }
     setEditingStaff(staffMember);
     setShowForm(true);
   };
 
   const handleDelete = async (id) => {
+    if (!id || id === 'null' || id === null) {
+      alert('Error: Invalid staff ID');
+      return;
+    }
     if (window.confirm('Are you sure you want to delete this staff member?')) {
       try {
         await api.delete(`/staff/${id}`);
         fetchStaff();
       } catch (error) {
-        alert('Error deleting staff member');
+        console.error('Delete staff error:', error);
+        alert(error.response?.data?.error || 'Error deleting staff member');
       }
     }
   };

@@ -466,10 +466,16 @@ router.post('/', authenticateToken, requireRole('Admin'), [
 router.put('/:id', authenticateToken, requireRole('Admin'), async (req, res) => {
   try {
     const staffId = req.params.id;
+    
+    // Validate staff ID
+    if (!staffId || staffId === 'null' || staffId === 'undefined') {
+      return res.status(400).json({ error: 'Invalid staff ID provided' });
+    }
+    
     const updates = req.body;
 
-    // Get staff record
-    const staff = await db.get('SELECT user_id FROM staff WHERE id = ?', [staffId]);
+    // Get staff record - try both id and staff_id
+    const staff = await db.get('SELECT user_id, id FROM staff WHERE id = ? OR staff_id = ?', [staffId, staffId]);
     if (!staff) {
       return res.status(404).json({ error: 'Staff member not found' });
     }
@@ -563,7 +569,9 @@ router.put('/:id', authenticateToken, requireRole('Admin'), async (req, res) => 
     });
 
     if (staffUpdates.length > 0) {
-      staffParams.push(staffId);
+      // Use the actual staff.id from the database, not the param (in case staff_id was used)
+      const actualStaffId = staff.id || staffId;
+      staffParams.push(actualStaffId);
       await db.run(`UPDATE staff SET ${staffUpdates.join(', ')}, updated_at = CURRENT_TIMESTAMP WHERE id = ?`, staffParams);
     }
 
@@ -580,14 +588,23 @@ router.put('/:id', authenticateToken, requireRole('Admin'), async (req, res) => 
 router.delete('/:id', authenticateToken, requireRole('Admin'), async (req, res) => {
   try {
     const staffId = req.params.id;
+    
+    // Validate staff ID
+    if (!staffId || staffId === 'null' || staffId === 'undefined') {
+      return res.status(400).json({ error: 'Invalid staff ID provided' });
+    }
 
-    const staff = await db.get('SELECT user_id FROM staff WHERE id = ?', [staffId]);
+    // Get staff record - try both id and staff_id
+    const staff = await db.get('SELECT user_id, id FROM staff WHERE id = ? OR staff_id = ?', [staffId, staffId]);
     if (!staff) {
       return res.status(404).json({ error: 'Staff member not found' });
     }
 
+    // Use the actual staff.id from the database
+    const actualStaffId = staff.id || staffId;
+    
     // Delete staff (cascade will delete user)
-    await db.run('DELETE FROM staff WHERE id = ?', [staffId]);
+    await db.run('DELETE FROM staff WHERE id = ?', [actualStaffId]);
 
     await logAction(req.user.id, 'delete_staff', 'staff', staffId, {}, req);
 

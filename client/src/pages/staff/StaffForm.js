@@ -138,12 +138,20 @@ const StaffForm = ({ staff, onClose }) => {
 
     try {
       if (staff) {
-        await api.put(`/staff/${staff.id}`, formData);
+        // Check if staff has a valid ID - use staff.id, staff_id, or user_id
+        const staffId = staff.id || staff.staff_id || staff.user_id;
+        if (!staffId || staffId === 'null' || staffId === null) {
+          setError('Invalid staff ID. Cannot update this staff member.');
+          setLoading(false);
+          return;
+        }
+        await api.put(`/staff/${staffId}`, formData);
       } else {
         await api.post('/staff', formData);
       }
       onClose();
     } catch (err) {
+      console.error('Save staff error:', err);
       setError(err.response?.data?.error || 'Failed to save staff member');
     } finally {
       setLoading(false);

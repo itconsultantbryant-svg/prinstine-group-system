@@ -81,7 +81,14 @@ const StaffList = ({ staff, onEdit, onDelete }) => {
                       </button>
                       <button
                         className="btn btn-sm btn-outline-danger"
-                        onClick={() => onDelete(member.id)}
+                        onClick={() => {
+                          const staffId = member.id || member.staff_id;
+                          if (staffId) {
+                            onDelete(staffId);
+                          } else {
+                            alert('Error: Staff ID not found');
+                          }
+                        }}
                       >
                         <i className="bi bi-trash me-1"></i>Delete
                       </button>

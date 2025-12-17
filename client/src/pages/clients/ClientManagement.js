@@ -34,7 +34,10 @@ const ClientManagement = () => {
     if (!user) return;
 
     const socket = getSocket();
-    if (!socket) return;
+    if (!socket || !socket.connected) {
+      console.warn('Socket not connected, skipping event listeners');
+      return;
+    }
 
     const handleClientCreated = async (newClient) => {
       console.log('Client created event received:', newClient);
@@ -73,14 +76,20 @@ const ClientManagement = () => {
     const handleClientDeleted = (deletedClient) => {
       console.log('Client deleted event received:', deletedClient);
       // Remove the deleted client from the state immediately
-      setClients(prevClients => 
-        prevClients.filter(client => 
-          client.id !== deletedClient.id && 
-          client.client_id !== deletedClient.client_id &&
-          !(deletedClient.id && client.id === deletedClient.id) &&
-          !(deletedClient.client_id && client.client_id === deletedClient.client_id)
-        )
-      );
+      // Use a more robust check to prevent duplicate removals
+      setClients(prevClients => {
+        const filtered = prevClients.filter(client => {
+          // Check multiple ID fields to ensure we don't remove the wrong client
+          const matchesId = deletedClient.id && client.id && client.id === deletedClient.id;
+          const matchesClientId = deletedClient.client_id && client.client_id && client.client_id === deletedClient.client_id;
+          return !matchesId && !matchesClientId;
+        });
+        // Only update if something actually changed
+        if (filtered.length !== prevClients.length) {
+          return filtered;
+        }
+        return prevClients;
+      });
     };
 
     socket.on('client_created', handleClientCreated);

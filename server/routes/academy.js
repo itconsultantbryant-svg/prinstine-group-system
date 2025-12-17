@@ -21,6 +21,64 @@ function generateCertificateId() {
   return 'CERT-' + Date.now().toString().slice(-8) + '-' + crypto.randomBytes(4).toString('hex').toUpperCase();
 }
 
+// Helper function to check if user is Academy staff (Academy or eLearning department)
+async function isAcademyStaff(user) {
+  if (!user) return false;
+  
+  // Admin always has access
+  if (user.role === 'Admin') {
+    return true;
+  }
+  
+  // Check if DepartmentHead manages Academy department
+  if (user.role === 'DepartmentHead') {
+    try {
+      const deptTableInfo = await db.all("PRAGMA table_info(departments)");
+      const deptColumnNames = deptTableInfo.map(col => col.name);
+      const hasHeadEmail = deptColumnNames.includes('head_email');
+      
+      let dept;
+      if (hasHeadEmail) {
+        dept = await db.get(
+          'SELECT name FROM departments WHERE manager_id = ? OR LOWER(TRIM(head_email)) = ?',
+          [user.id, (user.email || '').toLowerCase().trim()]
+        );
+      } else {
+        dept = await db.get(
+          'SELECT name FROM departments WHERE manager_id = ?',
+          [user.id]
+        );
+      }
+      
+      if (dept && dept.name) {
+        const deptName = dept.name.toLowerCase();
+        if (deptName.includes('academy') || deptName.includes('elearning') || deptName.includes('e-learning')) {
+          return true;
+        }
+      }
+    } catch (error) {
+      console.error('Error checking department head department:', error);
+    }
+  }
+  
+  // Check if Staff belongs to Academy department
+  if (user.role === 'Staff') {
+    try {
+      const staff = await db.get('SELECT department FROM staff WHERE user_id = ?', [user.id]);
+      if (staff && staff.department) {
+        const deptName = staff.department.toLowerCase();
+        if (deptName.includes('academy') || deptName.includes('elearning') || deptName.includes('e-learning')) {
+          return true;
+        }
+      }
+    } catch (error) {
+      console.error('Error checking staff department:', error);
+    }
+  }
+  
+  return false;
+}
+
 // ========== STUDENTS ==========
 
 // Get all students
@@ -38,12 +96,18 @@ router.get('/students', authenticateToken, async (req, res) => {
     if (req.user.role === 'Student') {
       query += ' AND s.user_id = ? AND s.approved = 1';
       params.push(req.user.id);
-    } else if (req.user.role !== 'Admin') {
-      // Non-admin users only see approved students
-      query += ' AND s.approved = 1';
-    } else if (pending_approval === 'true') {
-      // Admin can filter for pending approvals
-      query += ' AND s.approved = 0';
+    } else {
+      const academyStaff = await isAcademyStaff(req.user);
+      // Admin and Academy staff can see all students (including pending)
+      if (req.user.role === 'Admin' || academyStaff) {
+        if (pending_approval === 'true') {
+          query += ' AND s.approved = 0';
+        }
+        // Otherwise show all (no filter)
+      } else {
+        // Non-admin, non-academy users only see approved students
+        query += ' AND s.approved = 1';
+      }
     }
 
     if (status) {
@@ -113,22 +177,12 @@ router.post('/students', authenticateToken, requireRole('Admin', 'Instructor', '
       return res.status(400).json({ error: 'User with this email already exists' });
     }
 
-    // Check if user is Academy staff (Academy Head or authorized staff)
-    let isAcademyStaff = false;
-    if (req.user.role === 'Admin') {
-      isAcademyStaff = true;
-    } else if (req.user.role === 'DepartmentHead') {
-      const dept = await db.get(
-        'SELECT name FROM departments WHERE manager_id = ? OR LOWER(TRIM(head_email)) = ?',
-        [req.user.id, req.user.email.toLowerCase().trim()]
-      );
-      if (dept && dept.name.toLowerCase().includes('academy')) {
-        isAcademyStaff = true;
-      } else if (req.user.email.toLowerCase() === 'fwallace@prinstinegroup.org') {
-        isAcademyStaff = true;
-      }
-    } else if (req.user.email.toLowerCase() === 'jsieh@prinstinegroup.org' || req.user.email.toLowerCase() === 'cvulue@prinstinegroup.org') {
-      isAcademyStaff = true;
+    // Check if user is Academy staff
+    const academyStaff = await isAcademyStaff(req.user);
+    
+    // Only Admin and Academy staff can create students
+    if (!academyStaff && req.user.role !== 'Admin') {
+      return res.status(403).json({ error: 'Only Academy staff and Admins can create students' });
     }
 
     // If created by Academy staff (not admin), require admin approval
@@ -314,6 +368,17 @@ router.put('/students/:id', authenticateToken, requireRole('Admin', 'Instructor'
       return res.status(404).json({ error: 'Student not found' });
     }
 
+    // Check if user is Academy staff or Admin
+    const academyStaff = await isAcademyStaff(req.user);
+    if (!academyStaff && req.user.role !== 'Admin') {
+      return res.status(403).json({ error: 'Only Academy staff and Admins can edit students' });
+    }
+    
+    // Only Admin can change approved status
+    if (updates.approved !== undefined && req.user.role !== 'Admin') {
+      return res.status(403).json({ error: 'Only Admin can approve/reject students' });
+    }
+
     // Update user info if provided
     if (updates.name || updates.phone || updates.profile_image !== undefined) {
       const userUpdates = [];
@@ -402,12 +467,16 @@ router.get('/instructors', authenticateToken, async (req, res) => {
     `;
     const params = [];
 
-    if (req.user.role !== 'Admin') {
-      // Non-admin users only see approved instructors
+    const academyStaff = await isAcademyStaff(req.user);
+    // Admin and Academy staff can see all instructors (including pending)
+    if (req.user.role === 'Admin' || academyStaff) {
+      if (pending_approval === 'true') {
+        query += ' AND i.approved = 0';
+      }
+      // Otherwise show all (no filter)
+    } else {
+      // Non-admin, non-academy users only see approved instructors
       query += ' AND i.approved = 1';
-    } else if (pending_approval === 'true') {
-      // Admin can filter for pending approvals
-      query += ' AND i.approved = 0';
     }
 
     if (search) {
@@ -450,30 +519,12 @@ router.post('/instructors', authenticateToken, requireRole('Admin', 'DepartmentH
 
     const instructorId = generateInstructorId();
 
-    // Check if user is Academy staff (Academy Head or authorized staff)
-    // Academy Head: Francess (fwallace@prinstinegroup.org)
-    // Authorized staff: jsieh@prinstinegroup.org, Constantine (cvulue@prinstinegroup.org)
-    let isAcademyStaff = false;
-    if (req.user.role === 'Admin') {
-      isAcademyStaff = true;
-    } else if (req.user.role === 'DepartmentHead') {
-      const dept = await db.get(
-        'SELECT name FROM departments WHERE manager_id = ? OR LOWER(TRIM(head_email)) = ?',
-        [req.user.id, req.user.email.toLowerCase().trim()]
-      );
-      if (dept && dept.name.toLowerCase().includes('academy')) {
-        isAcademyStaff = true;
-      } else if (req.user.email.toLowerCase() === 'fwallace@prinstinegroup.org') {
-        // Explicitly allow Francess Wallace as Academy Head
-        isAcademyStaff = true;
-      }
-    } else if (req.user.email.toLowerCase() === 'jsieh@prinstinegroup.org' || req.user.email.toLowerCase() === 'cvulue@prinstinegroup.org') {
-      isAcademyStaff = true;
-    }
-
-    // If not Academy staff or Admin, deny access
-    if (!isAcademyStaff && req.user.role !== 'Admin') {
-      return res.status(403).json({ error: 'Only Academy Heads and Admins can create instructors' });
+    // Check if user is Academy staff
+    const academyStaff = await isAcademyStaff(req.user);
+    
+    // Only Admin and Academy staff can create instructors
+    if (!academyStaff && req.user.role !== 'Admin') {
+      return res.status(403).json({ error: 'Only Academy staff and Admins can create instructors' });
     }
 
     // If created by Academy staff (not admin), require admin approval
@@ -506,7 +557,7 @@ router.post('/instructors', authenticateToken, requireRole('Admin', 'DepartmentH
 });
 
 // Update instructor
-router.put('/instructors/:id', authenticateToken, requireRole('Admin'), async (req, res) => {
+router.put('/instructors/:id', authenticateToken, requireRole('Admin', 'DepartmentHead', 'Staff'), async (req, res) => {
   try {
     const instructorId = req.params.id;
     const updates = req.body;
@@ -514,6 +565,17 @@ router.put('/instructors/:id', authenticateToken, requireRole('Admin'), async (r
     const instructor = await db.get('SELECT user_id FROM instructors WHERE id = ?', [instructorId]);
     if (!instructor) {
       return res.status(404).json({ error: 'Instructor not found' });
+    }
+
+    // Check if user is Academy staff or Admin
+    const academyStaff = await isAcademyStaff(req.user);
+    if (!academyStaff && req.user.role !== 'Admin') {
+      return res.status(403).json({ error: 'Only Academy staff and Admins can edit instructors' });
+    }
+    
+    // Only Admin can change approved status
+    if (updates.approved !== undefined && req.user.role !== 'Admin') {
+      return res.status(403).json({ error: 'Only Admin can approve/reject instructors' });
     }
 
     // Update user info if provided
@@ -702,30 +764,17 @@ router.post('/courses', authenticateToken, requireRole('Admin', 'Instructor', 'D
       return res.status(400).json({ error: 'Course code already exists' });
     }
 
-    // Check if user is Academy staff (Academy Head or authorized staff)
-    // Academy Head: Francess (fwallace@prinstinegroup.org)
-    // Authorized staff: jsieh@prinstinegroup.org, Constantine (cvulue@prinstinegroup.org)
-    let isAcademyStaff = false;
-    if (req.user.role === 'Admin') {
-      isAcademyStaff = true;
-    } else if (req.user.role === 'DepartmentHead') {
-      const dept = await db.get(
-        'SELECT name FROM departments WHERE manager_id = ? OR LOWER(TRIM(head_email)) = ?',
-        [req.user.id, req.user.email.toLowerCase().trim()]
-      );
-      if (dept && dept.name.toLowerCase().includes('academy')) {
-        isAcademyStaff = true;
-      } else if (req.user.email.toLowerCase() === 'fwallace@prinstinegroup.org') {
-        // Explicitly allow Francess Wallace as Academy Head
-        isAcademyStaff = true;
-      }
-    } else if (req.user.email.toLowerCase() === 'jsieh@prinstinegroup.org' || req.user.email.toLowerCase() === 'cvulue@prinstinegroup.org') {
-      isAcademyStaff = true;
+    // Check if user is Academy staff
+    const academyStaff = await isAcademyStaff(req.user);
+    
+    // Only Admin and Academy staff can create courses
+    if (!academyStaff && req.user.role !== 'Admin') {
+      return res.status(403).json({ error: 'Only Academy staff and Admins can create courses' });
     }
 
     // If course_fee is provided and user is not admin, require admin approval
     const feeApproved = req.user.role === 'Admin' ? 1 : (course_fee ? 0 : null);
-    const createdBy = isAcademyStaff ? req.user.id : null;
+    const createdBy = academyStaff ? req.user.id : null;
 
     const result = await db.run(
       `INSERT INTO courses (course_code, title, description, instructor_id, mode, materials,
@@ -752,7 +801,7 @@ router.post('/courses', authenticateToken, requireRole('Admin', 'Instructor', 'D
 });
 
 // Update course
-router.put('/courses/:id', authenticateToken, requireRole('Admin', 'Instructor', 'DepartmentHead'), async (req, res) => {
+router.put('/courses/:id', authenticateToken, requireRole('Admin', 'Instructor', 'DepartmentHead', 'Staff'), async (req, res) => {
   try {
     const courseId = req.params.id;
     const updates = req.body;
@@ -760,6 +809,17 @@ router.put('/courses/:id', authenticateToken, requireRole('Admin', 'Instructor',
     const course = await db.get('SELECT id FROM courses WHERE id = ?', [courseId]);
     if (!course) {
       return res.status(404).json({ error: 'Course not found' });
+    }
+
+    // Check if user is Academy staff or Admin
+    const academyStaff = await isAcademyStaff(req.user);
+    if (!academyStaff && req.user.role !== 'Admin' && req.user.role !== 'Instructor') {
+      return res.status(403).json({ error: 'Only Academy staff, Instructors, and Admins can edit courses' });
+    }
+    
+    // Only Admin can change fee_approved status
+    if (updates.fee_approved !== undefined && req.user.role !== 'Admin') {
+      return res.status(403).json({ error: 'Only Admin can approve/reject course fees' });
     }
 
     // Check if course code is being changed and conflicts

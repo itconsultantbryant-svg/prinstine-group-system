@@ -113,9 +113,12 @@ const Targets = () => {
   const fetchUsers = async () => {
     try {
       const response = await api.get('/users');
-      // Filter to Staff and DepartmentHead for fund sharing, all non-Admin/Client for target creation
+      // Filter to only Staff and DepartmentHead (exclude Admin, Client, Partner, etc.)
       const allUsers = response.data.users || [];
-      setUsers(allUsers);
+      const filteredUsers = allUsers.filter(u => 
+        u.role === 'Staff' || u.role === 'DepartmentHead'
+      );
+      setUsers(filteredUsers);
     } catch (err) {
       console.error('Error fetching users:', err);
     }
@@ -857,8 +860,10 @@ const Targets = () => {
                       required
                     >
                       <option value="">Select Employee</option>
-                      {users.filter(u => u.role !== 'Admin' && u.role !== 'Client').map(user => (
-                        <option key={user.id} value={user.id}>{user.name} ({user.email})</option>
+                      {users
+                        .filter(u => u.role === 'Staff' || u.role === 'DepartmentHead')
+                        .map(user => (
+                          <option key={user.id} value={user.id}>{user.name} ({user.email}) - {user.role}</option>
                         ))}
                     </select>
                   </div>

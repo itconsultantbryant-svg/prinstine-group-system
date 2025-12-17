@@ -89,6 +89,10 @@ router.post('/send', authenticateToken, uploadCommunications.array('attachments'
     if (typeof userIds === 'string') {
       try {
         userIds = JSON.parse(userIds);
+        // Ensure it's an array
+        if (!Array.isArray(userIds)) {
+          userIds = [userIds];
+        }
       } catch (e) {
         // If not JSON, try splitting by comma
         userIds = userIds.split(',').map(id => parseInt(id.trim())).filter(id => !isNaN(id));
@@ -98,6 +102,17 @@ router.post('/send', authenticateToken, uploadCommunications.array('attachments'
     if (Array.isArray(userIds) && userIds.length === 0 && req.body.userIds) {
       userIds = Array.isArray(req.body.userIds) ? req.body.userIds : [req.body.userIds];
     }
+    
+    // Ensure userIds is always an array and contains valid numbers
+    if (!Array.isArray(userIds)) {
+      userIds = userIds ? [userIds] : [];
+    }
+    userIds = userIds.map(id => {
+      const numId = parseInt(id);
+      return isNaN(numId) ? null : numId;
+    }).filter(id => id !== null && id > 0);
+    
+    console.log('[Notifications] Parsed userIds:', userIds, 'from request body:', { ...req.body, userIds: '[REDACTED]' });
 
     // Handle file attachments
     let attachments = [];
@@ -179,13 +194,33 @@ router.post('/send', authenticateToken, uploadCommunications.array('attachments'
       } else {
         return res.status(403).json({ error: 'Only administrators, department heads, and staff can send notifications by role' });
       }
-    } else if (userIds && userIds.length > 0) {
+    } else if (userIds && Array.isArray(userIds) && userIds.length > 0) {
       // Send to specific users (any authenticated user can do this)
-      console.log(`Sending notification to ${userIds.length} user(s)`);
-      notificationIds = await sendBulkNotifications(userIds, title, message, type, link, senderId, attachments.length > 0 ? attachments : null);
+      console.log(`[Notifications] Sending to ${userIds.length} user(s):`, userIds);
+      
+      // Verify all user IDs exist and are active
+      const placeholders = userIds.map(() => '?').join(',');
+      const validUsers = await db.all(
+        `SELECT id FROM users WHERE id IN (${placeholders}) AND is_active = 1`,
+        userIds
+      );
+      const validUserIds = validUsers.map(u => u.id);
+      
+      if (validUserIds.length === 0) {
+        return res.status(400).json({ error: 'No valid active users found with the provided IDs' });
+      }
+      
+      if (validUserIds.length < userIds.length) {
+        const invalidIds = userIds.filter(id => !validUserIds.includes(id));
+        console.warn(`[Notifications] Some user IDs are invalid or inactive:`, invalidIds);
+      }
+      
+      notificationIds = await sendBulkNotifications(validUserIds, title, message, type, link, senderId, attachments.length > 0 ? attachments : null);
       return res.json({
         message: `Notification sent to ${notificationIds.length} user(s)`,
-        count: notificationIds.length
+        count: notificationIds.length,
+        requested: userIds.length,
+        valid: validUserIds.length
       });
     } else {
       return res.status(400).json({ error: 'Please specify userIds, role, or set sendToAll to true' });

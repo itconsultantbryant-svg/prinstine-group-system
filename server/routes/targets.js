@@ -1014,6 +1014,13 @@ router.post('/', authenticateToken, requireRole('Admin'), [
       return res.status(400).json({ error: 'Admin targets are automatically generated from staff and department head targets' });
     }
 
+    // Only allow creating targets for Staff and DepartmentHead (exclude Client, Partner, etc.)
+    if (user.role !== 'Staff' && user.role !== 'DepartmentHead') {
+      return res.status(400).json({ 
+        error: `Targets can only be created for Staff and DepartmentHead. ${user.role} role is not allowed.` 
+      });
+    }
+
     // Check if user already has an active target
     const existingTarget = await db.get(
       'SELECT id FROM targets WHERE user_id = ? AND status = ?',

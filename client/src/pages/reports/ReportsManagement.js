@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import api from '../../config/api';
 import { useAuth } from '../../hooks/useAuth';
-import { exportToPDF, exportToExcel, printContent, formatReportForExport, convertReportsToExcel } from '../../utils/exportUtils';
+import { exportToPDF, exportToExcel, exportToWord, printContent, formatReportForExport, convertReportsToExcel } from '../../utils/exportUtils';
 import jsPDF from 'jspdf';
 import * as XLSX from 'xlsx';
 
@@ -274,29 +274,10 @@ const ReportsManagement = () => {
     }
   };
 
-  const exportToWord = (report) => {
+  const exportToWordReport = (report) => {
     const content = formatReportForExport(report, report.reportType || 'department');
-    const htmlContent = `
-      <!DOCTYPE html>
-      <html>
-        <head>
-          <meta charset="utf-8">
-          <title>${report.title || 'Report'}</title>
-          <style>
-            body { font-family: Arial, sans-serif; padding: 20px; }
-            h1 { color: #333; border-bottom: 2px solid #333; }
-            pre { white-space: pre-wrap; font-family: Arial, sans-serif; }
-          </style>
-        </head>
-        <body>
-          <h1>${report.title || 'Report'}</h1>
-          <pre>${content}</pre>
-        </body>
-      </html>
-    `;
-    
-    const blob = new Blob(['\ufeff', htmlContent], { type: 'application/msword' });
-    const url = URL.createObjectURL(blob);
+    // Use centralized exportToWord from exportUtils
+    exportToWord(report.title || 'Report', content);
     const link = document.createElement('a');
     link.href = url;
     link.download = `${(report.title || 'Report').replace(/[^a-z0-9]/gi, '_')}_${new Date().toISOString().split('T')[0]}.doc`;

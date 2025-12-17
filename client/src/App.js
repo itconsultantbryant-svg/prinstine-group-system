@@ -49,6 +49,7 @@ import RequisitionHistory from './pages/requisitions/RequisitionHistory';
 import Targets from './pages/targets/Targets';
 import PettyCash from './pages/finance/PettyCash';
 import Appraisals from './pages/appraisals/Appraisals';
+import NotFound from './pages/NotFound';
 import './App.css';
 
 function App() {
@@ -111,6 +112,7 @@ function App() {
                           <Route path="/requisitions" element={<PrivateRoute><RequisitionHistory /></PrivateRoute>} />
                           <Route path="/targets" element={<PrivateRoute><Targets /></PrivateRoute>} />
                           <Route path="/profile" element={<Profile />} />
+                          <Route path="*" element={<NotFound />} />
                         </Routes>
                       </div>
                     </div>

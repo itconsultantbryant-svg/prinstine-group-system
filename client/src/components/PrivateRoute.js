@@ -28,7 +28,14 @@ const PrivateRoute = ({ children, requiredRole = null }) => {
   }
 
   if (requiredRole && user.role !== requiredRole) {
-    return <Navigate to="/dashboard" replace />;
+    // Redirect to appropriate dashboard based on user role
+    if (user.role === 'DepartmentHead') {
+      return <Navigate to="/department-dashboard" replace />;
+    } else if (user.role === 'Staff') {
+      return <Navigate to="/staff-dashboard" replace />;
+    } else {
+      return <Navigate to="/dashboard" replace />;
+    }
   }
 
   return children;

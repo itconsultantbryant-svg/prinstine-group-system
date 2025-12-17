@@ -278,13 +278,6 @@ const ReportsManagement = () => {
     const content = formatReportForExport(report, report.reportType || 'department');
     // Use centralized exportToWord from exportUtils
     exportToWord(report.title || 'Report', content);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `${(report.title || 'Report').replace(/[^a-z0-9]/gi, '_')}_${new Date().toISOString().split('T')[0]}.doc`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
   };
 
   const formatReportContent = (report) => {

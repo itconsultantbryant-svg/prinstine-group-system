@@ -178,6 +178,17 @@ router.delete('/:id', authenticateToken, requireRole('Admin'), async (req, res) 
       }
     }
 
+    // Prevent deleting users with active targets (targets will be auto-deleted via CASCADE)
+    const activeTargets = await db.get(
+      'SELECT COUNT(*) as count FROM targets WHERE user_id = ? AND status = ?',
+      [userId, 'Active']
+    );
+    if (activeTargets && activeTargets.count > 0) {
+      return res.status(400).json({ 
+        error: `Cannot delete user with ${activeTargets.count} active target(s). Please cancel or complete the targets first, or delete them manually.` 
+      });
+    }
+
     await db.run('DELETE FROM users WHERE id = ?', [userId]);
 
     await logAction(req.user.id, 'delete_user', 'users', userId, {}, req);

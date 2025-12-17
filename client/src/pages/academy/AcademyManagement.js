@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import api from '../../config/api';
 import { useAuth } from '../../hooks/useAuth';
+import { isAcademyStaff, canApproveAcademy } from '../../utils/academyUtils';
 import StudentForm from './StudentForm';
 import CourseForm from './CourseForm';
 import InstructorForm from './InstructorForm';
@@ -19,6 +20,11 @@ const AcademyManagement = () => {
   const [editingStudent, setEditingStudent] = useState(null);
   const [editingCourse, setEditingCourse] = useState(null);
   const [editingInstructor, setEditingInstructor] = useState(null);
+  
+  // Check if user is Academy staff (can add/edit/view)
+  const userIsAcademyStaff = isAcademyStaff(user);
+  // Check if user can approve (Admin only)
+  const userCanApprove = canApproveAcademy(user);
 
   useEffect(() => {
     if (activeTab === 'courses') {
@@ -189,17 +195,17 @@ const AcademyManagement = () => {
         <div className="col-12 d-flex justify-content-between align-items-center">
           <h1 className="h3 mb-0">Academy Management</h1>
           <div>
-            {activeTab === 'courses' && (user?.role === 'Admin' || user?.role === 'Instructor' || user?.role === 'DepartmentHead') && (
+            {activeTab === 'courses' && userIsAcademyStaff && (
               <button className="btn btn-primary me-2" onClick={handleAddCourse}>
                 <i className="bi bi-plus-circle me-2"></i>Add Course
               </button>
             )}
-            {activeTab === 'students' && (user?.role === 'Admin' || user?.role === 'Instructor' || user?.role === 'DepartmentHead') && (
+            {activeTab === 'students' && userIsAcademyStaff && (
               <button className="btn btn-primary me-2" onClick={handleAddStudent}>
                 <i className="bi bi-plus-circle me-2"></i>Add Student
               </button>
             )}
-            {activeTab === 'instructors' && (user?.role === 'Admin' || user?.role === 'DepartmentHead') && (
+            {activeTab === 'instructors' && userIsAcademyStaff && (
               <button className="btn btn-primary" onClick={handleAddInstructor}>
                 <i className="bi bi-plus-circle me-2"></i>Add Instructor
               </button>
@@ -217,7 +223,7 @@ const AcademyManagement = () => {
             Courses
           </button>
         </li>
-        {(user?.role === 'Admin' || user?.role === 'Instructor' || user?.role === 'DepartmentHead') && (
+        {userIsAcademyStaff && (
           <li className="nav-item">
             <button
               className={`nav-link ${activeTab === 'students' ? 'active' : ''}`}
@@ -227,7 +233,7 @@ const AcademyManagement = () => {
             </button>
           </li>
         )}
-        {(user?.role === 'Admin' || user?.role === 'DepartmentHead') && (
+        {userIsAcademyStaff && (
           <li className="nav-item">
             <button
               className={`nav-link ${activeTab === 'instructors' ? 'active' : ''}`}
@@ -292,12 +298,12 @@ const AcademyManagement = () => {
                           <Link to={`/academy/courses/view/${course.id}`} className="btn btn-sm btn-outline-info me-2">
                             <i className="bi bi-eye me-1"></i>View
                           </Link>
-                          {(user?.role === 'Admin' || user?.role === 'Instructor' || user?.role === 'DepartmentHead') && (
+                          {userIsAcademyStaff && (
                             <>
                               <button className="btn btn-sm btn-outline-primary me-2" onClick={() => handleEditCourse(course)}>
                                 <i className="bi bi-pencil me-1"></i>Edit
                               </button>
-                              {user?.role === 'Admin' && course.fee_approved === 0 && (
+                              {userCanApprove && course.fee_approved === 0 && (
                                 <>
                                   <button 
                                     className="btn btn-sm btn-outline-success me-2" 
@@ -377,12 +383,12 @@ const AcademyManagement = () => {
                           <Link to={`/academy/students/view/${student.id}`} className="btn btn-sm btn-outline-info me-2">
                             <i className="bi bi-eye me-1"></i>View
                           </Link>
-                          {(user?.role === 'Admin' || user?.role === 'Instructor' || user?.role === 'DepartmentHead') && (
+                          {userIsAcademyStaff && (
                             <>
                               <button className="btn btn-sm btn-outline-primary me-2" onClick={() => handleEditStudent(student)}>
                                 <i className="bi bi-pencil me-1"></i>Edit
                               </button>
-                              {user?.role === 'Admin' && student.approved === 0 && (
+                              {userCanApprove && student.approved === 0 && (
                                 <>
                                   <button 
                                     className="btn btn-sm btn-outline-success me-2" 
@@ -469,14 +475,12 @@ const AcademyManagement = () => {
                           <Link to={`/academy/instructors/view/${instructor.id}`} className="btn btn-sm btn-outline-info me-2">
                             <i className="bi bi-eye me-1"></i>View
                           </Link>
-                          {(user?.role === 'Admin' || user?.role === 'DepartmentHead') && (
+                          {userIsAcademyStaff && (
                             <>
-                              {user?.role === 'Admin' && (
-                                <button className="btn btn-sm btn-outline-primary me-2" onClick={() => handleEditInstructor(instructor)}>
-                                  <i className="bi bi-pencil me-1"></i>Edit
-                                </button>
-                              )}
-                              {user?.role === 'Admin' && instructor.approved === 0 && (
+                              <button className="btn btn-sm btn-outline-primary me-2" onClick={() => handleEditInstructor(instructor)}>
+                                <i className="bi bi-pencil me-1"></i>Edit
+                              </button>
+                              {userCanApprove && instructor.approved === 0 && (
                                 <>
                                   <button 
                                     className="btn btn-sm btn-outline-success me-2" 
@@ -492,11 +496,9 @@ const AcademyManagement = () => {
                                   </button>
                                 </>
                               )}
-                              {user?.role === 'Admin' && (
-                                <button className="btn btn-sm btn-outline-danger" onClick={() => handleDeleteInstructor(instructor.id)}>
-                                  <i className="bi bi-trash me-1"></i>Delete
-                                </button>
-                              )}
+                              <button className="btn btn-sm btn-outline-danger" onClick={() => handleDeleteInstructor(instructor.id)}>
+                                <i className="bi bi-trash me-1"></i>Delete
+                              </button>
                             </>
                           )}
                         </td>

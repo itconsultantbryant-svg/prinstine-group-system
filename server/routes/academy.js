@@ -31,6 +31,15 @@ async function isAcademyStaff(user) {
     return true;
   }
   
+  // Explicit email check for Assistant Academy Coordinator (cvulue@prinstinegroup.org)
+  // This ensures the user has full academy rights regardless of department field
+  const userEmail = (user.email || '').toLowerCase().trim();
+  const academyCoordinatorEmails = ['cvulue@prinstinegroup.org'];
+  if (academyCoordinatorEmails.includes(userEmail)) {
+    console.log(`[isAcademyStaff] User ${userEmail} identified as Assistant Academy Coordinator via email`);
+    return true;
+  }
+  
   // Check if DepartmentHead manages Academy department (Academy Department Head)
   if (user.role === 'DepartmentHead') {
     try {
@@ -42,7 +51,7 @@ async function isAcademyStaff(user) {
       if (hasHeadEmail) {
         dept = await db.get(
           'SELECT name FROM departments WHERE manager_id = ? OR LOWER(TRIM(head_email)) = ?',
-          [user.id, (user.email || '').toLowerCase().trim()]
+          [user.id, userEmail]
         );
       } else {
         dept = await db.get(
@@ -68,17 +77,19 @@ async function isAcademyStaff(user) {
   if (user.role === 'Staff') {
     try {
       const staff = await db.get('SELECT department, position FROM staff WHERE user_id = ?', [user.id]);
-      if (staff && staff.department) {
-        const deptName = staff.department.toLowerCase();
+      if (staff) {
+        const deptName = (staff.department || '').toLowerCase();
         const positionName = (staff.position || '').toLowerCase();
         
         // Check if staff is in Academy department
         if (deptName.includes('academy') || deptName.includes('elearning') || deptName.includes('e-learning')) {
+          console.log(`[isAcademyStaff] User ${userEmail} identified as Academy staff via department: ${staff.department}`);
           return true;
         }
         
         // Also check if position title indicates Academy Coordinator (additional check)
         if (positionName.includes('academy') && positionName.includes('coordinator')) {
+          console.log(`[isAcademyStaff] User ${userEmail} identified as Academy Coordinator via position: ${staff.position}`);
           return true;
         }
       }
@@ -752,7 +763,7 @@ router.get('/courses/:id', authenticateToken, async (req, res) => {
 });
 
 // Create course
-router.post('/courses', authenticateToken, requireRole('Admin', 'Instructor', 'DepartmentHead'), [
+router.post('/courses', authenticateToken, requireRole('Admin', 'Instructor', 'DepartmentHead', 'Staff'), [
   body('course_code').trim().notEmpty(),
   body('title').trim().notEmpty(),
   body('mode').isIn(['Online', 'In-person', 'Hybrid'])

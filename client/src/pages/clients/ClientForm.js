@@ -9,8 +9,10 @@ const ClientForm = ({ client, onClose }) => {
     phone: '',
     company_name: '',
     services_availed: [],
-    loan_amount: '',
-    loan_interest_rate: '',
+    services_fees: '',
+    payment_term: '',
+    loan_amount: '', // Keep for backward compatibility with existing clients
+    loan_interest_rate: '', // Keep for backward compatibility with existing clients
     status: 'Active',
     profile_image: '',
     category: '',
@@ -28,8 +30,10 @@ const ClientForm = ({ client, onClose }) => {
         phone: client.phone || '',
         company_name: client.company_name || '',
         services_availed: client.services_availed ? (typeof client.services_availed === 'string' ? JSON.parse(client.services_availed) : client.services_availed) : [],
-        loan_amount: client.loan_amount || '',
-        loan_interest_rate: client.loan_interest_rate || '',
+        services_fees: client.services_fees || client.loan_amount || '', // Use loan_amount as fallback for existing clients
+        payment_term: client.payment_term || '',
+        loan_amount: client.loan_amount || '', // Keep for backward compatibility
+        loan_interest_rate: client.loan_interest_rate || '', // Keep for backward compatibility
         status: client.status || 'Active',
         profile_image: client.profile_image || '',
         category: client.category || '',
@@ -97,8 +101,13 @@ const ClientForm = ({ client, onClose }) => {
         phone: formData.phone,
         company_name: formData.company_name,
         services_availed: formData.services_availed,
-        loan_amount: parseFloat(formData.loan_amount) || 0,
-        loan_interest_rate: parseFloat(formData.loan_interest_rate) || 0,
+        services_fees: parseFloat(formData.services_fees) || 0,
+        payment_term: formData.payment_term || null,
+        // Keep loan fields for backward compatibility (only send if editing existing client with loan data)
+        ...(client && (client.loan_amount || client.loan_interest_rate) ? {
+          loan_amount: parseFloat(formData.loan_amount) || client.loan_amount || 0,
+          loan_interest_rate: parseFloat(formData.loan_interest_rate) || client.loan_interest_rate || 0
+        } : {}),
         status: formData.status,
         profile_image: formData.profile_image,
         category: formData.category,
@@ -206,7 +215,7 @@ const ClientForm = ({ client, onClose }) => {
               <div className="mb-3">
                 <label className="form-label">Services Availed</label>
                 <div>
-                  {['Consultancy', 'Microfinance', 'Lending'].map(service => (
+                  {['Consultancy', 'Microfinance', 'Marketing', 'Academy'].map(service => (
                     <div key={service} className="form-check">
                       <input
                         className="form-check-input"
@@ -223,14 +232,35 @@ const ClientForm = ({ client, onClose }) => {
 
               <div className="row">
                 <div className="col-md-6 mb-3">
-                  <label className="form-label">Loan Amount</label>
-                  <input type="number" className="form-control" name="loan_amount" value={formData.loan_amount} onChange={handleChange} step="0.01" />
+                  <label className="form-label">Services Fees</label>
+                  <input type="number" className="form-control" name="services_fees" value={formData.services_fees} onChange={handleChange} step="0.01" min="0" />
                 </div>
                 <div className="col-md-6 mb-3">
-                  <label className="form-label">Loan Interest Rate (%)</label>
-                  <input type="number" className="form-control" name="loan_interest_rate" value={formData.loan_interest_rate} onChange={handleChange} step="0.01" />
+                  <label className="form-label">Payment Term</label>
+                  <select className="form-select" name="payment_term" value={formData.payment_term} onChange={handleChange}>
+                    <option value="">Select Payment Term</option>
+                    <option value="Monthly">Monthly</option>
+                    <option value="Quarterly">Quarterly</option>
+                    <option value="Annually">Annually</option>
+                  </select>
                 </div>
               </div>
+
+              {/* Show loan fields only when editing existing client with loan data (for backward compatibility) */}
+              {client && (client.loan_amount || client.loan_interest_rate) && (
+                <div className="row">
+                  <div className="col-md-6 mb-3">
+                    <label className="form-label">Loan Amount (Legacy)</label>
+                    <input type="number" className="form-control" name="loan_amount" value={formData.loan_amount} onChange={handleChange} step="0.01" />
+                    <small className="form-text text-muted">This field is for existing clients only</small>
+                  </div>
+                  <div className="col-md-6 mb-3">
+                    <label className="form-label">Loan Interest Rate (%) (Legacy)</label>
+                    <input type="number" className="form-control" name="loan_interest_rate" value={formData.loan_interest_rate} onChange={handleChange} step="0.01" />
+                    <small className="form-text text-muted">This field is for existing clients only</small>
+                  </div>
+                </div>
+              )}
 
               <div className="row">
                 <div className="col-md-4 mb-3">

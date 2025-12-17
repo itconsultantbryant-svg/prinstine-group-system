@@ -172,14 +172,28 @@ const ClientView = () => {
 
               <div className="row mb-3">
                 <div className="col-md-6">
-                  <strong>Loan Amount:</strong>
-                  <p>${client.loan_amount ? parseFloat(client.loan_amount).toLocaleString() : '0.00'}</p>
+                  <strong>Services Fees:</strong>
+                  <p>${client.services_fees ? parseFloat(client.services_fees).toLocaleString() : (client.loan_amount ? parseFloat(client.loan_amount).toLocaleString() : '0.00')}</p>
                 </div>
                 <div className="col-md-6">
-                  <strong>Loan Interest Rate:</strong>
-                  <p>{client.loan_interest_rate ? `${client.loan_interest_rate}%` : 'N/A'}</p>
+                  <strong>Payment Term:</strong>
+                  <p>{client.payment_term || (client.loan_interest_rate ? `${client.loan_interest_rate}% (Legacy)` : 'N/A')}</p>
                 </div>
               </div>
+
+              {/* Show loan fields only if they exist (for backward compatibility) */}
+              {(client.loan_amount || client.loan_interest_rate) && !client.services_fees && !client.payment_term && (
+                <div className="row mb-3">
+                  <div className="col-md-6">
+                    <strong>Loan Amount (Legacy):</strong>
+                    <p>${client.loan_amount ? parseFloat(client.loan_amount).toLocaleString() : '0.00'}</p>
+                  </div>
+                  <div className="col-md-6">
+                    <strong>Loan Interest Rate (Legacy):</strong>
+                    <p>{client.loan_interest_rate ? `${client.loan_interest_rate}%` : 'N/A'}</p>
+                  </div>
+                </div>
+              )}
 
               <div className="row mb-3">
                 <div className="col-md-6">

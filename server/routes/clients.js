@@ -149,6 +149,7 @@ router.post('/', authenticateToken, requireRole('Admin', 'Staff', 'DepartmentHea
 
     const {
       name, email, phone, company_name, services_availed,
+      services_fees, payment_term,
       loan_amount, loan_interest_rate, loan_repayment_schedule, status,
       category, progress_status
     } = req.body;
@@ -186,17 +187,59 @@ router.post('/', authenticateToken, requireRole('Admin', 'Staff', 'DepartmentHea
     const hasCategory = clientsColumnNames.includes('category');
     const hasProgressStatus = clientsColumnNames.includes('progress_status');
     const hasCreatedBy = clientsColumnNames.includes('created_by');
+    const hasServicesFees = clientsColumnNames.includes('services_fees');
+    const hasPaymentTerm = clientsColumnNames.includes('payment_term');
+    
+    // Add new columns if they don't exist (for backward compatibility)
+    try {
+      if (!hasServicesFees) {
+        await db.run('ALTER TABLE clients ADD COLUMN services_fees REAL DEFAULT 0');
+        console.log('Added services_fees column to clients table');
+      }
+      if (!hasPaymentTerm) {
+        await db.run('ALTER TABLE clients ADD COLUMN payment_term TEXT');
+        console.log('Added payment_term column to clients table');
+      }
+    } catch (error) {
+      // Column might already exist or error occurred, continue anyway
+      console.warn('Error adding columns (might already exist):', error.message);
+    }
     
     // Build INSERT query based on available columns
-    let insertColumns = ['user_id', 'client_id', 'company_name', 'services_availed', 'loan_amount',
-      'loan_interest_rate', 'loan_repayment_schedule', 'status'];
+    let insertColumns = ['user_id', 'client_id', 'company_name', 'services_availed', 'status'];
     let insertValues = [
       userId, clientId, company_name || null,
       services_availed && services_availed.length > 0 ? JSON.stringify(services_availed) : null,
-      loan_amount || 0, loan_interest_rate || 0,
-      loan_repayment_schedule ? JSON.stringify(loan_repayment_schedule) : null,
       status || 'Active'
     ];
+    
+    // Re-check columns after potential ALTER TABLE
+    const updatedTableInfo = await db.all("PRAGMA table_info(clients)");
+    const updatedColumnNames = updatedTableInfo.map(col => col.name);
+    
+    // Add new fields (preferred)
+    if (updatedColumnNames.includes('services_fees')) {
+      insertColumns.push('services_fees');
+      insertValues.push(services_fees || 0);
+    }
+    if (updatedColumnNames.includes('payment_term')) {
+      insertColumns.push('payment_term');
+      insertValues.push(payment_term || null);
+    }
+    
+    // Keep loan fields for backward compatibility (only if column exists and value provided)
+    if (updatedColumnNames.includes('loan_amount')) {
+      insertColumns.push('loan_amount');
+      insertValues.push(loan_amount || 0);
+    }
+    if (updatedColumnNames.includes('loan_interest_rate')) {
+      insertColumns.push('loan_interest_rate');
+      insertValues.push(loan_interest_rate || 0);
+    }
+    if (updatedColumnNames.includes('loan_repayment_schedule')) {
+      insertColumns.push('loan_repayment_schedule');
+      insertValues.push(loan_repayment_schedule ? JSON.stringify(loan_repayment_schedule) : null);
+    }
     
     if (hasCategory) {
       insertColumns.push('category');
@@ -237,9 +280,12 @@ router.post('/', authenticateToken, requireRole('Admin', 'Staff', 'DepartmentHea
         company_name: createdClient.company_name || company_name || name,
         email: createdClient.email || email,
         phone: createdClient.phone || phone,
+        services_fees: createdClient.services_fees || services_fees || 0,
+        payment_term: createdClient.payment_term || payment_term || null,
         category: createdClient.category || category || null,
         progress_status: createdClient.progress_status || progress_status || null,
         status: createdClient.status || status || 'Active',
+        services_availed: createdClient.services_availed || services_availed || null,
         profile_image: createdClient.profile_image || null,
         created_by: req.user.id,
         created_by_name: req.user.name || req.user.email
@@ -326,8 +372,25 @@ router.put('/:id', authenticateToken, requireRole('Admin', 'Staff', 'DepartmentH
       clientsColumnNames = clientsTableInfo.map(col => col.name);
     }
     
-    const allowedFields = ['company_name', 'services_availed', 'loan_amount', 'loan_interest_rate',
-      'loan_repayment_schedule', 'status', 'category', 'progress_status'];
+    // Add new columns if they don't exist (for backward compatibility)
+    try {
+      if (!clientsColumnNames.includes('services_fees')) {
+        await db.run('ALTER TABLE clients ADD COLUMN services_fees REAL DEFAULT 0');
+        clientsColumnNames.push('services_fees');
+        console.log('Added services_fees column to clients table');
+      }
+      if (!clientsColumnNames.includes('payment_term')) {
+        await db.run('ALTER TABLE clients ADD COLUMN payment_term TEXT');
+        clientsColumnNames.push('payment_term');
+        console.log('Added payment_term column to clients table');
+      }
+    } catch (error) {
+      // Column might already exist or error occurred, continue anyway
+      console.warn('Error adding columns (might already exist):', error.message);
+    }
+    
+    const allowedFields = ['company_name', 'services_availed', 'services_fees', 'payment_term',
+      'loan_amount', 'loan_interest_rate', 'loan_repayment_schedule', 'status', 'category', 'progress_status'];
     const updateFields = [];
     const params = [];
 
@@ -373,6 +436,8 @@ router.put('/:id', authenticateToken, requireRole('Admin', 'Staff', 'DepartmentH
         email: updatedClient.email,
         phone: updatedClient.phone,
         company_name: updatedClient.company_name,
+        services_fees: updatedClient.services_fees || updates.services_fees || null,
+        payment_term: updatedClient.payment_term || updates.payment_term || null,
         category: updatedClient.category,
         progress_status: updatedClient.progress_status,
         status: updatedClient.status,

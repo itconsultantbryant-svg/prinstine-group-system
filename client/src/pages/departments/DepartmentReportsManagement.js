@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import api from '../../config/api';
 import { exportToPDF, exportToExcel, printContent, formatReportForExport, convertReportsToExcel } from '../../utils/exportUtils';
+import { handleViewDocument, handleDownloadDocument, handlePrintDocument } from '../../utils/documentUtils';
 import './DepartmentReportsManagement.css';
 
 const getFileIcon = (mimetype) => {
@@ -594,24 +595,24 @@ const DepartmentReportsManagement = () => {
                             <div className="btn-group" role="group">
                               <button
                                 className="btn btn-sm btn-outline-info"
-                                onClick={() => window.open(file.url, '_blank')}
+                                onClick={() => handleViewDocument(file.url)}
                                 title="View"
                               >
                                 <i className="bi bi-eye"></i>
                               </button>
                               <button
                                 className="btn btn-sm btn-outline-primary"
-                                onClick={() => {
-                                  const link = document.createElement('a');
-                                  link.href = file.url;
-                                  link.download = file.originalName || file.filename || 'document';
-                                  document.body.appendChild(link);
-                                  link.click();
-                                  document.body.removeChild(link);
-                                }}
+                                onClick={() => handleDownloadDocument(file.url, file.originalName || file.filename)}
                                 title="Download"
                               >
                                 <i className="bi bi-download"></i>
+                              </button>
+                              <button
+                                className="btn btn-sm btn-outline-secondary"
+                                onClick={() => handlePrintDocument(file.url)}
+                                title="Print"
+                              >
+                                <i className="bi bi-printer"></i>
                               </button>
                               <button
                                 className="btn btn-sm btn-outline-secondary"

@@ -70,11 +70,26 @@ export const handleDownloadDocument = async (filePath, filename = null) => {
   }
   
   try {
-    const url = getAuthenticatedFileUrl(filePath, 'download');
+    // Extract path from URL if it's a full URL
+    let pathToUse = filePath;
+    if (filePath.startsWith('http://') || filePath.startsWith('https://')) {
+      try {
+        const urlObj = new URL(filePath);
+        pathToUse = urlObj.pathname;
+      } catch (e) {
+        // If URL parsing fails, try to extract path manually
+        const match = filePath.match(/\/uploads\/[^?]+/);
+        if (match) {
+          pathToUse = match[0];
+        }
+      }
+    }
+    
+    const url = getAuthenticatedFileUrl(pathToUse, 'download');
     
     // Extract filename from path if not provided
     if (!filename) {
-      const pathParts = filePath.split('/');
+      const pathParts = pathToUse.split('/');
       filename = pathParts[pathParts.length - 1] || 'document';
       // Decode filename if it's URL encoded
       try {
@@ -84,7 +99,7 @@ export const handleDownloadDocument = async (filePath, filename = null) => {
       }
     }
     
-    console.log('Starting download:', { filePath, filename, url });
+    console.log('Starting download:', { filePath, pathToUse, filename, url });
     
     // Method 1: Try using axios (more reliable with authentication)
     try {
@@ -93,13 +108,33 @@ export const handleDownloadDocument = async (filePath, filename = null) => {
         throw new Error('No authentication token found. Please log in again.');
       }
       
-      const response = await api.get(url, {
+      // Construct proper URL with token
+      const apiBaseUrl = getApiBaseUrl();
+      const downloadUrl = `${apiBaseUrl}/upload/download?path=${encodeURIComponent(pathToUse)}`;
+      
+      const response = await api.get(downloadUrl, {
         responseType: 'blob',
         timeout: 120000, // 2 minutes timeout for large files
         headers: {
-          'Authorization': `Bearer ${token}`
-        }
+          'Authorization': `Bearer ${token}`,
+          'Accept': '*/*'
+        },
+        validateStatus: (status) => status < 500 // Don't throw on 4xx errors
       });
+      
+      // Check if response is an error
+      if (response.status >= 400) {
+        // Try to parse error from blob
+        const errorText = await response.data.text();
+        let errorMessage = 'Failed to download file';
+        try {
+          const errorJson = JSON.parse(errorText);
+          errorMessage = errorJson.error || errorMessage;
+        } catch (e) {
+          errorMessage = errorText || `HTTP ${response.status}: ${response.statusText}`;
+        }
+        throw new Error(errorMessage);
+      }
       
       // Check if response is actually a blob (success) or error JSON
       let blob = response.data;
@@ -164,7 +199,14 @@ export const handleDownloadDocument = async (filePath, filename = null) => {
       
       // Method 2: Fallback to fetch
       const token = localStorage.getItem('token');
-      const response = await fetch(url, {
+      if (!token) {
+        throw new Error('No authentication token found. Please log in again.');
+      }
+      
+      const apiBaseUrl = getApiBaseUrl();
+      const downloadUrl = `${apiBaseUrl}/upload/download?path=${encodeURIComponent(pathToUse)}`;
+      
+      const response = await fetch(downloadUrl, {
         method: 'GET',
         headers: {
           'Authorization': `Bearer ${token}`,
@@ -300,21 +342,59 @@ export const handleDownloadDocument = async (filePath, filename = null) => {
  * @param {string} filePath - Path to the document
  */
 export const handlePrintDocument = (filePath) => {
-  // Use view endpoint which will display the file inline
-  const url = getAuthenticatedFileUrl(filePath, 'view');
-  const token = localStorage.getItem('token');
-  const urlWithToken = token ? `${url}&token=${token}` : url;
-  
-  // Open document in new window and print
-  const printWindow = window.open(urlWithToken, '_blank');
-  if (printWindow) {
-    printWindow.onload = () => {
+  try {
+    // Extract path from URL if it's a full URL
+    let pathToUse = filePath;
+    if (filePath.startsWith('http://') || filePath.startsWith('https://')) {
+      try {
+        const urlObj = new URL(filePath);
+        pathToUse = urlObj.pathname;
+      } catch (e) {
+        // If URL parsing fails, try to extract path manually
+        const match = filePath.match(/\/uploads\/[^?]+/);
+        if (match) {
+          pathToUse = match[0];
+        }
+      }
+    }
+    
+    // Use view endpoint which will display the file inline
+    const apiBaseUrl = getApiBaseUrl();
+    const viewUrl = `${apiBaseUrl}/upload/view?path=${encodeURIComponent(pathToUse)}`;
+    const token = localStorage.getItem('token');
+    const urlWithToken = token ? `${viewUrl}&token=${token}` : viewUrl;
+    
+    // Open document in new window and print
+    const printWindow = window.open(urlWithToken, '_blank');
+    if (printWindow) {
+      printWindow.onload = () => {
+        setTimeout(() => {
+          try {
+            printWindow.print();
+          } catch (printError) {
+            console.error('Print error:', printError);
+            alert('Failed to open print dialog. Please use your browser\'s print option from the opened window.');
+          }
+        }, 1500); // Increased delay to ensure document loads
+      };
+      
+      // Fallback: if onload doesn't fire, try after a longer delay
       setTimeout(() => {
-        printWindow.print();
-      }, 1000); // Increased delay to ensure document loads
-    };
-  } else {
-    alert('Please allow popups to print this document');
+        try {
+          if (printWindow && !printWindow.closed) {
+            printWindow.focus();
+            printWindow.print();
+          }
+        } catch (e) {
+          // Ignore errors
+        }
+      }, 3000);
+    } else {
+      alert('Please allow popups to print this document. You can also right-click the file link and select "Print" from the context menu.');
+    }
+  } catch (error) {
+    console.error('Print document error:', error);
+    alert('Failed to print document: ' + (error.message || 'Unknown error'));
   }
 };
 

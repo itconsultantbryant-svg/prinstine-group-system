@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import api from '../../config/api';
 import { useAuth } from '../../hooks/useAuth';
+import { handleViewDocument, handleDownloadDocument, handlePrintDocument } from '../../utils/documentUtils';
 
 const SupportTicketTracker = () => {
   const { user } = useAuth();
@@ -637,9 +638,33 @@ const SupportTicketTracker = () => {
                     <strong>Attachments:</strong>
                     <div className="mt-2">
                       {JSON.parse(selectedTicket.attachments || '[]').map((url, idx) => (
-                        <a key={idx} href={url} target="_blank" rel="noopener noreferrer" className="btn btn-sm btn-outline-primary me-2">
-                          <i className="bi bi-paperclip me-1"></i>Attachment {idx + 1}
-                        </a>
+                        <div key={idx} className="d-flex align-items-center mb-2">
+                          <i className="bi bi-paperclip me-2"></i>
+                          <span className="me-2">Attachment {idx + 1}</span>
+                          <div className="btn-group btn-group-sm">
+                            <button
+                              className="btn btn-outline-info"
+                              onClick={() => handleViewDocument(url)}
+                              title="View"
+                            >
+                              <i className="bi bi-eye"></i>
+                            </button>
+                            <button
+                              className="btn btn-outline-primary"
+                              onClick={() => handleDownloadDocument(url, `attachment_${idx + 1}`)}
+                              title="Download"
+                            >
+                              <i className="bi bi-download"></i>
+                            </button>
+                            <button
+                              className="btn btn-outline-secondary"
+                              onClick={() => handlePrintDocument(url)}
+                              title="Print"
+                            >
+                              <i className="bi bi-printer"></i>
+                            </button>
+                          </div>
+                        </div>
                       ))}
                     </div>
                   </div>

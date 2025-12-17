@@ -8,39 +8,44 @@ import * as XLSX from 'xlsx';
  * @param {string} filename - Output filename
  */
 export const exportToPDF = (title, content, filename = null) => {
-  const doc = new jsPDF();
-  
-  // Add title
-  doc.setFontSize(16);
-  doc.text(title, 10, 20);
-  
-  let y = 30;
-  const pageHeight = doc.internal.pageSize.height;
-  const margin = 10;
-  const maxWidth = 180;
-  
-  // Handle content
-  let lines = [];
-  if (typeof content === 'string') {
-    lines = doc.splitTextToSize(content, maxWidth);
-  } else if (Array.isArray(content)) {
-    lines = content;
-  } else {
-    lines = [String(content)];
-  }
-  
-  lines.forEach((line) => {
-    if (y > pageHeight - margin) {
-      doc.addPage();
-      y = margin;
+  try {
+    const doc = new jsPDF();
+    
+    // Add title
+    doc.setFontSize(16);
+    doc.text(title || 'Document', 10, 20);
+    
+    let y = 30;
+    const pageHeight = doc.internal.pageSize.height;
+    const margin = 10;
+    const maxWidth = 180;
+    
+    // Handle content
+    let lines = [];
+    if (typeof content === 'string') {
+      lines = doc.splitTextToSize(content, maxWidth);
+    } else if (Array.isArray(content)) {
+      lines = content;
+    } else {
+      lines = [String(content)];
     }
-    doc.setFontSize(10);
-    doc.text(line, margin, y);
-    y += 7;
-  });
-  
-  const outputFilename = filename || `${title.replace(/[^a-z0-9]/gi, '_')}_${new Date().toISOString().split('T')[0]}.pdf`;
-  doc.save(outputFilename);
+    
+    lines.forEach((line) => {
+      if (y > pageHeight - margin) {
+        doc.addPage();
+        y = margin;
+      }
+      doc.setFontSize(10);
+      doc.text(String(line || ''), margin, y);
+      y += 7;
+    });
+    
+    const outputFilename = filename || `${(title || 'document').replace(/[^a-z0-9]/gi, '_')}_${new Date().toISOString().split('T')[0]}.pdf`;
+    doc.save(outputFilename);
+  } catch (error) {
+    console.error('PDF export error:', error);
+    alert('Failed to export PDF: ' + (error.message || 'Unknown error'));
+  }
 };
 
 /**
@@ -50,12 +55,33 @@ export const exportToPDF = (title, content, filename = null) => {
  * @param {string} filename - Output filename
  */
 export const exportToExcel = (title, data, filename = null) => {
-  const ws = XLSX.utils.aoa_to_sheet(data);
-  const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, title || 'Sheet1');
-  
-  const outputFilename = filename || `${title.replace(/[^a-z0-9]/gi, '_')}_${new Date().toISOString().split('T')[0]}.xlsx`;
-  XLSX.writeFile(wb, outputFilename);
+  try {
+    if (!data || !Array.isArray(data) || data.length === 0) {
+      alert('No data to export');
+      return;
+    }
+    
+    // Ensure all rows are arrays
+    const sanitizedData = data.map(row => {
+      if (Array.isArray(row)) {
+        return row.map(cell => cell !== null && cell !== undefined ? String(cell) : '');
+      }
+      return [String(row)];
+    });
+    
+    const ws = XLSX.utils.aoa_to_sheet(sanitizedData);
+    const wb = XLSX.utils.book_new();
+    
+    // Limit sheet name to 31 characters (Excel limit)
+    const sheetName = (title || 'Sheet1').substring(0, 31).replace(/[\\\/\?\*\[\]]/g, '_');
+    XLSX.utils.book_append_sheet(wb, ws, sheetName);
+    
+    const outputFilename = filename || `${(title || 'export').replace(/[^a-z0-9]/gi, '_')}_${new Date().toISOString().split('T')[0]}.xlsx`;
+    XLSX.writeFile(wb, outputFilename);
+  } catch (error) {
+    console.error('Excel export error:', error);
+    alert('Failed to export Excel: ' + (error.message || 'Unknown error'));
+  }
 };
 
 /**
@@ -178,34 +204,83 @@ export const formatReportForExport = (report, type = 'department') => {
  * @param {string} filename - Output filename
  */
 export const exportToWord = (title, content, filename = null) => {
-  const htmlContent = `
-    <!DOCTYPE html>
-    <html>
-      <head>
-        <meta charset="utf-8">
-        <title>${title}</title>
-        <style>
-          body { font-family: Arial, sans-serif; padding: 20px; }
-          h1 { color: #333; border-bottom: 2px solid #333; }
-          pre { white-space: pre-wrap; font-family: Arial, sans-serif; }
-        </style>
-      </head>
-      <body>
-        <h1>${title}</h1>
-        <pre>${content}</pre>
-      </body>
-    </html>
-  `;
-  
-  const blob = new Blob(['\ufeff', htmlContent], { type: 'application/msword' });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement('a');
-  link.href = url;
-  link.download = filename || `${title.replace(/[^a-z0-9]/gi, '_')}_${new Date().toISOString().split('T')[0]}.doc`;
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
-  URL.revokeObjectURL(url);
+  try {
+    const sanitizedTitle = title || 'Document';
+    const sanitizedContent = content || '';
+    
+    const htmlContent = `
+      <!DOCTYPE html>
+      <html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40">
+        <head>
+          <meta charset="utf-8">
+          <meta name="ProgId" content="Word.Document">
+          <meta name="Generator" content="Microsoft Word">
+          <meta name="Originator" content="Microsoft Word">
+          <title>${sanitizedTitle}</title>
+          <!--[if gte mso 9]><xml>
+            <w:WordDocument>
+              <w:View>Print</w:View>
+              <w:Zoom>90</w:Zoom>
+              <w:DoNotOptimizeForBrowser/>
+            </w:WordDocument>
+          </xml><![endif]-->
+          <style>
+            @page {
+              size: 8.5in 11in;
+              margin: 1in 1.25in 1in 1.25in;
+            }
+            body { 
+              font-family: Arial, sans-serif; 
+              padding: 20px; 
+              line-height: 1.6;
+            }
+            h1 { 
+              color: #333; 
+              border-bottom: 2px solid #333;
+              padding-bottom: 10px;
+              margin-bottom: 20px;
+            }
+            pre { 
+              white-space: pre-wrap; 
+              font-family: Arial, sans-serif;
+              word-wrap: break-word;
+            }
+            p {
+              margin: 10px 0;
+            }
+          </style>
+        </head>
+        <body>
+          <h1>${sanitizedTitle}</h1>
+          <div>${typeof sanitizedContent === 'string' && sanitizedContent.includes('<') ? sanitizedContent : `<pre>${sanitizedContent}</pre>`}</div>
+        </body>
+      </html>
+    `;
+    
+    const blob = new Blob(['\ufeff', htmlContent], { 
+      type: 'application/msword' 
+    });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = filename || `${sanitizedTitle.replace(/[^a-z0-9]/gi, '_')}_${new Date().toISOString().split('T')[0]}.doc`;
+    link.style.display = 'none';
+    document.body.appendChild(link);
+    link.click();
+    
+    // Cleanup after a short delay
+    setTimeout(() => {
+      try {
+        document.body.removeChild(link);
+        URL.revokeObjectURL(url);
+      } catch (e) {
+        // Ignore cleanup errors
+      }
+    }, 100);
+  } catch (error) {
+    console.error('Word export error:', error);
+    alert('Failed to export Word document: ' + (error.message || 'Unknown error'));
+  }
 };
 
 /**

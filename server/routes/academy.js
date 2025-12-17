@@ -22,6 +22,7 @@ function generateCertificateId() {
 }
 
 // Helper function to check if user is Academy staff (Academy or eLearning department)
+// Includes: Admin, Academy Department Head, and Assistant Academy Coordinator (Staff in Academy department)
 async function isAcademyStaff(user) {
   if (!user) return false;
   
@@ -30,7 +31,7 @@ async function isAcademyStaff(user) {
     return true;
   }
   
-  // Check if DepartmentHead manages Academy department
+  // Check if DepartmentHead manages Academy department (Academy Department Head)
   if (user.role === 'DepartmentHead') {
     try {
       const deptTableInfo = await db.all("PRAGMA table_info(departments)");
@@ -61,13 +62,23 @@ async function isAcademyStaff(user) {
     }
   }
   
-  // Check if Staff belongs to Academy department
+  // Check if Staff belongs to Academy department (Assistant Academy Coordinator)
+  // Assistant Academy Coordinator = Staff member in Academy/eLearning department
+  // They have the same managing rights as Academy Department Head
   if (user.role === 'Staff') {
     try {
-      const staff = await db.get('SELECT department FROM staff WHERE user_id = ?', [user.id]);
+      const staff = await db.get('SELECT department, position FROM staff WHERE user_id = ?', [user.id]);
       if (staff && staff.department) {
         const deptName = staff.department.toLowerCase();
+        const positionName = (staff.position || '').toLowerCase();
+        
+        // Check if staff is in Academy department
         if (deptName.includes('academy') || deptName.includes('elearning') || deptName.includes('e-learning')) {
+          return true;
+        }
+        
+        // Also check if position title indicates Academy Coordinator (additional check)
+        if (positionName.includes('academy') && positionName.includes('coordinator')) {
           return true;
         }
       }

@@ -71,7 +71,8 @@ router.post('/send', authenticateToken, uploadCommunications.array('attachments'
   body('message').trim().notEmpty().withMessage('Message is required'),
   body('type').optional().isIn(['info', 'success', 'warning', 'error']).withMessage('Invalid notification type'),
   body('link').optional().trim(),
-  body('userIds').optional().isArray().withMessage('User IDs must be an array'),
+  // userIds can be a string (JSON) from FormData or an array - we'll parse it in the handler
+  body('userIds').optional(),
   body('role').optional().trim(),
   body('sendToAll').optional().isBoolean(),
   body('parentId').optional().isInt().withMessage('Parent ID must be an integer')
@@ -79,11 +80,17 @@ router.post('/send', authenticateToken, uploadCommunications.array('attachments'
   try {
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
+      console.error('[Notifications] Validation errors:', errors.array());
       return res.status(400).json({ errors: errors.array() });
     }
 
     let { title, message, type = 'info', link = null, userIds = [], role = null, sendToAll = false, parentId = null } = req.body;
     const senderId = req.user.id;
+    
+    // Convert sendToAll to boolean if it comes as string from FormData
+    if (typeof sendToAll === 'string') {
+      sendToAll = sendToAll === 'true' || sendToAll === '1';
+    }
     
     // Handle userIds if sent as JSON string (from FormData)
     if (typeof userIds === 'string') {
@@ -95,6 +102,7 @@ router.post('/send', authenticateToken, uploadCommunications.array('attachments'
         }
       } catch (e) {
         // If not JSON, try splitting by comma
+        console.log('[Notifications] Parsing userIds as comma-separated string:', userIds);
         userIds = userIds.split(',').map(id => parseInt(id.trim())).filter(id => !isNaN(id));
       }
     }
@@ -112,7 +120,7 @@ router.post('/send', authenticateToken, uploadCommunications.array('attachments'
       return isNaN(numId) ? null : numId;
     }).filter(id => id !== null && id > 0);
     
-    console.log('[Notifications] Parsed userIds:', userIds, 'from request body:', { ...req.body, userIds: '[REDACTED]' });
+    console.log('[Notifications] Parsed userIds:', userIds, 'from request body userIds type:', typeof req.body.userIds);
 
     // Handle file attachments
     let attachments = [];
@@ -223,10 +231,12 @@ router.post('/send', authenticateToken, uploadCommunications.array('attachments'
         valid: validUserIds.length
       });
     } else {
+      console.error('[Notifications] No valid send mode specified. userIds:', userIds, 'role:', role, 'sendToAll:', sendToAll);
       return res.status(400).json({ error: 'Please specify userIds, role, or set sendToAll to true' });
     }
   } catch (error) {
-    console.error('Send notification error:', error);
+    console.error('[Notifications] Send notification error:', error);
+    console.error('[Notifications] Error stack:', error.stack);
     res.status(500).json({ error: 'Failed to send notification: ' + error.message });
   }
 });

@@ -156,7 +156,12 @@ const Communications = () => {
       if (sendFormData.sendMode === 'role') {
         formData.append('role', sendFormData.selectedRole);
       } else {
-        formData.append('userIds', JSON.stringify(sendFormData.selectedUserIds));
+        // Ensure selectedUserIds is an array of numbers
+        const userIds = Array.isArray(sendFormData.selectedUserIds) 
+          ? sendFormData.selectedUserIds.map(id => parseInt(id)).filter(id => !isNaN(id))
+          : [];
+        console.log('[Communications] Sending to userIds:', userIds);
+        formData.append('userIds', JSON.stringify(userIds));
       }
 
       // Add attachments
@@ -164,9 +169,11 @@ const Communications = () => {
         formData.append('attachments', att.file);
       });
 
-      await api.post('/notifications/send', formData, {
+      const response = await api.post('/notifications/send', formData, {
         headers: { 'Content-Type': 'multipart/form-data' }
       });
+      
+      console.log('[Communications] Send response:', response.data);
       
       setSendFormData({
         title: '',
@@ -178,12 +185,17 @@ const Communications = () => {
       });
       setSendAttachments([]);
       setShowSendForm(false);
-      setSuccess('Communication sent successfully');
+      setSuccess(response.data?.message || 'Communication sent successfully');
       setTimeout(() => setSuccess(''), 3000);
       fetchNotifications();
     } catch (error) {
-      console.error('Error sending communication:', error);
-      setError(error.response?.data?.error || 'Failed to send communication');
+      console.error('[Communications] Error sending communication:', error);
+      console.error('[Communications] Error response:', error.response?.data);
+      const errorMessage = error.response?.data?.error 
+        || error.response?.data?.message 
+        || (error.response?.data?.errors && error.response.data.errors.map(e => e.msg).join(', '))
+        || 'Failed to send communication';
+      setError(errorMessage);
     } finally {
       setSending(false);
     }

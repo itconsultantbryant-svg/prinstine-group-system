@@ -32,7 +32,7 @@ const Communications = () => {
 
   useEffect(() => {
     fetchNotifications();
-    if (user && (user.role === 'Admin' || user.role === 'DepartmentHead' || user.role === 'Staff')) {
+    if (user) {
       fetchAvailableUsers();
       fetchAvailableRoles();
     }
@@ -93,11 +93,8 @@ const Communications = () => {
     try {
       const response = await api.get('/notifications/users');
       const usersData = response.data?.users || response.data || [];
-      // Filter users based on role: DepartmentHead and Staff can see Admin, DepartmentHead, and Staff
-      let filteredUsers = Array.isArray(usersData) ? usersData : [];
-      if (user?.role === 'DepartmentHead' || user?.role === 'Staff') {
-        filteredUsers = filteredUsers.filter(u => u.role === 'Admin' || u.role === 'DepartmentHead' || u.role === 'Staff');
-      }
+      // All users can see all other users for communication
+      const filteredUsers = Array.isArray(usersData) ? usersData : [];
       setAvailableUsers(filteredUsers);
     } catch (error) {
       console.error('Error fetching users:', error);
@@ -313,20 +310,18 @@ const Communications = () => {
             <h1 className="h3 mb-0">Communications</h1>
             <p className="text-muted">View and reply to your communications</p>
           </div>
-          {(user?.role === 'Admin' || user?.role === 'DepartmentHead') && (
-            <button
-              className="btn btn-primary"
-              onClick={() => setShowSendForm(!showSendForm)}
-            >
-              <i className="bi bi-plus-circle me-2"></i>
-              {showSendForm ? 'Cancel' : 'Send New Communication'}
-            </button>
-          )}
+          <button
+            className="btn btn-primary"
+            onClick={() => setShowSendForm(!showSendForm)}
+          >
+            <i className="bi bi-plus-circle me-2"></i>
+            {showSendForm ? 'Cancel' : 'Send New Communication'}
+          </button>
         </div>
       </div>
 
       {/* Send New Communication Form */}
-      {showSendForm && (user?.role === 'Admin' || user?.role === 'DepartmentHead' || user?.role === 'Staff') && (
+      {showSendForm && (
         <div className="card mb-4">
           <div className="card-header">
             <h5 className="mb-0">Send New Communication</h5>
@@ -445,11 +440,6 @@ const Communications = () => {
                       <option key={role} value={role}>{role}</option>
                     ))}
                   </select>
-                  {user?.role === 'DepartmentHead' && (
-                    <small className="text-muted d-block mt-1">
-                      Department Heads can send to Admin and DepartmentHead roles
-                    </small>
-                  )}
                 </div>
               )}
 
@@ -467,16 +457,14 @@ const Communications = () => {
                     }}
                     required
                   >
-                    {availableUsers
-                      .filter(u => user?.role === 'Admin' || (user?.role === 'DepartmentHead' && (u.role === 'Admin' || u.role === 'DepartmentHead')))
-                      .map(user => (
-                        <option key={user.id} value={user.id}>
-                          {user.name} ({user.email}) - {user.role}
-                        </option>
-                      ))}
+                    {availableUsers.map(user => (
+                      <option key={user.id} value={user.id}>
+                        {user.name} ({user.email}) - {user.role}
+                      </option>
+                    ))}
                   </select>
                   <small className="text-muted d-block mt-1">
-                    Hold Ctrl/Cmd to select multiple users
+                    Hold Ctrl/Cmd (Windows/Linux) or Cmd (Mac) to select multiple users
                   </small>
                 </div>
               )}

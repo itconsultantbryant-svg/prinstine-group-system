@@ -2078,6 +2078,61 @@ async function initializeDatabase() {
       }
     }
     
+    // Run academy cohorts migration if needed
+    if (fs.existsSync(academyCohortsPath)) {
+      const cohortsTableExists = await db.get("SELECT name FROM sqlite_master WHERE type='table' AND name='cohorts'");
+      if (!cohortsTableExists) {
+        console.log('Creating cohorts table...');
+        const cohortsSQL = fs.readFileSync(academyCohortsPath, 'utf8');
+        const cohortsStatements = cohortsSQL.split(';').filter(s => s.trim().length > 0);
+        for (const statement of cohortsStatements) {
+          if (statement.trim()) {
+            try {
+              await db.run(statement);
+            } catch (stmtError) {
+              // Ignore errors for columns that already exist
+              if (!stmtError.message.includes('duplicate column') && 
+                  !stmtError.message.includes('already exists') &&
+                  !stmtError.message.includes('no such table')) {
+                console.error('Error executing cohorts migration statement:', stmtError.message);
+              }
+            }
+          }
+        }
+        console.log('✓ Cohorts table and columns created');
+      } else {
+        // Table exists, but check if students table has cohort_id and period columns
+        const studentsInfo = await db.all("PRAGMA table_info(students)");
+        const studentsColumns = studentsInfo.map(col => col.name);
+        const needsCohortColumn = !studentsColumns.includes('cohort_id');
+        const needsPeriodColumn = !studentsColumns.includes('period');
+        
+        if (needsCohortColumn || needsPeriodColumn) {
+          console.log('Adding cohort_id and period columns to students table...');
+          if (needsCohortColumn) {
+            try {
+              await db.run('ALTER TABLE students ADD COLUMN cohort_id INTEGER');
+              console.log('✓ Added cohort_id to students table');
+            } catch (e) {
+              if (!e.message.includes('duplicate column') && !e.message.includes('already exists')) {
+                console.error('Error adding cohort_id to students:', e.message);
+              }
+            }
+          }
+          if (needsPeriodColumn) {
+            try {
+              await db.run('ALTER TABLE students ADD COLUMN period TEXT');
+              console.log('✓ Added period to students table');
+            } catch (e) {
+              if (!e.message.includes('duplicate column') && !e.message.includes('already exists')) {
+                console.error('Error adding period to students:', e.message);
+              }
+            }
+          }
+        }
+      }
+    }
+    
     console.log('=== Column verification complete ===\n');
   } catch (error) {
     console.error('Database initialization error:', error);

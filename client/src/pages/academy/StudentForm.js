@@ -13,15 +13,19 @@ const StudentForm = ({ student, onClose }) => {
     enrollment_date: '',
     status: 'Active',
     profile_image: '',
-    courses_enrolled: []
+    courses_enrolled: [],
+    cohort_id: '',
+    period: ''
   });
   const [courses, setCourses] = useState([]);
+  const [cohorts, setCohorts] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [uploadingImage, setUploadingImage] = useState(false);
 
   useEffect(() => {
     fetchCourses();
+    fetchCohorts();
     if (student) {
       // Parse courses_enrolled if it's a JSON string
       let coursesEnrolled = [];
@@ -43,7 +47,9 @@ const StudentForm = ({ student, onClose }) => {
         enrollment_date: student.enrollment_date ? student.enrollment_date.split('T')[0] : '',
         status: student.status || 'Active',
         profile_image: student.profile_image || '',
-        courses_enrolled: coursesEnrolled
+        courses_enrolled: coursesEnrolled,
+        cohort_id: student.cohort_id || '',
+        period: student.period || ''
       });
     }
   }, [student]);
@@ -54,6 +60,15 @@ const StudentForm = ({ student, onClose }) => {
       setCourses(response.data.courses || []);
     } catch (error) {
       console.error('Error fetching courses:', error);
+    }
+  };
+
+  const fetchCohorts = async () => {
+    try {
+      const response = await api.get('/academy/cohorts?status=Active');
+      setCohorts(response.data.cohorts || []);
+    } catch (error) {
+      console.error('Error fetching cohorts:', error);
     }
   };
 
@@ -121,7 +136,9 @@ const StudentForm = ({ student, onClose }) => {
         enrollment_date: formData.enrollment_date,
         status: formData.status,
         profile_image: formData.profile_image,
-        courses_enrolled: formData.courses_enrolled
+        courses_enrolled: formData.courses_enrolled,
+        cohort_id: formData.cohort_id || null,
+        period: formData.period || null
       };
 
       if (student) {
@@ -195,6 +212,41 @@ const StudentForm = ({ student, onClose }) => {
               <div className="mb-3">
                 <label className="form-label">Enrollment Date</label>
                 <input type="date" className="form-control" name="enrollment_date" value={formData.enrollment_date} onChange={handleChange} />
+              </div>
+
+              <div className="mb-3">
+                <label className="form-label">Cohort</label>
+                <select
+                  className="form-select"
+                  name="cohort_id"
+                  value={formData.cohort_id}
+                  onChange={handleChange}
+                >
+                  <option value="">Select a cohort (optional)</option>
+                  {cohorts.map((cohort) => (
+                    <option key={cohort.id} value={cohort.id}>
+                      {cohort.name} {cohort.code ? `(${cohort.code})` : ''}
+                    </option>
+                  ))}
+                </select>
+                <small className="form-text text-muted">
+                  Assign this student to a cohort
+                </small>
+              </div>
+
+              <div className="mb-3">
+                <label className="form-label">Period</label>
+                <input
+                  type="text"
+                  className="form-control"
+                  name="period"
+                  value={formData.period}
+                  onChange={handleChange}
+                  placeholder="e.g., Q1 2024, Fall 2024, 2024-2025"
+                />
+                <small className="form-text text-muted">
+                  Academic period or term (optional)
+                </small>
               </div>
 
               <div className="mb-3">

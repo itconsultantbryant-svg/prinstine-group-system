@@ -106,11 +106,12 @@ async function isAcademyStaff(user) {
 // Get all students
 router.get('/students', authenticateToken, async (req, res) => {
   try {
-    const { status, search, pending_approval } = req.query;
+    const { status, search, pending_approval, cohort_id, period, start_date, end_date } = req.query;
     let query = `
-      SELECT s.*, u.name, u.email, u.phone, u.profile_image
+      SELECT s.*, u.name, u.email, u.phone, u.profile_image, c.name as cohort_name, c.code as cohort_code
       FROM students s
       JOIN users u ON s.user_id = u.id
+      LEFT JOIN cohorts c ON s.cohort_id = c.id
       WHERE 1=1
     `;
     const params = [];
@@ -135,6 +136,22 @@ router.get('/students', authenticateToken, async (req, res) => {
     if (status) {
       query += ' AND s.status = ?';
       params.push(status);
+    }
+    if (cohort_id) {
+      query += ' AND s.cohort_id = ?';
+      params.push(cohort_id);
+    }
+    if (period) {
+      query += ' AND s.period = ?';
+      params.push(period);
+    }
+    if (start_date) {
+      query += ' AND s.enrollment_date >= ?';
+      params.push(start_date);
+    }
+    if (end_date) {
+      query += ' AND s.enrollment_date <= ?';
+      params.push(end_date);
     }
     if (search) {
       query += ' AND (u.name LIKE ? OR u.email LIKE ? OR s.student_id LIKE ?)';
@@ -191,7 +208,7 @@ router.post('/students', authenticateToken, requireRole('Admin', 'Instructor', '
       return res.status(400).json({ errors: errors.array() });
     }
 
-    const { email, name, username, phone, enrollment_date, courses_enrolled, password, status, profile_image } = req.body;
+    const { email, name, username, phone, enrollment_date, courses_enrolled, password, status, profile_image, cohort_id, period } = req.body;
 
     // Check if user exists
     const existingUser = await db.get('SELECT id FROM users WHERE email = ?', [email]);
@@ -224,14 +241,16 @@ router.post('/students', authenticateToken, requireRole('Admin', 'Instructor', '
     const studentId = generateStudentId();
 
     const result = await db.run(
-      `INSERT INTO students (user_id, student_id, enrollment_date, courses_enrolled, status, approved, created_by, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+      `INSERT INTO students (user_id, student_id, enrollment_date, courses_enrolled, status, approved, cohort_id, period, created_by, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
       [
         userResult.lastID, studentId,
         enrollment_date || new Date().toISOString().split('T')[0],
         courses_enrolled ? JSON.stringify(courses_enrolled) : null,
         status || 'Active',
         approved,
+        cohort_id || null,
+        period || null,
         req.user.id
       ]
     );
@@ -433,6 +452,14 @@ router.put('/students/:id', authenticateToken, requireRole('Admin', 'Instructor'
     if (updates.status !== undefined) {
       studentUpdates.push('status = ?');
       studentParams.push(updates.status);
+    }
+    if (updates.cohort_id !== undefined) {
+      studentUpdates.push('cohort_id = ?');
+      studentParams.push(updates.cohort_id || null);
+    }
+    if (updates.period !== undefined) {
+      studentUpdates.push('period = ?');
+      studentParams.push(updates.period || null);
     }
     if (updates.courses_enrolled !== undefined) {
       studentUpdates.push('courses_enrolled = ?');
@@ -1129,6 +1156,204 @@ router.put('/instructors/:id/approve', authenticateToken, requireRole('Admin'), 
   } catch (error) {
     console.error('Approve instructor error:', error);
     res.status(500).json({ error: 'Failed to process approval' });
+  }
+});
+
+// ========== COHORTS ==========
+
+// Generate unique cohort code
+function generateCohortCode(name, startDate) {
+  const year = startDate ? new Date(startDate).getFullYear() : new Date().getFullYear();
+  const month = startDate ? new Date(startDate).getMonth() + 1 : new Date().getMonth() + 1;
+  const nameAbbr = name.substring(0, 3).toUpperCase();
+  return `${nameAbbr}-${year}-${String(month).padStart(2, '0')}`;
+}
+
+// Get all cohorts
+router.get('/cohorts', authenticateToken, async (req, res) => {
+  try {
+    const { status, search } = req.query;
+    let query = 'SELECT c.*, u.name as created_by_name FROM cohorts c LEFT JOIN users u ON c.created_by = u.id WHERE 1=1';
+    const params = [];
+
+    if (status) {
+      query += ' AND c.status = ?';
+      params.push(status);
+    }
+    if (search) {
+      query += ' AND (c.name LIKE ? OR c.code LIKE ? OR c.period LIKE ?)';
+      const searchTerm = `%${search}%`;
+      params.push(searchTerm, searchTerm, searchTerm);
+    }
+
+    query += ' ORDER BY c.start_date DESC, c.created_at DESC';
+
+    const cohorts = await db.all(query, params);
+    res.json({ cohorts });
+  } catch (error) {
+    console.error('Get cohorts error:', error);
+    res.status(500).json({ error: 'Failed to fetch cohorts' });
+  }
+});
+
+// Get single cohort
+router.get('/cohorts/:id', authenticateToken, async (req, res) => {
+  try {
+    const cohort = await db.get(
+      'SELECT c.*, u.name as created_by_name FROM cohorts c LEFT JOIN users u ON c.created_by = u.id WHERE c.id = ?',
+      [req.params.id]
+    );
+
+    if (!cohort) {
+      return res.status(404).json({ error: 'Cohort not found' });
+    }
+
+    res.json({ cohort });
+  } catch (error) {
+    console.error('Get cohort error:', error);
+    res.status(500).json({ error: 'Failed to fetch cohort' });
+  }
+});
+
+// Create cohort
+router.post('/cohorts', authenticateToken, requireRole('Admin', 'Instructor', 'DepartmentHead', 'Staff'), [
+  body('name').trim().notEmpty().withMessage('Cohort name is required'),
+  body('start_date').optional().isISO8601().withMessage('Invalid start date format'),
+  body('end_date').optional().isISO8601().withMessage('Invalid end date format'),
+  body('period').optional().trim(),
+  body('status').optional().isIn(['Active', 'Completed', 'Cancelled']).withMessage('Invalid status')
+], async (req, res) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({ errors: errors.array() });
+    }
+
+    const { name, start_date, end_date, period, description, status } = req.body;
+
+    // Check if user is Academy staff
+    const academyStaff = await isAcademyStaff(req.user);
+    if (!academyStaff && req.user.role !== 'Admin') {
+      return res.status(403).json({ error: 'Only Academy staff and Admins can create cohorts' });
+    }
+
+    // Generate unique code
+    const code = generateCohortCode(name, start_date);
+
+    // Check if code already exists, append number if needed
+    let finalCode = code;
+    let counter = 1;
+    while (true) {
+      const existing = await db.get('SELECT id FROM cohorts WHERE code = ?', [finalCode]);
+      if (!existing) break;
+      finalCode = `${code}-${counter}`;
+      counter++;
+    }
+
+    const result = await db.run(
+      `INSERT INTO cohorts (name, code, start_date, end_date, period, description, status, created_by, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+      [name, finalCode, start_date || null, end_date || null, period || null, description || null, status || 'Active', req.user.id]
+    );
+
+    const cohort = await db.get(
+      'SELECT c.*, u.name as created_by_name FROM cohorts c LEFT JOIN users u ON c.created_by = u.id WHERE c.id = ?',
+      [result.lastID]
+    );
+
+    await logAction(req.user.id, 'create_cohort', 'academy', result.lastID, { name, code: finalCode }, req);
+
+    res.status(201).json({ cohort, message: 'Cohort created successfully' });
+  } catch (error) {
+    console.error('Create cohort error:', error);
+    res.status(500).json({ error: 'Failed to create cohort' });
+  }
+});
+
+// Update cohort
+router.put('/cohorts/:id', authenticateToken, requireRole('Admin', 'Instructor', 'DepartmentHead', 'Staff'), async (req, res) => {
+  try {
+    const cohortId = req.params.id;
+    const updates = req.body;
+
+    const cohort = await db.get('SELECT id FROM cohorts WHERE id = ?', [cohortId]);
+    if (!cohort) {
+      return res.status(404).json({ error: 'Cohort not found' });
+    }
+
+    // Check if user is Academy staff or Admin
+    const academyStaff = await isAcademyStaff(req.user);
+    if (!academyStaff && req.user.role !== 'Admin') {
+      return res.status(403).json({ error: 'Only Academy staff and Admins can edit cohorts' });
+    }
+
+    const allowedUpdates = ['name', 'start_date', 'end_date', 'period', 'description', 'status'];
+    const updateFields = [];
+    const updateParams = [];
+
+    for (const field of allowedUpdates) {
+      if (updates[field] !== undefined) {
+        updateFields.push(`${field} = ?`);
+        updateParams.push(updates[field]);
+      }
+    }
+
+    if (updateFields.length === 0) {
+      return res.status(400).json({ error: 'No valid fields to update' });
+    }
+
+    updateFields.push('updated_at = CURRENT_TIMESTAMP');
+    updateParams.push(cohortId);
+
+    await db.run(
+      `UPDATE cohorts SET ${updateFields.join(', ')} WHERE id = ?`,
+      updateParams
+    );
+
+    await logAction(req.user.id, 'update_cohort', 'academy', cohortId, updates, req);
+
+    const updatedCohort = await db.get(
+      'SELECT c.*, u.name as created_by_name FROM cohorts c LEFT JOIN users u ON c.created_by = u.id WHERE c.id = ?',
+      [cohortId]
+    );
+
+    res.json({ cohort: updatedCohort, message: 'Cohort updated successfully' });
+  } catch (error) {
+    console.error('Update cohort error:', error);
+    res.status(500).json({ error: 'Failed to update cohort' });
+  }
+});
+
+// Delete cohort
+router.delete('/cohorts/:id', authenticateToken, requireRole('Admin', 'Instructor', 'DepartmentHead', 'Staff'), async (req, res) => {
+  try {
+    const cohortId = req.params.id;
+
+    const cohort = await db.get('SELECT id FROM cohorts WHERE id = ?', [cohortId]);
+    if (!cohort) {
+      return res.status(404).json({ error: 'Cohort not found' });
+    }
+
+    // Check if user is Academy staff or Admin
+    const academyStaff = await isAcademyStaff(req.user);
+    if (!academyStaff && req.user.role !== 'Admin') {
+      return res.status(403).json({ error: 'Only Academy staff and Admins can delete cohorts' });
+    }
+
+    // Check if cohort has students
+    const studentsCount = await db.get('SELECT COUNT(*) as count FROM students WHERE cohort_id = ?', [cohortId]);
+    if (studentsCount && studentsCount.count > 0) {
+      return res.status(400).json({ error: `Cannot delete cohort. ${studentsCount.count} student(s) are assigned to this cohort.` });
+    }
+
+    await db.run('DELETE FROM cohorts WHERE id = ?', [cohortId]);
+
+    await logAction(req.user.id, 'delete_cohort', 'academy', cohortId, { name: cohort.name }, req);
+
+    res.json({ message: 'Cohort deleted successfully' });
+  } catch (error) {
+    console.error('Delete cohort error:', error);
+    res.status(500).json({ error: 'Failed to delete cohort' });
   }
 });
 

@@ -209,6 +209,8 @@ async function initializeDatabase() {
     const targetsPath = path.join(__dirname, 'database/migrations/021_targets_system.sql');
     const departmentHeadFieldsPath = path.join(__dirname, '../database/migrations/022_add_department_head_fields.sql');
     const addMissingColumnsPath = path.join(__dirname, 'database/migrations/023_add_missing_columns.sql');
+    const appraisalsSystemPath = path.join(__dirname, 'database/migrations/024_appraisals_system.sql');
+    const academyCohortsPath = path.join(__dirname, 'database/migrations/025_academy_cohorts.sql');
     
     if (tables.length === 0) {
       console.log('Initializing database schema...');

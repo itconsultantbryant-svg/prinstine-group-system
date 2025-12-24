@@ -278,40 +278,44 @@ const AcademyManagement = () => {
       <div className="row mb-4">
         <div className="col-12 d-flex justify-content-between align-items-center">
           <h1 className="h3 mb-0">Academy Management</h1>
-          <div>
-            {activeTab === 'courses' && userIsAcademyStaff && (
-              <button className="btn btn-primary me-2" onClick={handleAddCourse}>
-                <i className="bi bi-plus-circle me-2"></i>Add Course
-              </button>
-            )}
-            {activeTab === 'students' && userIsAcademyStaff && (
-              <button className="btn btn-primary me-2" onClick={handleAddStudent}>
-                <i className="bi bi-plus-circle me-2"></i>Add Student
-              </button>
-            )}
-            {activeTab === 'instructors' && userIsAcademyStaff && (
-              <button className="btn btn-primary me-2" onClick={handleAddInstructor}>
-                <i className="bi bi-plus-circle me-2"></i>Add Instructor
-              </button>
-            )}
-            {activeTab === 'cohorts' && userIsAcademyStaff && (
-              <button className="btn btn-primary" onClick={handleAddCohort}>
-                <i className="bi bi-plus-circle me-2"></i>Add Cohort
-              </button>
-            )}
-          </div>
+          {(user?.role === 'Admin' || userIsAcademyStaff) && (
+            <div>
+              {activeTab === 'courses' && (
+                <button className="btn btn-primary me-2" onClick={handleAddCourse}>
+                  <i className="bi bi-plus-circle me-2"></i>Add Course
+                </button>
+              )}
+              {activeTab === 'students' && (
+                <button className="btn btn-primary me-2" onClick={handleAddStudent}>
+                  <i className="bi bi-plus-circle me-2"></i>Add Student
+                </button>
+              )}
+              {activeTab === 'instructors' && (
+                <button className="btn btn-primary me-2" onClick={handleAddInstructor}>
+                  <i className="bi bi-plus-circle me-2"></i>Add Instructor
+                </button>
+              )}
+              {activeTab === 'cohorts' && (
+                <button className="btn btn-primary" onClick={handleAddCohort}>
+                  <i className="bi bi-plus-circle me-2"></i>Add Cohort
+                </button>
+              )}
+            </div>
+          )}
         </div>
       </div>
 
       <ul className="nav nav-tabs mb-4">
-        <li className="nav-item">
-          <button
-            className={`nav-link ${activeTab === 'courses' ? 'active' : ''}`}
-            onClick={() => setActiveTab('courses')}
-          >
-            Courses
-          </button>
-        </li>
+        {(user?.role === 'Admin' || userIsAcademyStaff || user?.role === 'Instructor' || user?.role === 'Student') && (
+          <li className="nav-item">
+            <button
+              className={`nav-link ${activeTab === 'courses' ? 'active' : ''}`}
+              onClick={() => setActiveTab('courses')}
+            >
+              Courses
+            </button>
+          </li>
+        )}
         {userIsAcademyStaff && (
           <li className="nav-item">
             <button
@@ -344,11 +348,13 @@ const AcademyManagement = () => {
         )}
       </ul>
 
-      {activeTab === 'courses' && (
+      {((user?.role === 'Admin' || userIsAcademyStaff || user?.role === 'Instructor' || user?.role === 'Student')) && activeTab === 'courses' && (
         <div className="card">
           <div className="card-body">
             {courses.length === 0 ? (
-              <div className="text-center text-muted">No courses found. Click "Add Course" to create one.</div>
+              <div className="text-center text-muted">
+                {userIsAcademyStaff ? 'No courses found. Click "Add Course" to create one.' : 'No courses found.'}
+              </div>
             ) : (
               <div className="table-responsive">
                 <table className="table table-hover">

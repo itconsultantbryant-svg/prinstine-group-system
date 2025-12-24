@@ -168,6 +168,41 @@ router.get('/me', authenticateToken, async (req, res) => {
       return res.status(404).json({ error: 'User not found' });
     }
 
+    // For Staff users, get department and position from staff table
+    if (user.role === 'Staff') {
+      const staff = await db.get(
+        'SELECT department, position FROM staff WHERE user_id = ?',
+        [user.id]
+      );
+      if (staff) {
+        user.department = staff.department || null;
+        user.position = staff.position || null;
+      }
+    }
+
+    // For DepartmentHead users, get department name from departments table
+    if (user.role === 'DepartmentHead') {
+      const deptTableInfo = await db.all("PRAGMA table_info(departments)");
+      const deptColumnNames = deptTableInfo.map(col => col.name);
+      const hasHeadEmail = deptColumnNames.includes('head_email');
+      
+      let dept;
+      if (hasHeadEmail) {
+        dept = await db.get(
+          'SELECT name FROM departments WHERE manager_id = ? OR LOWER(TRIM(head_email)) = ?',
+          [user.id, user.email.toLowerCase().trim()]
+        );
+      } else {
+        dept = await db.get(
+          'SELECT name FROM departments WHERE manager_id = ?',
+          [user.id]
+        );
+      }
+      if (dept && dept.name) {
+        user.department = dept.name;
+      }
+    }
+
     res.json({ user });
   } catch (error) {
     console.error('Get user error:', error);

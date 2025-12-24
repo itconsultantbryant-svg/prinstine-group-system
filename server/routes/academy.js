@@ -21,8 +21,8 @@ function generateCertificateId() {
   return 'CERT-' + Date.now().toString().slice(-8) + '-' + crypto.randomBytes(4).toString('hex').toUpperCase();
 }
 
-// Helper function to check if user is Academy staff (Academy or eLearning department)
-// Includes: Admin, Academy Department Head, and Assistant Academy Coordinator (Staff in Academy department)
+// Helper function to check if user is Academy staff (Academy, eLearning, or Marketing department)
+// Includes: Admin, Academy Department Head, Marketing Department Head, and Assistant Academy Coordinator (Staff in Academy department)
 async function isAcademyStaff(user) {
   if (!user) return false;
   
@@ -62,7 +62,7 @@ async function isAcademyStaff(user) {
       
       if (dept && dept.name) {
         const deptName = dept.name.toLowerCase();
-        if (deptName.includes('academy') || deptName.includes('elearning') || deptName.includes('e-learning')) {
+        if (deptName.includes('academy') || deptName.includes('elearning') || deptName.includes('e-learning') || deptName.includes('marketing')) {
           return true;
         }
       }

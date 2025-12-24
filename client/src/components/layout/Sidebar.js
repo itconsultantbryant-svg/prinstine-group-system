@@ -187,10 +187,10 @@ const Sidebar = () => {
       return hasFinanceAccess; // For others, check if they have finance access
     }
     
-    // Hide Academy section for Finance, Client Engagement, and Audit Department Heads (but allow for Staff with academy access)
+    // Hide Academy section for Finance, Client Engagement, Audit, and ICT/IT Department Heads (but allow for Staff with academy access)
     if (item.path === '/academy' && user?.role === 'DepartmentHead') {
-      // Check if user is Finance, Client Engagement, or Audit Department Head (by email)
-      const excludedEmails = ['jtokpa@prinstinegroup.org', 'cmoore@prinstinegroup.org', 'wbuku@prinstinegroup.org'];
+      // Check if user is Finance, Client Engagement, Audit, or ICT/IT Department Head (by email)
+      const excludedEmails = ['jtokpa@prinstinegroup.org', 'cmoore@prinstinegroup.org', 'wbuku@prinstinegroup.org', 'eksackie@prinstinegroup.org'];
       if (excludedEmails.includes(user?.email?.toLowerCase())) {
         return false;
       }

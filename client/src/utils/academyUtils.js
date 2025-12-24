@@ -24,11 +24,11 @@ export const isAcademyStaff = (user) => {
     return true;
   }
   
-  // Check if DepartmentHead manages Academy department
+  // Check if DepartmentHead manages Academy or Marketing department
   if (user.role === 'DepartmentHead') {
-    // Check if user's department includes academy/elearning
+    // Check if user's department includes academy/elearning or marketing
     const department = (user.department || '').toLowerCase();
-    if (department.includes('academy') || department.includes('elearning') || department.includes('e-learning')) {
+    if (department.includes('academy') || department.includes('elearning') || department.includes('e-learning') || department.includes('marketing')) {
       return true;
     }
   }

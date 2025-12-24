@@ -40,6 +40,22 @@ const AcademyManagement = () => {
   // Check if user can approve (Admin only)
   const userCanApprove = canApproveAcademy(user);
 
+  // Refetch data when user object changes (in case department/position are loaded later)
+  useEffect(() => {
+    if (user && (userIsAcademyStaff || user.role === 'Admin')) {
+      // If we're on a tab, refetch that data
+      if (activeTab === 'courses') {
+        fetchCourses();
+      } else if (activeTab === 'students') {
+        fetchStudents();
+      } else if (activeTab === 'instructors') {
+        fetchInstructors();
+      } else if (activeTab === 'cohorts') {
+        fetchCohorts();
+      }
+    }
+  }, [user?.department, user?.position, user?.email]);
+
   useEffect(() => {
     if (activeTab === 'courses') {
       fetchCourses();
@@ -61,10 +77,12 @@ const AcademyManagement = () => {
 
   const fetchCourses = async () => {
     try {
+      setLoading(true);
       const response = await api.get('/academy/courses');
-      setCourses(response.data.courses);
+      setCourses(response.data.courses || []);
     } catch (error) {
       console.error('Error fetching courses:', error);
+      setCourses([]);
     } finally {
       setLoading(false);
     }
@@ -263,16 +281,7 @@ const AcademyManagement = () => {
     }
   };
 
-  if (loading) {
-    return (
-      <div className="d-flex justify-content-center">
-        <div className="spinner-border text-primary" role="status">
-          <span className="visually-hidden">Loading...</span>
-        </div>
-      </div>
-    );
-  }
-
+  // Don't block rendering - show content with individual loading states per tab
   return (
     <div className="container-fluid">
       <div className="row mb-4">
@@ -348,12 +357,18 @@ const AcademyManagement = () => {
         )}
       </ul>
 
-      {((user?.role === 'Admin' || userIsAcademyStaff || user?.role === 'Instructor' || user?.role === 'Student')) && activeTab === 'courses' && (
+      {activeTab === 'courses' && (
         <div className="card">
           <div className="card-body">
-            {courses.length === 0 ? (
+            {loading ? (
+              <div className="text-center">
+                <div className="spinner-border text-primary" role="status">
+                  <span className="visually-hidden">Loading...</span>
+                </div>
+              </div>
+            ) : courses.length === 0 ? (
               <div className="text-center text-muted">
-                {userIsAcademyStaff ? 'No courses found. Click "Add Course" to create one.' : 'No courses found.'}
+                {(user?.role === 'Admin' || userIsAcademyStaff) ? 'No courses found. Click "Add Course" to create one.' : 'No courses found.'}
               </div>
             ) : (
               <div className="table-responsive">
@@ -443,6 +458,14 @@ const AcademyManagement = () => {
       {activeTab === 'students' && (
         <div className="card">
           <div className="card-body">
+            {loading ? (
+              <div className="text-center">
+                <div className="spinner-border text-primary" role="status">
+                  <span className="visually-hidden">Loading...</span>
+                </div>
+              </div>
+            ) : (
+              <>
             {/* Filters */}
             <div className="row mb-3">
               <div className="col-md-2">
@@ -601,6 +624,8 @@ const AcademyManagement = () => {
                 </tbody>
               </table>
             </div>
+              </>
+            )}
           </div>
         </div>
       )}
@@ -619,7 +644,13 @@ const AcademyManagement = () => {
       {activeTab === 'instructors' && (
         <div className="card">
           <div className="card-body">
-            {instructors.length === 0 ? (
+            {loading ? (
+              <div className="text-center">
+                <div className="spinner-border text-primary" role="status">
+                  <span className="visually-hidden">Loading...</span>
+                </div>
+              </div>
+            ) : instructors.length === 0 ? (
               <div className="text-center text-muted">No instructors found. Click "Add Instructor" to create one.</div>
             ) : (
               <div className="table-responsive">
@@ -734,7 +765,13 @@ const AcademyManagement = () => {
       {activeTab === 'cohorts' && (
         <div className="card">
           <div className="card-body">
-            {cohorts.length === 0 ? (
+            {loading ? (
+              <div className="text-center">
+                <div className="spinner-border text-primary" role="status">
+                  <span className="visually-hidden">Loading...</span>
+                </div>
+              </div>
+            ) : cohorts.length === 0 ? (
               <div className="text-center text-muted">No cohorts found. Click "Add Cohort" to create one.</div>
             ) : (
               <div className="table-responsive">

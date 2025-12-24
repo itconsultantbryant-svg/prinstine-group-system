@@ -325,35 +325,33 @@ const AcademyManagement = () => {
             </button>
           </li>
         )}
-        {userIsAcademyStaff && (
-          <li className="nav-item">
-            <button
-              className={`nav-link ${activeTab === 'students' ? 'active' : ''}`}
-              onClick={() => setActiveTab('students')}
-            >
-              Students
-            </button>
-          </li>
-        )}
-        {userIsAcademyStaff && (
-          <li className="nav-item">
-            <button
-              className={`nav-link ${activeTab === 'instructors' ? 'active' : ''}`}
-              onClick={() => setActiveTab('instructors')}
-            >
-              Instructors
-            </button>
-          </li>
-        )}
-        {userIsAcademyStaff && (
-          <li className="nav-item">
-            <button
-              className={`nav-link ${activeTab === 'cohorts' ? 'active' : ''}`}
-              onClick={() => setActiveTab('cohorts')}
-            >
-              Cohorts
-            </button>
-          </li>
+        {(user?.role === 'Admin' || userIsAcademyStaff) && (
+          <>
+            <li className="nav-item">
+              <button
+                className={`nav-link ${activeTab === 'students' ? 'active' : ''}`}
+                onClick={() => setActiveTab('students')}
+              >
+                Students
+              </button>
+            </li>
+            <li className="nav-item">
+              <button
+                className={`nav-link ${activeTab === 'instructors' ? 'active' : ''}`}
+                onClick={() => setActiveTab('instructors')}
+              >
+                Instructors
+              </button>
+            </li>
+            <li className="nav-item">
+              <button
+                className={`nav-link ${activeTab === 'cohorts' ? 'active' : ''}`}
+                onClick={() => setActiveTab('cohorts')}
+              >
+                Cohorts
+              </button>
+            </li>
+          </>
         )}
       </ul>
 
